@@ -91,6 +91,11 @@ if (arg === "--print") {
   jsonVersion(p("app/package-lock.json"), next, 2); // root and packages[""]
   jsonVersion(p("app/src-tauri/tauri.conf.json"), next);
   // Rewrites only the workspace crates' versions in Cargo.lock.
-  execFileSync("cargo", ["update", "--workspace", "--offline"], { cwd: root, stdio: "inherit" });
+  // Offline first (fast, local); on a fresh checkout (CI) the registry index is missing, so retry online.
+  try {
+    execFileSync("cargo", ["update", "--workspace", "--offline"], { cwd: root, stdio: "pipe" });
+  } catch {
+    execFileSync("cargo", ["update", "--workspace"], { cwd: root, stdio: "inherit" });
+  }
   console.log(`Version ${current} -> ${next}`);
 }
