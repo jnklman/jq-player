@@ -10,6 +10,7 @@ mod media;
 mod panel_windows;
 mod save_as;
 mod session;
+mod updates;
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Sender};
@@ -400,6 +401,8 @@ pub fn run() {
         // First, so a second start ends before setting anything up.
         .plugin(tauri_plugin_single_instance::init(second_instance))
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(updates::Pending::default())
         .plugin(
             tauri_plugin_window_state::Builder::new()
                 .with_state_flags(WINDOW_STATE)
@@ -437,6 +440,9 @@ pub fn run() {
             language::apply(
                 &jq_core::LocalSettings::load_general(&settings_file).unwrap_or_default().language,
             );
+            if jq_core::LocalSettings::load_general(&settings_file).unwrap_or_default().check_updates {
+                updates::check_at_startup(app.handle().clone());
+            }
             let tx = backend::spawn(app.handle().clone());
             // A show path on the command line (e.g. a show file opened in the file
             // manager) is opened right away: no show is open yet to ask about.
@@ -516,7 +522,9 @@ pub fn run() {
             panel_windows::focus_main,
             panel_windows::window_support,
             close::close_ack,
-            close::confirm_close
+            close::confirm_close,
+            updates::check_update,
+            updates::install_update
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

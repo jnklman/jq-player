@@ -1,11 +1,16 @@
 <script lang="ts">
   import { getVersion } from '@tauri-apps/api/app';
 
+  import ArrowCircleUp from '~icons/ph/arrow-circle-up-bold';
+  import CheckCircle from '~icons/ph/check-circle-bold';
+  import CircleNotch from '~icons/ph/circle-notch-bold';
+  import Warning from '~icons/ph/warning-bold';
   import XMark from '~icons/ph/x-bold';
   import { Button, buttonVariants } from '$lib/components/ui/button';
   import * as Dialog from '$lib/components/ui/dialog';
 
   import appIcon from '../../assets/app-icon.svg';
+  import { api, events, type UpdateInfo } from '../lib/api';
   import { t } from '../lib/i18n/index.svelte';
   import { dialogEscape } from '../lib/store.svelte';
   import { hint } from '../lib/ui';
@@ -19,6 +24,39 @@
     (v) => (version = v),
     () => {},
   );
+
+  type UpdateState =
+    | { kind: 'idle' }
+    | { kind: 'checking' }
+    | { kind: 'current' }
+    | { kind: 'available'; info: UpdateInfo }
+    | { kind: 'installing'; percent: number | null }
+    | { kind: 'error'; message: string };
+  let update = $state<UpdateState>({ kind: 'idle' });
+
+  async function checkUpdate() {
+    update = { kind: 'checking' };
+    try {
+      const info = await api.checkUpdate();
+      update = info ? { kind: 'available', info } : { kind: 'current' };
+    } catch (e) {
+      update = { kind: 'error', message: String(e) };
+    }
+  }
+
+  async function installUpdate() {
+    update = { kind: 'installing', percent: null };
+    const unlisten = await events.onUpdateProgress(({ downloaded, total }) => {
+      update = { kind: 'installing', percent: total ? Math.min(100, Math.floor((downloaded / total) * 100)) : null };
+    });
+    try {
+      await api.installUpdate();
+    } catch (e) {
+      update = { kind: 'error', message: String(e) };
+    } finally {
+      unlisten();
+    }
+  }
 
   type Tab = 'gpl' | 'third';
   let tab = $state<Tab>('gpl');
@@ -50,6 +88,40 @@
         <XMark />
       </Dialog.Close>
     </Dialog.Header>
+    {#if update.kind !== 'idle'}
+      <div
+        class="m-2 mb-0 flex shrink-0 items-center gap-3 rounded border px-4 py-2 text-[13px] {update.kind === 'error'
+          ? 'border-stop-line bg-panel-2 text-stop-soft'
+          : 'border-border bg-panel-2 text-fg-2'}"
+        role="status"
+      >
+        {#if update.kind === 'error'}
+          <Warning class="size-4 shrink-0" />
+        {:else if update.kind === 'current'}
+          <CheckCircle class="size-4 shrink-0 text-go" />
+        {:else if update.kind === 'available'}
+          <ArrowCircleUp class="size-4 shrink-0 text-primary" />
+        {:else}
+          <CircleNotch class="size-4 shrink-0 animate-spin text-primary motion-reduce:animate-none" />
+        {/if}
+        <span class="min-w-0 grow">
+          {#if update.kind === 'checking'}
+            {t('update.checking')}
+          {:else if update.kind === 'current'}
+            {t('update.current')}
+          {:else if update.kind === 'available'}
+            {t('update.available', { version: update.info.version })}
+          {:else if update.kind === 'installing'}
+            {update.percent === null ? t('update.installing') : t('update.downloading', { percent: update.percent })}
+          {:else if update.kind === 'error'}
+            {update.message}
+          {/if}
+        </span>
+        {#if update.kind === 'available'}
+          <Button onclick={installUpdate}>{t('update.install')}</Button>
+        {/if}
+      </div>
+    {/if}
     <div class="flex shrink-0 flex-col gap-3 border-b border-border p-4">
       <div class="flex items-center gap-4">
         <img src={appIcon} alt="" class="size-16" />
@@ -64,6 +136,14 @@
           <span class="text-[13px] text-fg-2">{t('about.tagline')}</span>
           <span class={hint}>© 2026 Julius Henkelmann</span>
         </div>
+        <Button
+          class="ml-auto shrink-0 self-start"
+          variant="outline"
+          disabled={update.kind === 'checking' || update.kind === 'installing'}
+          onclick={checkUpdate}
+        >
+          {update.kind === 'checking' ? t('update.checking') : t('update.check')}
+        </Button>
       </div>
       <p class="m-0 text-[13px] leading-normal text-fg-2">
         {t('about.license_text')}

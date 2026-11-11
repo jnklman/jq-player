@@ -95,6 +95,10 @@ pub struct LocalSettings {
     /// is not offered) or the code of an offered language ("en", "de").
     /// Texts of the backend and of the UI follow it.
     pub language: String,
+    /// Look for a newer release a few seconds after the program starts (a
+    /// request to GitHub). Only tells the operator; installing is always
+    /// their decision.
+    pub check_updates: bool,
 }
 
 impl LocalSettings {
@@ -206,6 +210,7 @@ impl Default for LocalSettings {
             selection_mode: SelectionMode::Separate,
             media_watch: WatchMode::Events,
             language: jq_i18n::AUTO.into(),
+            check_updates: false,
         }
     }
 }

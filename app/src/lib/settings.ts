@@ -99,7 +99,7 @@ const TAB_FIELDS: Record<SettingsTab, (keyof LocalSettings)[]> = {
   keys: ['keys', 'jump_back', 'jump_forward', 'jump_end', 'volume_step', 'pan_step', 'rate_step'],
   midi: ['midi_port', 'msc_device', 'midi_out'],
   osc: ['osc_listen', 'osc_hosts'],
-  ui: ['language', 'open_last', 'wheel', 'escape', 'focus_warning'],
+  ui: ['language', 'open_last', 'wheel', 'escape', 'focus_warning', 'check_updates'],
   media: ['media_watch'],
 };
 

@@ -234,6 +234,11 @@ export async function init(main: boolean) {
 
 async function listenAsMain() {
   await events.onNotice(notify);
+  // Not during a show: the operator finds the update in the About dialog later.
+  await events.onUpdateAvailable((info) => {
+    if (mode() !== 'show')
+      notify({ level: 'warning', message: t('update.available_notice', { version: info.version }) });
+  });
   await events.onCloseRequested((check) => {
     ui.leaving = {
       kind: 'quit',

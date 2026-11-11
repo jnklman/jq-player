@@ -629,6 +629,8 @@ export interface LocalSettings {
    * language ("en", "de"). The backend's messages follow it at once; the UI takes `getLanguage` / `language_changed`.
    */
   language: string;
+  /** Look for a newer release shortly after the start (`update_available` event); off by default. */
+  check_updates: boolean;
   /** Folder the audio file picker starts in; null = the show's media folder. Set with `setAudioDir`. */
   audio_dir: string | null;
   /** Arrangement of the panels per mode (`{ edit, show }`, see `lib/layout.svelte.ts`; with the panel windows), stored as
@@ -1015,6 +1017,18 @@ export interface RuntimeState {
   stopwatches: { id: string; elapsed: number; remaining: number | null; running: boolean }[];
 }
 
+/** A newer release than the running version. */
+export interface UpdateInfo {
+  version: string;
+  /** Release notes, if the release has any. */
+  notes: string | null;
+}
+
+export interface UpdateProgress {
+  downloaded: number;
+  total: number | null;
+}
+
 /** Why closing needs a question. */
 export interface CloseCheck {
   show_mode: boolean;
@@ -1330,6 +1344,13 @@ export const api = {
    * backend assumes a hung UI and asks with a native dialog.
    */
   closeAck: () => invoke<void>('close_ack'),
+  /** Looks for a newer release on GitHub; `null` if this is the latest. Never installs anything. */
+  checkUpdate: () => invoke<UpdateInfo | null>('check_update'),
+  /**
+   * Downloads and installs the update `checkUpdate` found, then restarts (on Windows the installer ends the
+   * program, so this may not return). Fails while show mode is on, a cue runs or the show has unsaved changes.
+   */
+  installUpdate: () => invoke<void>('install_update'),
   /** Closes the window; with `save`, only if saving succeeds. */
   confirmClose: (save: boolean) => invoke<void>('confirm_close', { save }),
   /**
@@ -1360,6 +1381,12 @@ export const events = {
     listen<Notice>('notice', (e) => handler(e.payload)),
   onCloseRequested: (handler: (check: CloseCheck) => void): Promise<UnlistenFn> =>
     listen<CloseCheck>('close_requested', (e) => handler(e.payload)),
+  /** The start-up check (setting `check_updates`) found a newer release; sent once, never while installing. */
+  onUpdateAvailable: (handler: (info: UpdateInfo) => void): Promise<UnlistenFn> =>
+    listen<UpdateInfo>('update_available', (e) => handler(e.payload)),
+  /** Download progress of `installUpdate`; `total` is null if the server does not tell the size. */
+  onUpdateProgress: (handler: (progress: UpdateProgress) => void): Promise<UnlistenFn> =>
+    listen<UpdateProgress>('update_progress', (e) => handler(e.payload)),
   /** Open it like `openShow`, asking first; the backend opens nothing itself. */
   onOpenRequested: (handler: (path: string) => void): Promise<UnlistenFn> =>
     listen<string>('open_requested', (e) => handler(e.payload)),

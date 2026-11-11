@@ -51,6 +51,14 @@
   and triggers the build, which creates the GitHub release with NSIS, MSI, deb and AppImage files;
   the installers come in English and German).
 
+- **Self-update:** `tauri-plugin-updater` (Rust side only, `app/src-tauri/src/updates.rs`; the UI is the
+  button in the About dialog, never automatic). It reads `latest.json` from the latest GitHub release, which the
+  Build workflow's release job generates (`scripts/updater-manifest.mjs`) from the `.sig` files that
+  `tauri.release.conf.json` (`createUpdaterArtifacts`, CI only) makes. Installing is refused in show mode, while
+  cues run or with unsaved changes. The public key is in `tauri.conf.json`; the private key is the repository
+  secret `TAURI_SIGNING_PRIVATE_KEY` (+ `_PASSWORD`). If the key is lost, installed copies can never update again.
+  Updates work for the NSIS installer (Windows) and the AppImage (Linux), not for MSI or deb.
+
 ## Commands
 
 - `cargo test`, `cargo clippy --all-targets`, `cargo fmt`

@@ -393,6 +393,13 @@ const en = {
   'about.libraries_text':
     'jQ Player is built on these free libraries. A click shows the respective license text. ASIO is a trademark and software of Steinberg Media Technologies GmbH.',
   'about.unknown_license': 'unknown',
+  'update.check': 'Check for updates',
+  'update.checking': 'Checking …',
+  'update.current': 'jQ Player is up to date.',
+  'update.available': 'Version {version} is available.',
+  'update.install': 'Install and restart',
+  'update.downloading': 'Downloading … {percent} %',
+  'update.installing': 'Installing …',
   'appmenu.tip': 'Open or create a show',
   'appmenu.label': 'App menu',
   'appmenu.new_show': 'New show …',
@@ -1067,6 +1074,12 @@ const en = {
   'ui_tab.focus': 'Focus',
   'ui_tab.focus_keywords': 'window warning keyboard keys',
   'ui_tab.focus_warning': 'Warning when the window has no focus',
+  'ui_tab.updates': 'Updates',
+  'ui_tab.updates_keywords': 'update version release github start internet',
+  'ui_tab.check_updates': 'Check for updates at startup',
+  'ui_tab.updates_hint':
+    'Asks GitHub for the latest release a few seconds after the start. Nothing is installed without your say-so (About dialog).',
+  'update.available_notice': 'jQ Player {version} is available. Install it from the About dialog.',
   'ui_tab.focus_hint': 'Keys only work while jQ Player has the focus.',
   // Waveform
   'wave.drag_start': 'Drag start',

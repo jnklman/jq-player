@@ -85,5 +85,12 @@
       </Label>
       <span class={hint}>{t('ui_tab.focus_hint')}</span>
     </SettingRow>
+    <SettingRow label={t('ui_tab.updates')} keywords={t('ui_tab.updates_keywords')}>
+      <Label class="{check} pt-1.5">
+        <Checkbox bind:checked={draft.check_updates} />
+        {t('ui_tab.check_updates')}
+      </Label>
+      <span class={hint}>{t('ui_tab.updates_hint')}</span>
+    </SettingRow>
   </SettingGroup>
 </SettingsPanel>
