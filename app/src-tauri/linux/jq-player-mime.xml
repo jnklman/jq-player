@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-jqplayer-show">
+    <comment>jQ Player show</comment>
+    <comment xml:lang="de">jQ-Player-Show</comment>
+    <sub-class-of type="application/json"/>
+    <icon name="jq-player"/>
+    <glob pattern="*.jqshow"/>
+  </mime-type>
+</mime-info>

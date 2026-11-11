@@ -1,0 +1,11 @@
+[package]
+name = "jq-stretch"
+version.workspace = true
+edition = "2024"
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+# Pinned exactly: the no-allocation guarantee of `process` (see lib.rs) was
+# checked against the Signalsmith Stretch header (1.3.1) this version ships.
+signalsmith-stretch = "=0.1.3"

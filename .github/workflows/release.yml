@@ -1,0 +1,48 @@
+# Cuts a release in one click: sets the version everywhere (see
+# scripts/version.mjs), commits, tags and starts the Build workflow on the tag,
+# which builds the installers and publishes the GitHub release.
+#
+# "Run workflow" in the Actions tab, on the branch to release from, with
+# either an explicit version (0.2.0, 0.3.0-beta.1) or patch | minor | major.
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "New version (e.g. 0.2.0) or patch / minor / major"
+        required: true
+        default: patch
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Set version
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          node scripts/version.mjs "$VERSION"
+          node scripts/version.mjs --check
+          echo "NEW_VERSION=$(node scripts/version.mjs --print)" >> "$GITHUB_ENV"
+      - name: Commit, tag and start build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "Version $NEW_VERSION"
+          git tag "v$NEW_VERSION"
+          git push origin HEAD "v$NEW_VERSION"
+          # Pushes made with the workflow token do not trigger other
+          # workflows, but an explicit dispatch does.
+          gh workflow run build.yml --ref "v$NEW_VERSION"

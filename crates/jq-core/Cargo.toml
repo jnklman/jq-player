@@ -1,0 +1,21 @@
+[package]
+name = "jq-core"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+fastrand = "2.5.0"
+jq-engine = { path = "../jq-engine" }
+jq-i18n = { path = "../jq-i18n" }
+jq-media = { path = "../jq-media" }
+jq-show = { path = "../jq-show" }
+keepawake = "0.6.1"
+notify = "8.2.1"
+rosc = "0.11.4"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+thiserror = "2.0.21"
+xxhash-rust = { version = "0.8.19", features = ["xxh3"] }

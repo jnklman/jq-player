@@ -1,0 +1,248 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+/* Variants such as data-open: and data-checked: used by the components. */
+@import 'shadcn-svelte/tailwind.css';
+
+/* The app is dark only; `dark:` styles of the shadcn components always apply. */
+@custom-variant dark (&:is(.dark *));
+
+/* Colours and type from the GUI mock-up (dark, for dim backstage light).
+   Each colour becomes utilities like bg-panel, text-muted-foreground, border-line. */
+@theme {
+  --color-canvas: #0e1013;
+  --color-panel: #14171b;
+  --color-panel-2: #16191e;
+  --color-hover: #1d2128;
+  --color-selected: #1d222a;
+  --color-mode: #2a3442;
+
+  --color-line: #262a31;
+  --color-line-strong: #2f343c;
+  --color-row-line: #1f2329;
+
+  --color-fg: #e8eaed;
+  --color-fg-2: #c4cad2;
+  --color-dim: #7d8590;
+
+  --color-go: #3ecf8e;
+  --color-go-fg: #06140c;
+  --color-go-bg: #23724e;
+  --color-fade: #f5a524;
+  --color-fade-fg: #1a1205;
+  --color-fade-bg: #875b14;
+  --color-fade-line: #5a4317;
+  --color-fade-soft: #ffd58a;
+  --color-stop: #c7484c;
+  --color-stop-fg: #300608;
+  --color-stop-bg: #662426;
+  --color-stop-soft: #ff8a8f;
+  --color-stop-line: #5c2326;
+  --color-pause: #5ec4d6;
+  --color-pause-fg: #04181c;
+  --color-pause-bg: #2a6874;
+  --color-pause-line: #1f4a52;
+  --color-pause-soft: #a6e6f0;
+  --color-vamp: #a58bff;
+  --color-vamp-soft: #d9ccff;
+  --color-progress: #4c9aff;
+
+  --color-row-next: #1b2838;
+  --color-row-running: #161d1a;
+  --color-row-vamp: #1a1726;
+  --color-row-paused: #13202a;
+
+  /* Window buttons in the header (no system title bar). */
+  --color-win-min: #febc2e;
+  --color-win-max: #28c840;
+  --color-win-close: #ff5f57;
+  /* Glyphs: same hue, darkened to ≥ 6.4:1 contrast (red tops out at 7:1 even with black). */
+  --color-win-min-fg: #4a2c00;
+  --color-win-max-fg: #002a06;
+  --color-win-close-fg: #2a0000;
+
+  /* shadcn-svelte's token names, mapped onto the palette above, so components
+     added with `npx shadcn-svelte add` match the app as they are. */
+  --color-background: var(--color-canvas);
+  --color-foreground: var(--color-fg);
+  --color-card: var(--color-panel);
+  --color-card-foreground: var(--color-fg);
+  --color-popover: var(--color-panel-2);
+  --color-popover-foreground: var(--color-fg);
+  /* The blue for cue numbers, the playhead and focus. */
+  --color-primary: #6cb6ff;
+  --color-primary-foreground: #06121f;
+  --color-secondary: var(--color-panel-2);
+  --color-secondary-foreground: var(--color-fg);
+  --color-muted: var(--color-hover);
+  --color-muted-foreground: #9aa3ae;
+  --color-accent: var(--color-hover);
+  --color-accent-foreground: var(--color-fg);
+  --color-destructive: var(--color-stop-soft);
+  --color-border: var(--color-line);
+  --color-input: var(--color-line-strong);
+  --color-ring: var(--color-primary);
+
+  --font-sans: 'Inter Variable', system-ui, 'Segoe UI', 'Noto Sans', sans-serif;
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, 'Cascadia Mono', 'DejaVu Sans Mono', monospace;
+}
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html,
+  body,
+  #app {
+    @apply h-full;
+  }
+
+  /* The window is transparent (`tauri.conf.json`) and has no system frame, so
+     the body draws the rounded window. `clip-path` instead of `rounded` +
+     `overflow-hidden`, because it also clips fixed overlays (dialog backdrops)
+     portaled into the body. Square while maximized, and on Windows, which
+     rounds the window and draws its edge itself. The background sits on
+     `#app`: with `html` and `body` both transparent, a body background would
+     be painted across the whole window, unclipped.
+     UI text can't be selected, only fields and marked spots (`select-text`).
+     bits-ui would make a dialog or menu selectable while the pointer is down
+     on it; the content components in lib/components/ui turn that off
+     (`preventOverflowTextSelection={false}`). */
+  body {
+    @apply overflow-hidden font-sans text-sm text-foreground select-none;
+    clip-path: inset(0 round 10px);
+  }
+
+  #app {
+    @apply bg-background;
+  }
+
+  /* Window edge in place of the system frame's shadow. An overlay above
+     everything, because the content would cover an inset ring on the body. */
+  body::after {
+    @apply pointer-events-none fixed inset-0 z-9999 rounded-[10px] inset-ring inset-ring-line-strong;
+    content: '';
+  }
+
+  [data-maximized] body,
+  [data-windows] body,
+  [data-native-frame] body {
+    clip-path: none;
+  }
+
+  [data-maximized] body::after,
+  [data-windows] body::after,
+  [data-native-frame] body::after {
+    display: none;
+  }
+
+  /* No keyboard focus (`data-focus-lost`, set by App.svelte): the same edge,
+     thick and red. Also while maximized (square) and on Windows (rounded like
+     Windows 11 rounds the window; the backend turns its border red too). */
+  [data-focus-lost] body::after {
+    @apply inset-ring-4 inset-ring-stop;
+  }
+
+  [data-focus-lost][data-maximized] body::after,
+  [data-focus-lost][data-windows] body::after,
+  [data-focus-lost][data-native-frame] body::after {
+    display: block;
+  }
+
+  [data-focus-lost][data-windows] body::after {
+    @apply rounded-[8px];
+  }
+
+  [data-focus-lost][data-maximized] body::after,
+  [data-focus-lost][data-native-frame] body::after {
+    @apply rounded-none;
+  }
+
+  /* Touch moves the window there (`dragByTouch` in lib/window.svelte.ts), it
+     does not pan or zoom the page. */
+  [data-tauri-drag-region]:not([data-tauri-drag-region='false']) {
+    touch-action: none;
+  }
+
+  /* Windows: drag regions without controls are the title bar for Windows
+     itself (WebView2 non-client regions, enabled by wry), which moves the
+     window by mouse, touch and pen, maximizes on double-click and offers Snap.
+     Tauri's drag script and `dragByTouch` don't get these areas there. A
+     region with controls stays part of the page (`dragFill` marks its empty
+     space): controls cut out of a `drag` area with `no-drag` take the mouse
+     there, but not touch. */
+  [data-windows]
+    [data-tauri-drag-region='deep']:not(
+      :has(
+        a,
+        button,
+        input,
+        select,
+        textarea,
+        label,
+        [role],
+        [tabindex],
+        [data-slot='tooltip-trigger'],
+        [data-tauri-drag-region='false']
+      )
+    ) {
+    -webkit-app-region: drag;
+    app-region: drag;
+  }
+
+  button:not(:disabled) {
+    @apply cursor-pointer;
+  }
+
+  /* Scrolling areas are ScrollArea components (lib/components/ui). Where
+     there can't be one (text areas, long menus), the native scrollbar looks
+     like theirs, the same in WebKitGTK and WebView2. No `scrollbar-width` or
+     `scrollbar-color`: Chromium ignores these pseudo-elements once they are set. */
+  ::-webkit-scrollbar {
+    @apply size-2.5 bg-transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply rounded-full border-2 border-solid border-transparent bg-dim/40 bg-clip-padding;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-dim/70;
+  }
+
+  ::-webkit-scrollbar-corner {
+    @apply bg-transparent;
+  }
+
+  /* While something is dragged (`grabbing` in lib/ui.ts), the cursor stays
+     the grabbing hand over everything, not the one of the element below. */
+  [data-grabbing],
+  [data-grabbing] * {
+    @apply cursor-grabbing!;
+  }
+
+  /* The one focus ring of the app, for keyboard focus only. Components leave
+     the outline alone (only an inset offset where a parent clips it); an
+     `outline-hidden` in the markup opts out. Spelled out instead of
+     `outline-2`, which an `outline-none` on the element would turn off. */
+  :focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 1px;
+  }
+}
+
+/* An overlay panel window (`data-overlay`, set by PanelWindow.svelte): the
+   window and the panel's own background let through what lies behind them,
+   by `--overlay-opacity` (0.3–1); text and controls stay solid. Outside the
+   layers, so they win over the `bg-…` utilities of the same elements. */
+[data-overlay] #app {
+  background-color: transparent;
+}
+
+[data-overlay] [data-slot='panel-frame'] {
+  background-color: color-mix(in srgb, var(--color-panel) calc(var(--overlay-opacity, 1) * 100%), transparent);
+}

@@ -1,0 +1,388 @@
+# Texts of the backend. Format: see crates/jq-i18n/src/lib.rs
+
+# Used by the tests of jq-i18n
+i18n.test = Hello {name}
+i18n.files.one = {count} file
+i18n.files.other = {count} files
+
+# Audio output (jq-audio)
+audio.host_unavailable = Audio host “{name}” is not available, available: {available}
+audio.no_default_device = no default output device
+audio.device_not_found = no output device matches “{name}”
+audio.unsupported_format = sample format {format} is not supported
+audio.cpal = Audio: {error}
+audio.stopped = audio thread ended unexpectedly
+audio.channels = at least 2 channels required
+audio.failure.device_lost = Device no longer available
+audio.failure.stream_invalidated = Stream became invalid (driver reset, buffer size or sample rate changed)
+audio.failure.host_lost = Audio host no longer available
+audio.failure.silent = Device delivers no more data
+audio.lost.recovering = {reason}; the audio engine is being recovered
+audio.lost.last_attempt = {reason}; last attempt: {error}
+audio.silent.device = Silent – no device
+audio.silent.detail = No device open; cues play silently
+audio.default_config = {rate} Hz, {channels} channels, {format}
+audio.default_device = Default device
+audio.default_device_detail = PipeWire default output (follows the system setting)
+
+# Engine (jq-engine)
+engine.queue_full = The engine's command queue is full
+engine.sample_rate_mismatch = Audio data is at {buffer} Hz, the engine runs at {engine} Hz
+engine.invalid_region = invalid region: {problem}
+engine.output_channel = Channels {first}/{second} do not exist, the device is open with {channels} channels
+engine.region.start_after_end = start is behind the end
+engine.region.loop_backwards = a loop start must be before its loop end
+engine.region.loop_past_end = a loop ends behind the end of playback
+engine.region.loops_unordered = loops must be sorted and must not overlap
+engine.region.marks_unsorted = marks must be sorted
+
+# Media files (jq-media)
+media.no_audio_track = no audio track
+media.resample_failed = Converting the sample rate failed: {message}
+media.cancelled = cancelled
+media.read_error = Read error: {error}
+media.unsupported = not a supported audio format
+media.corrupt = corrupt audio data
+media.seek_failed = Seeking in the file failed
+media.too_large = File too large for the decoder
+media.decode_error = Error while decoding
+
+# MIDI (jq-midi)
+midi.unavailable = MIDI not available: {error}
+midi.no_input = no MIDI input matches “{name}”
+midi.input_error = MIDI input “{name}”: {error}
+midi.no_output = no MIDI output matches “{name}”
+midi.output_error = MIDI output “{name}”: {error}
+
+# Key names (jq-show)
+key.ctrl = Ctrl
+key.alt = Alt
+key.shift = Shift
+key.space = Space
+
+# Value checks of a cue (jq-show checks)
+check.negative = {name} is negative – counts as 0
+check.item = Item {number}: {issue}
+check.pan_range = Pan is outside −1…+1 – will be limited
+check.rate_range = Rate is outside {min}–{max} % – will be limited
+check.transpose_range = Transposition is outside ±{max} semitones – will be limited
+check.output_missing = Output “{output}” does not exist in the show – plays on channels 1/2
+check.next_item_only_playlist = “Next item” on a second trigger only exists for playlists – ignored
+check.field.pre_wait = Pre-wait
+check.field.follow_time = Follow time
+check.field.start = Start
+check.field.fade_in = Fade-in
+check.field.fade_out = Fade-out
+check.field.gap = Gap
+check.field.duration = Duration
+check.field.fade_duration = Fade duration
+check.field.start_from = Start from
+check.field.crossfade = Crossfade
+check.field.wait = Wait time
+
+# Editing (jq-show edit)
+edit.cue_not_found = Cue not found
+edit.link_needs_two = Select at least two cues to link
+edit.link_not_groups = Groups and scene markers cannot be linked
+edit.link_same_type = Only cues of the same type can be linked
+edit.nothing_selected = No cues selected
+edit.group_main_only = Only cues of the main list can be grouped
+edit.group_not_scenes = Scene markers cannot be grouped
+edit.group_not_nested = Groups cannot be put into a group
+edit.group_title = Group
+
+# Show files (jq-show file, paths)
+show_file.invalid = {path}: not a valid show file: {error}
+show_file.wrong_format = {path}: format “{found}” is not a show file
+show_file.too_new = {path}: version {found} is newer than this program version ({current})
+show_file.invalid_name = “{name}” is not possible as a file or folder name
+show_file.exists = {path} already exists
+paths.no_file_name = no file name
+paths.cancelled = cancelled
+paths.exists = {path} already exists
+paths.outside_media = is not in the media folder
+
+# Timing of a sound cue (jq-show timing)
+timing.start_past_end = Start is behind the end – the cue plays nothing
+timing.end_past_file = End is behind the end of the file
+timing.vamp_empty = Vamp {number}: its end is not behind its start – skipped
+timing.vamp_before_start = Vamp {number} is before the start
+timing.vamp_overlap = Vamp {number} overlaps vamp {other} – skipped
+timing.vamp_past_end = Vamp {number} is behind the end
+timing.vamp_cut = Vamp {number} reaches beyond the end
+timing.mark_outside = Mark {number} is outside start–end
+timing.mark_duplicate = Mark {number} is there twice
+timing.fade_in_too_long = Fade-in is longer than the section
+timing.end_fade_too_long = End fade is longer than the section
+
+# Cue labels in messages
+cue.label_both = {number} “{title}”
+cue.label_title = “{title}”
+
+# Names of the global actions (jq-core keys)
+action.go = GO
+action.stop_all = STOP ALL
+action.panic = Panic
+action.fade_all = FADE ALL
+action.pause_all = PAUSE ALL
+action.resume_all = RESUME ALL
+action.toggle_pause_all = Toggle pause all
+action.playhead_next = Playhead forward
+action.playhead_prev = Playhead back
+action.stop_preview = Stop preview
+action.preview = Preview
+action.toggle_pause_cue = Toggle pause
+action.stop_cue = Stop cue
+action.fade_cue = Fade out cue
+action.restart_cue = Restart cue
+action.exit_loop_cue = Exit loop
+action.next_item = Next playlist item
+action.jump_back = Jump back
+action.jump_forward = Jump forward
+action.jump_end = Jump to end
+action.volume_up = Volume +
+action.volume_down = Volume −
+action.pan_left = Pan left
+action.pan_right = Pan right
+action.rate_up = Rate +
+action.rate_down = Rate −
+
+# Shortcuts (jq-core keys)
+keys.key_missing = {action}: key missing
+keys.fixed = {key} is reserved and cannot be assigned
+keys.taken = {key} is already assigned to “{action}”
+keys.too_many = “{action}”: at most {max} keys
+
+# MIDI messages (jq-core midi)
+midi.msc_no_cue = MSC: no cue {number}
+midi.out_of_range = {what} {value} is not in 0–127
+midi.bad_channel = Channel {channel} is not in 1–16
+midi.msc_cue_digits = MSC cue “{text}”: digits and dot only
+midi.what.program = Program
+midi.what.controller = Controller
+midi.what.value = Value
+midi.what.note = Note
+midi.what.velocity = Velocity
+midi.what.msc_device = MSC device
+
+# OSC and file watching (jq-core)
+osc.sender_stopped = {target}: OSC sender stopped
+osc.address_not_found = {target}: address not found
+osc.address_slash = OSC address “{address}” must start with /
+watch.system_unavailable = The system's file watcher is not available ({error}) – media files are polled regularly instead
+keepalive.reason = Show open
+
+# Notices of the runner (jq-core runner)
+runner.already_fading = Cue {cue} is already fading out
+runner.underrun = {name}: {ms} ms of silence, the file did not come from the disk fast enough
+runner.too_many_stretchers = Cue {cue}: too many cues with their own pitch at once – plays without pitch correction
+runner.too_many_voices = Too many simultaneous cues, cue not started
+runner.already_running = Cue {cue} is already running
+runner.placeholder = Cue {cue}: placeholder without a file
+runner.no_stopwatch_chosen = Cue {cue}: no stopwatch chosen
+runner.stopwatch_missing = Cue {cue}: stopwatch missing
+runner.no_target = Cue {cue}: no target chosen
+runner.target_in_group = Target {target} is inside a group, jumping there is not possible
+runner.target_missing = Target missing
+runner.cue_problem = Cue {cue}: {problem}
+runner.goto_loop = Cue {cue}: jump loop without a pause aborted
+runner.start_loop = Cue {cue}: start loop without a pause aborted
+runner.still_copying = The file is still being copied to the media folder
+runner.file_not_loadable = File cannot be loaded: {error}
+runner.not_preloaded = Cue {cue} was not preloaded
+runner.item_error = Cue {cue} item {item}: {error}
+runner.what.fade_to_level = “Fade to level”
+runner.what.reset = Reset
+runner.fading_no_effect = Cue {cue} is fading out right now – {what} has no effect
+runner.mark_missing = Cue {cue}: mark missing, no jump
+runner.no_osc_device = no OSC device chosen
+runner.osc_device_missing = OSC device “{device}” is missing in the show
+runner.osc_unavailable = OSC not available
+runner.no_midi_output = no MIDI output set (settings)
+runner.preview_placeholder = Placeholder without a file: nothing to preview
+runner.no_preview_output = No preview output set (settings)
+runner.preview_not_loadable = Preview: file cannot be loaded: {error}
+runner.preview_error = Preview: {error}
+runner.engine_error = Audio engine: {error}
+
+# Session (app)
+keys.global = {key} is assigned globally to “{action}”
+session.settings_ignored = Settings ignored: {error}
+session.link_synced = Linked cue {cue} differed and was aligned
+session.keep_awake_failed = Sleep mode cannot be prevented: {error}
+session.autosave_unreadable = Autosave not readable: {error}
+session.autosave_failed = Autosave failed: {error}
+session.file_missing = File missing: {file}
+session.case_mismatch = Spelling differs: {file} (on disk: {actual})
+session.audio_output = Audio output
+session.preview_output = Preview output
+session.preview = Preview
+session.audio_error = Audio: {error}
+session.preview_error = Preview: {error}
+session.timing_cue = Cue {cue}: {issue}
+session.timing_item = Cue {cue} item {item}: {issue}
+session.device_lost = {label} “{device}” interrupted: {reason}. Cues keep playing silently; the device is opened again as soon as it is available.
+session.device_back = {label} “{device}” reconnected
+session.show_mode_locked = Editing is locked in show mode
+session.media_dir_busy_cue = The media folder can only be changed while no cue is running
+session.media_dir_busy_files = The media folder can only be changed when all file actions have finished
+session.decide_recovery = First decide whether the autosave is restored
+session.media_dir_unreachable = Media folder not reachable: {error}
+session.not_a_folder = {path} is not a folder
+session.show_dir_unreachable = Show folder not reachable: {error}
+session.media_dir_not_storable = The media folder cannot be saved: {path}
+session.changed_while_playing = The file of cue {cue} was changed during playback – it keeps playing the old version, long (streamed) files may be disturbed
+session.file_now_missing = File missing now: {file}
+session.file_back = File is back: {file}
+session.file_changed = File changed on disk: {file}
+session.not_copied = “{file}” not copied: {error}
+session.search_aborted = Search for missing files aborted
+session.relinked_some = {relinked} file(s) relinked, {missing} still missing
+session.media_dir_has_show = The media folder contains the show file and cannot be cleaned up
+session.lock_failed.one = {count} file not locked against changes, e.g. {file}: {error}
+session.lock_failed.other = {count} files not locked against changes, e.g. {file}: {error}
+session.setting.fade_all = FADE ALL time
+session.setting.end_warning = End warning time
+session.setting.panic_fade = Panic fade
+session.setting.go_lockout = GO lockout
+session.setting.volume_step = Volume step
+session.setting.pan_step = Pan step
+session.setting.rate_step = Rate step
+session.setting.not_negative = {what} must be a number ≥ 0
+session.setting.positive = {what} must be greater than 0
+session.setting.jump_times = Jump times must be greater than 0
+session.setting.msc_device = The MSC device ID is between 0 and 126
+session.setting.buffer = The buffer size must be a power of two between {min} and {max}
+session.setting.osc_port = The OSC port must be between 1 and 65535
+session.setting.channels_from_one = Channels are counted from 1
+session.setting.min_channels = Set at least 2 channels
+session.setting.show_mode_locked = Show mode is locked – unlock it in the show menu
+session.audio_device_busy = The audio device can only be changed while no cue is running
+session.output_channels = Output “{output}” on channels {first}/{second} – the device only has {channels}
+session.settings_not_saved = Setting not saved: {error}
+session.name_empty = The show name must not be empty
+session.save_as_busy_cue = “Save as” only works while no cue is running
+session.save_as_busy_files = “Save as” only works once all files are copied
+session.preview_unavailable = Preview output not available: {error}
+session.osc_listen_failed = OSC reception on port {port} is not possible: {error}
+session.no_midi_input = No MIDI input open (settings)
+session.keyboard_only = “{action}” only works with the keyboard
+session.midi_main_only = MIDI triggers only exist for cues of the main list
+session.midi_global = The MIDI trigger is assigned globally to “{action}”
+session.hotkey_main_only = Hotkeys only exist for cues of the main list
+session.convert_control_only = Only control cues can be converted
+session.countdown_range = Countdown “{name}” needs a time above 0 up to 100 hours
+session.stopwatch_id = Stopwatch ID “{id}” is missing or used twice
+session.stopwatch_name = Every stopwatch needs a name
+session.device_id = Device ID “{id}” is missing or used twice
+session.device_address = Device “{name}”: enter address and port
+session.playlist_not_found = Playlist cue not found
+session.item_not_found = Item not found
+session.sound_not_found = Sound cue not found
+session.file_unused = The file is not used in the show
+session.normalize_waiting.one = {count} file not measured yet – normalize again after the measurement
+session.normalize_waiting.other = {count} files not measured yet – normalize again after the measurement
+session.loudness_range = The target loudness must be between {min} and {max} LUFS
+session.search_running = The search for missing files is already running
+session.item_unreadable = Item {item} not readable: {reason}
+session.file_unreadable = File not readable: {reason}
+session.outside_show_folder = {path} is outside the show folder; the show is not portable this way
+session.invalid_file_name = invalid file name
+session.name_taken = “{name}” is already taken in the media folder; copied as “{stored}”
+session.no_group_in_group = Groups cannot be inserted into groups
+session.group_not_found = Group not found
+session.output_id = Output ID “{id}” is missing or used twice
+session.output_name = Every output needs a name
+session.main_output = The main output can be renamed but not removed
+session.output_in_use = Output “{output}” is still used by cue {cue}
+session.osc_send_failed = OSC sending is not possible: {error}
+session.audio_unavailable = Audio output not available: {error}
+session.level_limits = The level limits must be between {min} and +{max} dB
+session.level_gap = The minimum level must be at least 6 dB below the maximum level
+session.device_too_few_channels = “{name}” only has {max} channels, {channels} are set
+session.pair_missing_set = {label}: channels {first}/{second} do not exist, “{name}” is set to {limit} channels
+session.pair_missing_has = {label}: channels {first}/{second} do not exist, “{name}” has {limit} channels
+session.next_item_playlist_only = “Next item” only exists for playlists
+session.scene_main_only = Scene markers only exist in the main list
+session.goto_top_level = A go-to cue can only jump to top-level cues
+session.others_fade = The fade time must be between 0 and {max} s
+session.others_duck = The reduction must be between −60 and 0 dB
+
+# Titles of new cues (app)
+session.title.playlist = Playlist
+session.title.group = Group
+session.title.wait = Wait
+session.title.scene = Scene
+session.title.placeholder = Placeholder
+session.title.goto = Go to
+session.control.start = Start
+session.control.pause = Pause
+session.control.fade_out = Fade-out
+session.control.pan = Pan
+session.control.rate = Rate
+session.control.position = Position
+session.control.exit_loop = Exit loop
+session.control.reset = Reset
+session.control.stopwatch = Stopwatch
+
+# Problems of a cue (app)
+problem.start_from_sound_only = “Start from” only applies to sound cues – cue {cue} starts from the beginning
+problem.start_from_after_end = Start from {time} is behind the end of cue {cue} ({end}) – the cue ends at once
+problem.start_from_before_start = Start from {time} is before the start point of cue {cue} ({start}) – plays from the start point
+problem.no_stopwatch = No stopwatch chosen
+problem.stopwatch_deleted = The stopwatch was deleted
+problem.target_deleted = Target missing (deleted)
+problem.targets_deleted = {gone} of {total} targets missing (deleted)
+problem.no_previous = No previous entry – the cue acts on nothing
+problem.start_needs_chosen = A start cue only starts chosen cues – with this target it starts nothing
+problem.output_missing = Output “{output}” does not exist in the show – the cue acts on nothing
+problem.starts_itself = Starts itself without a pre-wait – is aborted as a loop on GO
+problem.position_playlist = Cue {cue} is a playlist: there are only jumps forward / back within the running item – this jump has no effect
+problem.position_after_end = Position {time} is behind the end of cue {cue} ({end}) – the cue ends at once
+problem.position_before_start = Position {time} is before the start point of cue {cue} ({start}) – jumps to the start point
+problem.no_marks = Cue {cue} has no marks – no jump
+problem.mark_missing = Mark {index} does not exist in cue {cue} ({count} marks) – no jump
+problem.hotkey_no_key = Hotkey without a key – never triggered
+problem.hotkey_main_only = Hotkey “{key}” only works in the main list
+problem.hotkey_fixed = Hotkey “{key}” is reserved – never triggered
+problem.hotkey_global = Hotkey “{key}” is assigned globally to “{action}” – the global shortcut takes precedence
+problem.midi_main_only = The MIDI trigger only works in the main list
+problem.midi_global = The MIDI trigger is assigned globally to “{action}” – the global assignment takes precedence
+problem.release_ignored = Release has no effect: “Second trigger” is set to Ignore
+
+# App (Tauri): closing, startup, misc
+app.no_reply = no reply from the show thread
+app.no_show = no show open
+app.backend_locked = Backend locked
+app.thread_ended = Show thread ended
+app.peak_cache_not_cleared = Peak cache not emptied: {error}
+backend.internal_error = Internal error in the show thread (see log)
+backend.autosave_not_deleted = Autosave not deleted: {error}
+close.quit = Quit
+close.save_quit = Save and quit
+close.discard_quit = Quit without saving
+close.cancel = Cancel
+close.show_mode = Show mode is active.
+close.running.one = One cue is still running.
+close.running.other = {count} cues are still running.
+close.imports.one = A file is still being copied to the media folder; its cue would then have no file.
+close.imports.other = {count} files are still being copied to the media folder; their cues would then have no file.
+close.dirty = The show has unsaved changes.
+close.quit_anyway = Quit anyway?
+close.save_failed = Saving failed
+close.save_failed_text = Saving failed: {error}\n\nThe program stays open.
+startup.webview2_title = jQ Player cannot start
+startup.webview2_text = Microsoft Edge WebView2, which jQ Player needs for its interface, is missing on this computer.\n\nThe easiest way is to install jQ Player with the installer: it brings WebView2 along and also works without internet.\n\nAlternatively, install WebView2 (“Evergreen Runtime”) from Microsoft:\nhttps://developer.microsoft.com/microsoft-edge/webview2
+keylabels.no_display = no display
+keylabels.no_layout = no keyboard layout
+keylabels.unavailable = Keyboard layout not available
+media.dir_not_found = Media folder not found: {path}
+media.file_manager_failed = The file manager could not be opened: {error}
+save_as.media_not_copied = Media not copied: {error}
+save_as.missing.one = {count} file is missing and was not copied, e.g. {file}
+save_as.missing.other = {count} files are missing and were not copied, e.g. {file}
+save_as.outside.one = {count} file is outside the media folder and was not copied, e.g. {file}
+save_as.outside.other = {count} files are outside the media folder and were not copied, e.g. {file}
+panels.locked = Panel windows locked
+panels.not_opened = Panel windows not opened: {panels}
+format.decimal = .

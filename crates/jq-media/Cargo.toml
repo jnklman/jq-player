@@ -1,0 +1,14 @@
+[package]
+name = "jq-media"
+version.workspace = true
+edition = "2024"
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+ebur128 = "0.1.11"
+jq-engine = { path = "../jq-engine" }
+jq-i18n = { path = "../jq-i18n" }
+rubato = "5.0.1"
+serde = { version = "1.0.229", features = ["derive"] }
+symphonia = { version = "0.6.1", features = ["all"] }

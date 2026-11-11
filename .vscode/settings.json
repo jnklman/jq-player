@@ -1,0 +1,32 @@
+{
+    "svelte.enable-ts-plugin": true,
+    "files.associations": {
+        "*.css": "tailwindcss"
+    },
+    "tailwindCSS.classFunctions": ["tw"],
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+        "source.fixAll.eslint": "explicit"
+    },
+    "[rust]": {
+        "editor.defaultFormatter": "rust-lang.rust-analyzer"
+    },
+    "eslint.validate": ["javascript", "typescript", "svelte"],
+    "prettier.documentSelectors": ["**/*.svelte"],
+    "eslint.workingDirectories": ["app"],
+    "tailwindCSS.experimental.configFile": "app/src/styles.css",
+    "cSpell.words": [
+        "Cascadia",
+        "color",
+        "dialog",
+        "Noto",
+        "playhead",
+        "portaled",
+        "Segoe",
+        "shadcn",
+        "tabindex",
+        "tailwindcss",
+        "tauri"
+    ]
+}

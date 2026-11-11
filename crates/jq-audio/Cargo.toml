@@ -1,0 +1,29 @@
+[package]
+name = "jq-audio"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+cpal = "0.18.2"
+jq-engine = { path = "../jq-engine" }
+jq-i18n = { path = "../jq-i18n" }
+serde = { version = "1.0.229", features = ["derive"] }
+
+# Linux gets every host besides ALSA: PipeWire (needs libpipewire-0.3-dev and
+# clang to build, links libpipewire), JACK (needs libjack-jackd2-dev, loads
+# libjack at runtime) and PulseAudio (speaks the protocol itself).
+[target.'cfg(target_os = "linux")'.dependencies]
+cpal = { version = "0.18.2", features = ["jack", "pipewire", "pulseaudio"] }
+# Reads the default sink, see src/pipewire_default.rs.
+pipewire = "0.10"
+
+# MMCSS for the callback thread and no power throttling, see src/realtime.rs.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading"] }
+
+# ASIO on Windows needs the ASIO SDK (CPAL_ASIO_DIR) and LLVM, so it is opt-in.
+[features]
+asio = ["cpal/asio"]

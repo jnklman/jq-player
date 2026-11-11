@@ -1,0 +1,46 @@
+[package]
+name = "jq-player"
+description = "jQ Player – cue player for theatre operation"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[lib]
+# The `_lib` suffix keeps the lib name distinct from the bin name (cargo#8519).
+name = "jq_player_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-single-instance = "2"
+tauri-plugin-window-state = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+jq-audio = { path = "../../crates/jq-audio" }
+jq-core = { path = "../../crates/jq-core" }
+jq-engine = { path = "../../crates/jq-engine" }
+jq-i18n = { path = "../../crates/jq-i18n" }
+jq-media = { path = "../../crates/jq-media" }
+jq-midi = { path = "../../crates/jq-midi" }
+jq-show = { path = "../../crates/jq-show" }
+
+
+# ASIO host on Windows, see crates/jq-audio/Cargo.toml.
+[features]
+asio = ["jq-audio/asio"]
+
+[target.'cfg(windows)'.dependencies]
+# Message box before Tauri starts (already in the tree via tauri-plugin-dialog).
+rfd = { version = "0.17", default-features = false }
+# Window border colour (already in the tree via Tauri).
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_UI_Input_KeyboardAndMouse"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# Key labels of the current layout (already in the tree via Tauri).
+gtk = "0.18"

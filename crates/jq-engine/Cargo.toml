@@ -1,0 +1,11 @@
+[package]
+name = "jq-engine"
+version.workspace = true
+edition = "2024"
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+jq-i18n = { path = "../jq-i18n" }
+jq-stretch = { path = "../jq-stretch" }
+rtrb = "0.4.1"

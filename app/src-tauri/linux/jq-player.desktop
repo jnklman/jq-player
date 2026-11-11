@@ -1,0 +1,18 @@
+[Desktop Entry]
+Categories={{categories}}
+Comment=Cue player for theatre operation
+Comment[de]=Cue-Player für den Theaterbetrieb
+Exec={{exec}} %f
+StartupWMClass={{exec}}
+Icon={{icon}}
+Name=jQ Player
+GenericName=Cue Player
+GenericName[de]=Cue-Player
+Keywords=Cue;Sound;Theater;Theatre;Show
+Keywords[de]=Cue;Sound;Theater;Show
+Terminal=false
+SingleMainWindow=true
+Type=Application
+{{#if mime_type}}
+MimeType={{mime_type}}
+{{/if}}
