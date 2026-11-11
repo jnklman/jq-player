@@ -821,8 +821,8 @@ mod tests {
 
         // Groups don't nest.
         let revision = e.revision();
-        assert_eq!(e.group(&[b]), Err("Nur Cues der Hauptliste lassen sich gruppieren".into()));
-        assert_eq!(e.group(&[a, g]), Err("Gruppen lassen sich nicht in eine Gruppe setzen".into()));
+        assert_eq!(e.group(&[b]), Err(t!("edit.group_main_only")));
+        assert_eq!(e.group(&[a, g]), Err(t!("edit.group_not_nested")));
         assert_eq!(e.revision(), revision, "nothing changed");
 
         // Dissolving brings back what grouping took.

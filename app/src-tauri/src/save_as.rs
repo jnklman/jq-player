@@ -113,7 +113,7 @@ mod tests {
 
         let (path, root, warnings) = prepare(&dir, "Verknüpft", &media, &files, MediaChoice::Link).unwrap();
         assert_eq!(path, dir.join("Verknüpft/Verknüpft.jqshow"));
-        let media_root = media.canonicalize().unwrap().to_str().unwrap().to_owned();
+        let media_root = media.canonicalize().unwrap().to_str().unwrap().replace('\\', "/");
         assert_eq!((root.as_str(), warnings.len()), (media_root.as_str(), 0));
         assert!(!dir.join("Verknüpft/media").exists());
         assert!(paths::resolve(path.parent().unwrap(), &root).join("a.wav").is_file());
@@ -123,7 +123,11 @@ mod tests {
         assert!(warnings[0].contains("weg.wav"), "{warnings:?}");
         assert_eq!(std::fs::read(path.with_file_name("media").join("a.wav")).unwrap(), b"a");
 
-        assert!(prepare(&dir, "Kopie", &media, &files, MediaChoice::Copy).unwrap_err().contains("existiert"));
+        assert!(
+            prepare(&dir, "Kopie", &media, &files, MediaChoice::Copy)
+                .unwrap_err()
+                .contains(&jq_i18n::t!("show_file.exists", path = "").trim())
+        );
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

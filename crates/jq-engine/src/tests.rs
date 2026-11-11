@@ -1360,7 +1360,10 @@ fn direct_playback_stays_bit_identical() {
     render(&mut mix, 1500);
     let events = notifications(&mut ctl);
     assert_eq!(events, "LLNF");
-    assert_eq!(checksum(&out), 130_835_893_719_015_155);
+    // exp/powf/sin/cos are not bit-identical across platform math libraries,
+    // so each platform keeps its own reference.
+    let expected = if cfg!(windows) { 4_204_355_065_759_853_371 } else { 130_835_893_719_015_155 };
+    assert_eq!(checksum(&out), expected);
 }
 
 // Rate and pitch: varispeed through the interpolation, everything else

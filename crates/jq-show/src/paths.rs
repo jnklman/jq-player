@@ -560,22 +560,26 @@ pub(crate) mod tests {
         fs::remove_dir_all(dir).unwrap();
     }
 
+    /// Absolute test paths need a drive letter on Windows.
+    const ROOT: &str = if cfg!(windows) { "C:" } else { "" };
+
     #[test]
     fn relative_paths_between_folders() {
-        let p = |s: &str| PathBuf::from(s);
+        let p = |s: &str| PathBuf::from(format!("{ROOT}{s}"));
         assert_eq!(relative_path(&p("/shows/Neu"), &p("/shows/Alt/media")).as_deref(), Some("../Alt/media"));
         assert_eq!(relative_path(&p("/shows/Neu"), &p("/shows/Neu/media")).as_deref(), Some("media"));
         assert_eq!(relative_path(&p("/a/b/c"), &p("/x")).as_deref(), Some("../../../x"));
         assert_eq!(relative_path(&p("/a"), &p("/a")).as_deref(), Some("."));
-        assert_eq!(relative_path(&p("/a"), &p("rel/media")), None);
+        assert_eq!(relative_path(&p("/a"), &PathBuf::from("rel/media")), None);
     }
 
     #[test]
     fn media_roots_are_relative_only_inside_the_show_folder() {
-        let show = Path::new("/shows/one");
-        assert_eq!(media_root(show, show), Some(".".into()));
-        assert_eq!(media_root(show, Path::new("/shows/one/media/nested")), Some("media/nested".into()));
-        assert_eq!(media_root(show, Path::new("/shows/two/media")), Some("/shows/two/media".into()));
+        let p = |s: &str| PathBuf::from(format!("{ROOT}{s}"));
+        let show = p("/shows/one");
+        assert_eq!(media_root(&show, &show), Some(".".into()));
+        assert_eq!(media_root(&show, &p("/shows/one/media/nested")), Some("media/nested".into()));
+        assert_eq!(media_root(&show, &p("/shows/two/media")), Some(format!("{ROOT}/shows/two/media")));
     }
 
     #[test]
