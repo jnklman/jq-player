@@ -126,7 +126,7 @@ mod tests {
         assert!(
             prepare(&dir, "Kopie", &media, &files, MediaChoice::Copy)
                 .unwrap_err()
-                .contains(&jq_i18n::t!("show_file.exists", path = "").trim())
+                .contains(jq_i18n::t!("show_file.exists", path = "").trim())
         );
         std::fs::remove_dir_all(dir).unwrap();
     }
