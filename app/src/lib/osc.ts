@@ -4,7 +4,7 @@
 import type { OscArg } from './api';
 
 const INT = /^-?\d+$/;
-const FLOAT = /^-?(\d+[.,]\d*|[.,]\d+)(e-?\d+)?$/i;
+const FLOAT = /^-?(\d+[.,]\d*|[.,]\d+)(e[+-]?\d+)?$/i;
 
 export function parseOscArgs(text: string): OscArg[] {
   const tokens = text.match(/"[^"]*"|\S+/g) ?? [];
@@ -16,11 +16,18 @@ export function parseOscArgs(text: string): OscArg[] {
   });
 }
 
+/** A float that reads back as one: always with a decimal point, also in exponent form ("1.0e-7", "1.0e+21"). */
+function floatText(value: number): string {
+  const text = String(value);
+  if (/e/i.test(text)) return text.replace(/^(-?\d+)(e)/i, '$1.0$2');
+  return /^-?\d+$/.test(text) ? `${text}.0` : text;
+}
+
 export function formatOscArgs(args: OscArg[]): string {
   return args
     .map((arg) => {
       if ('int' in arg) return String(arg.int);
-      if ('float' in arg) return Number.isInteger(arg.float) ? arg.float.toFixed(1) : String(arg.float);
+      if ('float' in arg) return floatText(arg.float);
       const plain = arg.string !== '' && !/\s|"/.test(arg.string) && !INT.test(arg.string) && !FLOAT.test(arg.string);
       return plain ? arg.string : `"${arg.string}"`;
     })

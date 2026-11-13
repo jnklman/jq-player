@@ -14,12 +14,12 @@
   import { typeColors, typeLabel } from '../../lib/control';
   import { cueLabel, isPlaceholder, linkedCues, secondTriggerLabels, vampSpans } from '../../lib/cue';
   import { placeholderIcon } from '../../lib/cueIcons';
-  import { chainArrow, cueStatus, cueWarnings, repeatBadge, rowRunning } from '../../lib/cueStatus';
+  import { chainArrow, chainWaiting, cueStatus, cueWarnings, repeatBadge, rowRunning } from '../../lib/cueStatus';
   import { fmtMidi } from '../../lib/format';
   import { t } from '../../lib/i18n/index.svelte';
   import { keyText } from '../../lib/keys.svelte';
   import { plainText } from '../../lib/richText';
-  import { allCues, extendSelection, select, toggleSelected, ui } from '../../lib/store.svelte';
+  import { allCues, extendSelection, isRunning, select, toggleSelected, ui } from '../../lib/store.svelte';
   import { bar } from '../../lib/ui';
   import { cueGrid, cueRow, dragRow, headRow } from './grid';
 
@@ -50,8 +50,12 @@
     editing: boolean;
   } = $props();
 
-  const status = $derived(cueStatus(cue));
+  // Only these booleans follow every runtime update; the status is rebuilt when one of them changes or while the
+  // cue runs, not for every resting row of the list.
+  const live = $derived(isRunning(cue));
+  const status = $derived(cueStatus(cue, live));
   const arrow = $derived(chainArrow(cue, next));
+  const arrowWaiting = $derived(chainWaiting(cue, next));
   const passes = $derived(repeatBadge(cue));
   const warnings = $derived(cueWarnings(cue));
   const running = $derived(rowRunning(cue));
@@ -135,7 +139,7 @@
         class={[
           'pointer-events-none absolute top-1/2 left-0 z-0 w-full',
           beforeScene ? 'h-6' : 'h-12',
-          arrow.waiting ? 'text-primary' : 'text-dim',
+          arrowWaiting ? 'text-primary' : 'text-dim',
         ]}
       >
         <svg class="absolute inset-0 overflow-visible" width="12" height={beforeScene ? 24 : 48} aria-hidden="true">
@@ -150,8 +154,8 @@
         <span
           class={[
             'absolute top-1/2 left-2.5 -translate-y-1/2 rounded border bg-panel px-1 text-[10px] leading-4 font-semibold whitespace-nowrap',
-            arrow.waiting ? 'border-primary text-primary' : 'border-line-strong text-fg-2',
-          ]}>{arrow.label}</span
+            arrowWaiting ? 'border-primary text-primary' : 'border-line-strong text-fg-2',
+          ]}>{arrow}</span
         >
       </span>
     {/if}

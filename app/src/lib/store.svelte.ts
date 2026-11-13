@@ -414,9 +414,12 @@ export async function revealCue(id: CueId, behavior: ScrollBehavior = 'auto') {
 
 /** The selected cues of the main list, in list order; cues gone meanwhile are left out. */
 export function selection(): CueId[] {
+  // A set: after "select all" on a large show, `includes` on the (proxied) array per cue took noticeably long.
+  // eslint-disable-next-line svelte/prefer-svelte-reactivity -- a local lookup, never changed
+  const picked = new Set(ui.selected ? [ui.selected, ...ui.marked] : ui.marked);
   return cues()
     .map((cue) => cue.id)
-    .filter((id) => id === ui.selected || ui.marked.includes(id));
+    .filter((id) => picked.has(id));
 }
 
 /** Every cue (groups' cues included) and a lookup by id, rebuilt only when the show changes. */

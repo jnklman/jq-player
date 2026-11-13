@@ -1,6 +1,7 @@
 <script lang="ts">
   import Link from '~icons/ph/link-bold';
-  import { Button } from '$lib/components/ui/button';
+  import XMark from '~icons/ph/x-bold';
+  import { Button, buttonVariants } from '$lib/components/ui/button';
   import * as Dialog from '$lib/components/ui/dialog';
   import { ScrollArea } from '$lib/components/ui/scroll-area';
 
@@ -8,7 +9,7 @@
   import { t } from '../lib/i18n/index.svelte';
   import type { MissingMediaFile } from '../lib/media';
   import { missingMediaFiles, pickAudio } from '../lib/media';
-  import { mode, ui } from '../lib/store.svelte';
+  import { dialogEscape, mode, ui } from '../lib/store.svelte';
 
   let { onclose }: { onclose: () => void } = $props();
   let busyKey = $state<string | null>(null);
@@ -39,17 +40,20 @@
     }
   }
 >
-  <Dialog.Content class="max-w-150">
+  <Dialog.Content class="max-w-150" escapeKeydownBehavior={dialogEscape()}>
     <Dialog.Header>
       <Dialog.Title>{t('relink.title')}</Dialog.Title>
-      <Dialog.Description>
-        {#if missingFiles.length}
-          {t('relink.text')}
-        {:else}
-          {t('relink.all_done')}
-        {/if}
-      </Dialog.Description>
+      <Dialog.Close class={buttonVariants({ variant: 'ghost', size: 'icon-sm' })} aria-label={t('common.close')}
+        ><XMark /></Dialog.Close
+      >
     </Dialog.Header>
+    <Dialog.Description class="m-0 px-4 pt-3">
+      {#if missingFiles.length}
+        {t('relink.text')}
+      {:else}
+        {t('relink.all_done')}
+      {/if}
+    </Dialog.Description>
     <ScrollArea class="max-h-[60vh] min-h-0">
       <div class="flex flex-col gap-2 p-4">
         {#each missingFiles as file (file.key)}

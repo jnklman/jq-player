@@ -10,6 +10,7 @@
   import { api } from '../lib/api';
   import { t } from '../lib/i18n/index.svelte';
   import { watchViews } from '../lib/stopwatches';
+  import { attempt } from '../lib/store.svelte';
 
   // The show's stopwatches and countdowns in the header: name and time; a
   // click offers start/stop and reset. They run in the backend, also without the UI.
@@ -47,16 +48,16 @@
       aria-label={t('stopwatches.watch_named', { name: watch.name })}
     >
       {#if watch.running}
-        <Button onclick={() => api.stopwatch(watch.id, 'stop')}
+        <Button onclick={() => attempt(api.stopwatch(watch.id, 'stop'))}
           ><Pause class="size-3.5" /> {t('stopwatch_action.stop')}</Button
         >
       {:else}
-        <Button onclick={() => api.stopwatch(watch.id, 'start')}
+        <Button onclick={() => attempt(api.stopwatch(watch.id, 'start'))}
           ><Play class="size-3.5" /> {t('stopwatch_action.start')}</Button
         >
       {/if}
-      <Button onclick={() => api.stopwatch(watch.id, 'restart')}>{t('stopwatches.restart')}</Button>
-      <Button variant="ghost" onclick={() => api.stopwatch(watch.id, 'reset')}
+      <Button onclick={() => attempt(api.stopwatch(watch.id, 'restart'))}>{t('stopwatches.restart')}</Button>
+      <Button variant="ghost" onclick={() => attempt(api.stopwatch(watch.id, 'reset'))}
         ><ArrowCounterClockwise class="size-3.5" /> {t('common.reset')}</Button
       >
     </Popover.Content>

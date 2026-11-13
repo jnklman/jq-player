@@ -23,18 +23,20 @@
   // spread its `props` onto that element:
   //   <Tooltip tip="…">{#snippet child({ props })}<span {...props}>…</span>{/snippet}</Tooltip>
   // A disabled button gets no pointer events; wrap it in a span to explain why
-  // it is disabled. Such wrappers are no tab stops of their own.
+  // it is disabled. Such wrappers are no tab stops of their own: without `tabindex` the trigger's tabindex is
+  // dropped from the props handed to `child`, so a real button or menu trigger stays reachable with Tab and a
+  // span stays out of the tab order. Pass `tabindex={0}` to make a wrapper focusable on purpose.
   let { tip, keys, side = 'top', children, child, tabindex, keepOpen = false, ...restProps }: TooltipProps = $props();
   let open = $state(false);
 </script>
 
 <!-- The trigger's props say type="button", which would turn an <input> into a button. -->
 {#snippet untyped({ props }: { props: Record<string, unknown> })}
-  {@render child?.({ props: { ...props, type: undefined } })}
+  {@render child?.({ props: { ...props, type: undefined, ...(tabindex === undefined && { tabindex: undefined }) } })}
 {/snippet}
 
 <TooltipPrimitive.Root bind:open={() => open || keepOpen, (v) => (open = v)}>
-  <TooltipTrigger tabindex={tabindex ?? (child ? -1 : 0)} child={child && untyped} {...restProps}>
+  <TooltipTrigger {tabindex} child={child && untyped} {...restProps}>
     {@render children?.()}
   </TooltipTrigger>
   {#if tip}

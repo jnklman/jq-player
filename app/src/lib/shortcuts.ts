@@ -31,22 +31,67 @@ export function isTextField(target: EventTarget | null): boolean {
   );
 }
 
+const slotSelector = (slots: string[]) => slots.map((slot) => `[data-slot="${slot}"]`).join(', ');
+
+// Open lists and menus (with their submenus) navigate with the arrows and Enter.
+const LISTS = slotSelector([
+  'select-content',
+  'dropdown-menu-content',
+  'dropdown-menu-sub-content',
+  'context-menu-content',
+  'context-menu-sub-content',
+]);
+const MODALS = slotSelector(['dialog-content', 'alert-dialog-content']);
+
 // Fields and open lists or menus keep their keys. Select and menu triggers
 // and panel dividers keep them only when reached with Tab, so they can be
 // used from the keyboard; clicked ones leave the keys to the shortcuts.
 function isTyping(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   if (isTextField(target)) return true;
-  if (target.closest('[data-slot="select-content"], [data-slot="dropdown-menu-content"]')) return true;
-  const control = '[data-slot="select-trigger"], [data-slot="dropdown-menu-trigger"], [data-slot="resizable-handle"]';
+  if (target.closest(LISTS)) return true;
+  const control = slotSelector(['select-trigger', 'dropdown-menu-trigger', 'resizable-handle']);
   return !pointerFocus && target.closest(control) !== null;
+}
+
+// Tabs and everything in a dialog (its buttons, switches and tabs, in a
+// question the answers) reached with Tab: in edit mode they keep their keys
+// (Space, Enter, arrows) but not Esc, which still panics.
+function isTabbedControl(target: EventTarget | null): boolean {
+  if (pointerFocus || !(target instanceof HTMLElement)) return false;
+  if (target.closest('[role="tab"]')) return true;
+  // The dialog box itself (focused instead of its first button) is no control.
+  const modal = target.closest(MODALS);
+  return modal !== null && modal !== target;
+}
+
+/** A dialog or question is open: the cue list behind it does not take keys. */
+function modalOpen(): boolean {
+  return document.querySelector(MODALS) !== null;
 }
 
 /** A dialog, menu or list is open that Esc closes (questions never close with Esc). */
 function overlayOpen(): boolean {
-  const slots = ['dialog', 'dropdown-menu', 'popover', 'select'];
-  return document.querySelector(slots.map((slot) => `[data-slot="${slot}-content"]`).join(', ')) !== null;
+  const slots = ['dialog', 'dropdown-menu', 'context-menu', 'popover', 'select'];
+  return document.querySelector(slotSelector(slots.map((slot) => `${slot}-content`))) !== null;
 }
+
+/**
+ * Fields commit what was typed when they lose the focus (the detail text a moment later), so that Ctrl+S saves
+ * it: the focus leaves the field and comes back after the commit.
+ */
+async function commitTyping() {
+  const field = document.activeElement;
+  if (!(field instanceof HTMLElement) || !isTextField(field)) return;
+  field.blur();
+  await new Promise((resolve) => setTimeout(resolve, COMMIT_WAIT_MS));
+  if (field.isConnected && (document.activeElement === null || document.activeElement === document.body)) {
+    field.focus();
+  }
+}
+
+// Longer than the detail text editor (CodeMirror) takes to notice that it lost the focus (10 ms).
+const COMMIT_WAIT_MS = 30;
 
 /** Takes the focus from a clicked control (see `pointerFocus`); focus moved with Tab stays. */
 function releasePointerFocus() {
@@ -71,7 +116,8 @@ export function releaseAllKeys() {
 
 /** Space must never also "click" a focused button on keyup: that would be a second GO. */
 export function onKeyup(e: KeyboardEvent) {
-  if (e.key === ' ' && ui.view && !(mode() === 'edit' && isTyping(e.target))) e.preventDefault();
+  const own = isTyping(e.target) || isTabbedControl(e.target);
+  if (e.key === ' ' && ui.view && !(mode() === 'edit' && own)) e.preventDefault();
 }
 
 /** Ctrl (or Cmd) with a letter, by the letter typed (so it follows the layout). */
@@ -104,8 +150,13 @@ export function formatShortcut(e: KeyboardEvent): Format | null {
   return plain[letter] ?? null;
 }
 
-/** The fixed Ctrl shortcuts of edit mode; true if `e` was one (and nothing else may act on it). */
-function editShortcut(e: KeyboardEvent, letter: string): boolean {
+/**
+ * The fixed Ctrl shortcuts of edit mode; true if `e` was one (and nothing else may act on it). Behind a dialog
+ * (`inDialog`) the ones on the list's selection are left to the dialog; undo and redo stay, as the group dialog
+ * edits the show directly.
+ */
+function editShortcut(e: KeyboardEvent, letter: string, inDialog: boolean): boolean {
+  if (inDialog && ['c', 'x', 'a', 'v'].includes(letter)) return true;
   switch (letter) {
     case 'z':
       if (e.shiftKey) redo();
@@ -136,24 +187,31 @@ function editShortcut(e: KeyboardEvent, letter: string): boolean {
 
 // Handled before the focused element sees the key (capture phase), so a
 // shortcut never also acts on that element (opens a menu, moves a divider).
-// Show mode: GO and STOP ALL win even over a focused field, which keeps its
-// other keys. Edit mode: typing wins.
+// Show mode: GO and panic win even over a focused field, which keeps its
+// other keys. Edit mode: typing wins. An open dialog keeps the list's keys
+// (selection, clipboard, Delete) away from the cue list behind it.
 export function onKeydown(e: KeyboardEvent) {
   if (e.key === 'Tab') pointerFocus = false;
   learnKeyLabel(e);
   // A key field records this press.
   if (!ui.view || keyCapture.active) return;
   const letter = ctrlLetter(e);
-  // Commands with dialogs of their own run in the main window.
+  const inDialog = modalOpen();
+  // Commands with dialogs of their own run in the main window; a held key runs them once.
   if (letter === 's') {
     e.preventDefault();
-    if (!e.shiftKey) saveShow();
-    else if (isMainWindow) saveShowAs();
-    else runInMain('save_show_as');
+    if (e.repeat) return;
+    void commitTyping().then(() => {
+      if (!e.shiftKey) saveShow();
+      else if (isMainWindow) saveShowAs();
+      else runInMain('save_show_as');
+    });
     return;
   }
   if (!e.shiftKey && (letter === 'n' || letter === 'o')) {
     e.preventDefault();
+    // Not under an open dialog, which would stay open on another show.
+    if (e.repeat || inDialog) return;
     if (!isMainWindow) runInMain(letter === 'n' ? 'new_show' : 'open_show');
     else if (letter === 'n') createShow();
     else openShow();
@@ -162,21 +220,26 @@ export function onKeydown(e: KeyboardEvent) {
   const typing = isTyping(e.target);
   const editing = mode() === 'edit';
   if (editing && typing) return;
-  if (editing && letter && editShortcut(e, letter)) return;
-  // The waveform dialog takes space for its preview player.
-  if (ui.waveformOpen && e.key === ' ') return;
+  if (editing && letter && editShortcut(e, letter, inDialog)) return;
   const chord = chordOf(e);
   if (!chord) return;
   // Esc always panics (also with Shift); other keys as bound in the settings.
   const action = isPanicKey(chord) ? 'panic' : ui.view.settings.keys.find((b) => sameChord(b.chord, chord))?.action;
-  // In show mode GO and panic win even over a focused field.
-  if (typing && action !== 'go' && action !== 'panic') return;
+  // In show mode GO and panic win even over a focused field (and the waveform's player).
+  const wins = !editing && (action === 'go' || action === 'panic');
+  if (typing && !wins) return;
+  if (isTabbedControl(e.target) && !wins && action !== 'panic') return;
+  // The waveform dialog takes space for its preview player.
+  if (ui.waveformOpen && e.key === ' ' && !wins) return;
 
   // Keys of the list (fixed): arrows, Home and End move the selection,
   // Ctrl+arrows from scene to scene, Shift extends it while editing;
   // Delete deletes (edit) or stops (show).
   const plain = !chord.ctrl && !chord.alt;
-  if (plain && ['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.code)) {
+  const listKey = ['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.code);
+  // Behind a dialog the list keeps still; the keys are the dialog's.
+  if (inDialog && (listKey || (chord.ctrl && ['ArrowDown', 'ArrowUp'].includes(e.code)) || e.code === 'Delete')) return;
+  if (plain && listKey) {
     e.preventDefault();
     const to = { ArrowDown: 1, ArrowUp: -1, Home: 'start', End: 'end' } as const;
     moveSelection(to[e.code as keyof typeof to], e.shiftKey && editing);

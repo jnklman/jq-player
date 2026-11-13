@@ -4,6 +4,7 @@
 
 import { api, type FadeCurve, type SoundFields } from './api';
 import { fadeGains } from './cue';
+import { fmtNumber } from './i18n/index.svelte';
 
 /** The positions in a file: start, end, vamps and marks. */
 export type Positions = Pick<SoundFields, 'start' | 'end' | 'vamps' | 'marks'>;
@@ -152,11 +153,11 @@ export function rulerTicks(pxPerSec: number, from: number, to: number): { step: 
   return { step, times };
 }
 
-/** A ruler label with as many decimals as the step needs: "12", "1:05,5", "0,25". */
+/** A ruler label with as many decimals as the step needs: "12", "1:05,5", "0,25" (a point in English). */
 export function rulerLabel(secs: number, step: number): string {
   const digits = step < 0.1 ? 2 : step < 1 ? 1 : 0;
   const total = Math.round(secs * 100) / 100;
   const minutes = Math.floor(total / 60);
-  const rest = (total - minutes * 60).toFixed(digits).replace('.', ',');
+  const rest = fmtNumber(total - minutes * 60, digits);
   return minutes > 0 ? `${minutes}:${rest.padStart(digits ? 3 + digits : 2, '0')}` : rest;
 }

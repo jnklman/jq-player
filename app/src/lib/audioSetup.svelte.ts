@@ -21,9 +21,15 @@ export class AudioSetup {
     void this.load(draft().host);
   }
 
+  /** Counts the loads, so only the latest one's answer is kept. */
+  private loads = 0;
+
   async load(host: string | null) {
+    const mine = ++this.loads;
     this.loading = true;
-    this.devices = (await attempt(api.audioDevices(host ?? undefined))) ?? null;
+    const devices = (await attempt(api.audioDevices(host ?? undefined))) ?? null;
+    if (mine !== this.loads) return;
+    this.devices = devices;
     this.loading = false;
   }
 

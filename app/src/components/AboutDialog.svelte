@@ -192,9 +192,9 @@
                     {/if}
                     {#if 'note' in pkg}<span class={hint}>{pkg.note}</span>{/if}
                     {#each pkg.texts as text (text)}
-                      <pre class="m-0 font-mono text-[11px] leading-snug whitespace-pre-wrap text-fg-2 select-text">
-                        {licenses?.texts[text]}
-                      </pre>
+                      <pre
+                        class="m-0 font-mono text-[11px] leading-snug whitespace-pre-wrap text-fg-2 select-text">{licenses
+                          ?.texts[text]}</pre>
                     {/each}
                   </div>
                 {/if}

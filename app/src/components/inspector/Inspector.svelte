@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
+
   import Lock from '~icons/ph/lock-bold';
   import SpeakerHigh from '~icons/ph/speaker-high-fill';
   import Stop from '~icons/ph/stop-fill';
@@ -8,6 +10,7 @@
   import { api, type CueId } from '../../lib/api';
   import { isPlaceholder } from '../../lib/cue';
   import { t } from '../../lib/i18n/index.svelte';
+  import { boundKeys } from '../../lib/keys.svelte';
   import { cueById, mode, selection, ui } from '../../lib/store.svelte';
   import { empty, hint } from '../../lib/ui';
   import PanelFrame from '../layout/PanelFrame.svelte';
@@ -33,6 +36,18 @@
   // A new body for other cues or another type (see `InspectorBody`).
   const key = $derived(cues.map((cue) => `${cue.id}:${cue.type}`).join());
 
+  // Before the body goes (the selection moved on, e.g. by a GO from MIDI or OSC that the selection follows), a
+  // field being typed in loses the focus, so it commits to the cue it was made for: a removed input sends no
+  // `change`.
+  let frame = $state<HTMLElement | null>(null);
+  $effect.pre(() => {
+    void key;
+    untrack(() => {
+      const active = document.activeElement;
+      if (active instanceof HTMLElement && frame?.contains(active)) active.blur();
+    });
+  });
+
   const single = $derived(cues.length === 1 ? cues[0] : null);
   // Previewing never touches the show, so it works in show mode too.
   const preview = $derived(single && ui.runtime?.preview?.cue === single.id ? ui.runtime.preview : null);
@@ -54,7 +69,7 @@
       {@const id = single.id}
       <Tooltip
         tip={t('inspector.preview_tip')}
-        keys="P"
+        keys={boundKeys(ui.view?.settings.keys ?? [], 'preview') || undefined}
         class={buttonVariants()}
         aria-pressed={preview != null}
         onclick={() => api.action({ action: 'preview', cue: id })}
@@ -70,18 +85,20 @@
   {#if cues.length === 0}
     <div class={empty}>{t('inspector.click_cue')}</div>
   {:else}
-    {#key key}
-      <!-- A failing field must not take the panel (or the rest of the window) with it. -->
-      <svelte:boundary onerror={(error) => console.error('Inspector:', error)}>
-        <InspectorBody {cues} {locked} />
-        {#snippet failed(error, reset)}
-          <div class="{empty} flex flex-col items-center gap-2">
-            {t('inspector.failed')}
-            <span class="{hint} font-mono">{String(error)}</span>
-            <Button size="sm" onclick={reset}>{t('inspector.retry')}</Button>
-          </div>
-        {/snippet}
-      </svelte:boundary>
-    {/key}
+    <div class="contents" bind:this={frame}>
+      {#key key}
+        <!-- A failing field must not take the panel (or the rest of the window) with it. -->
+        <svelte:boundary onerror={(error) => console.error('Inspector:', error)}>
+          <InspectorBody {cues} {locked} />
+          {#snippet failed(error, reset)}
+            <div class="{empty} flex flex-col items-center gap-2">
+              {t('inspector.failed')}
+              <span class="{hint} font-mono">{String(error)}</span>
+              <Button size="sm" onclick={reset}>{t('inspector.retry')}</Button>
+            </div>
+          {/snippet}
+        </svelte:boundary>
+      {/key}
+    </div>
   {/if}
 </PanelFrame>

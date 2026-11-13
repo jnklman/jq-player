@@ -33,6 +33,7 @@
   const base = $derived(selected ? 'var(--color-selected)' : 'var(--color-panel-2)');
   const tint = $derived(cue.color ? `color-mix(in oklab, ${cue.color} 22%, ${base})` : base);
 
+  // Multi-select in edit mode only: Ctrl/Shift-click, and a double-click selecting the scene with its cues.
   function onclick(e: MouseEvent) {
     if (editing && (e.ctrlKey || e.metaKey)) toggleSelected(cue.id);
     else if (editing && e.shiftKey) extendSelection(cue.id);
@@ -60,7 +61,7 @@
   onmousedown={(e) => {
     if (e.shiftKey) e.preventDefault();
   }}
-  ondblclick={() => selectScene(cue.id)}
+  ondblclick={() => editing && selectScene(cue.id)}
   onkeydown={() => {}}
 >
   <!-- The chain from the cue above goes on to the one below, top to bottom over the row lines. -->

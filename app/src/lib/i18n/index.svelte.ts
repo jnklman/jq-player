@@ -117,11 +117,23 @@ export function options<T extends string>(keys: Record<T, TextKey>): { value: T;
   }));
 }
 
+/** Formatters of `fmtNumber` by language and digits; a plain cache, nothing reacts to it. */
+// eslint-disable-next-line svelte/prefer-svelte-reactivity
+const numberFormats = new Map<string, Intl.NumberFormat>();
+
 /** A number as text in the current language ("2,5" / "2.5"), with `digits` decimals (as many as needed if omitted). */
 export function fmtNumber(value: number, digits?: number): string {
-  return new Intl.NumberFormat(i18n.locale, {
-    useGrouping: false,
-    minimumFractionDigits: digits ?? 0,
-    maximumFractionDigits: digits ?? 20,
-  }).format(value);
+  // Called for every running time ~30×/s; building a formatter each time is the costly part.
+  const locale = i18n.locale;
+  const key = `${locale}:${digits ?? ''}`;
+  let format = numberFormats.get(key);
+  if (!format) {
+    format = new Intl.NumberFormat(locale, {
+      useGrouping: false,
+      minimumFractionDigits: digits ?? 0,
+      maximumFractionDigits: digits ?? 20,
+    });
+    numberFormats.set(key, format);
+  }
+  return format.format(value);
 }

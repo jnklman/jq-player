@@ -28,11 +28,11 @@ export function midiMessageOf(kind: MidiMessage['kind'], from?: MidiMessage): Mi
   }
 }
 
-/** e.g. "PC 5 · Kanal 1", "MSC GO 12.5". */
+/** e.g. "PC 5 · Channel 1" (programs counted from 1, like `fmtMidi`), "MSC GO 12.5". */
 export function midiSummary(message: MidiMessage): string {
   switch (message.kind) {
     case 'program_change':
-      return `PC ${message.program} · ${t('midi.channel', { channel: message.channel + 1 })}`;
+      return `PC ${message.program + 1} · ${t('midi.channel', { channel: message.channel + 1 })}`;
     case 'control_change':
       return `CC ${message.controller}=${message.value} · ${t('midi.channel', { channel: message.channel + 1 })}`;
     case 'note_on':

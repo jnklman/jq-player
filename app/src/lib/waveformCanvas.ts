@@ -20,22 +20,33 @@ export interface WaveformPicture {
   fades: FadeSegment[];
 }
 
+// The theme is fixed, so the colours are read once per canvas.
+const colors = new WeakMap<HTMLCanvasElement, { peak: string; fade: string }>();
+
 export function drawWaveform(canvas: HTMLCanvasElement, picture: WaveformPicture) {
   const { width, ruler, pxPerSec, scrollLeft } = picture;
   const ratio = window.devicePixelRatio || 1;
-  canvas.width = Math.round(width * ratio);
-  canvas.height = Math.round(picture.height * ratio);
+  // Setting the size reallocates the bitmap, so only when it changed.
+  const pixelWidth = Math.round(width * ratio);
+  const pixelHeight = Math.round(picture.height * ratio);
+  if (canvas.width !== pixelWidth) canvas.width = pixelWidth;
+  if (canvas.height !== pixelHeight) canvas.height = pixelHeight;
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
   ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
   ctx.clearRect(0, 0, width, picture.height);
-  const style = getComputedStyle(canvas);
-  const color = (name: string) => style.getPropertyValue(name).trim();
+  let palette = colors.get(canvas);
+  if (!palette) {
+    const style = getComputedStyle(canvas);
+    const color = (name: string) => style.getPropertyValue(name).trim();
+    palette = { peak: color('--color-fg-2'), fade: color('--color-fade') };
+    colors.set(canvas, palette);
+  }
   const height = picture.height - ruler;
   const middle = ruler + height / 2;
 
   // The loudest peak under each pixel, from a detail tile where one is loaded.
-  ctx.fillStyle = color('--color-fg-2');
+  ctx.fillStyle = palette.peak;
   for (let column = 0; column < width; column++) {
     const since = (scrollLeft + column) / pxPerSec;
     const until = since + 1 / pxPerSec;
@@ -47,7 +58,7 @@ export function drawWaveform(canvas: HTMLCanvasElement, picture: WaveformPicture
   // What a fade takes away is shaded, its curve drawn over it.
   const xOf = (secs: number) => secs * pxPerSec - scrollLeft;
   const yOf = (gain: number) => ruler + (1 - gain) * height;
-  ctx.strokeStyle = color('--color-fade');
+  ctx.strokeStyle = palette.fade;
   ctx.lineWidth = 1.5;
   for (const [from, to, gain] of picture.fades) {
     const steps = Math.max(8, Math.min(400, Math.ceil(((to - from) * pxPerSec) / 4)));

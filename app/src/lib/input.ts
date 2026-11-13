@@ -4,9 +4,15 @@
 /** The number in `text`; null if empty or not a number. */
 export function parseNumber(text: string): number | null {
   const raw = text.trim().replace(',', '.').replace('−', '-');
-  if (raw === '') return null;
+  // Plain decimal notation (and an exponent, as a number field accepts it), not what `Number` also takes ("0x10", "1_0").
+  if (!/^[+-]?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$/i.test(raw)) return null;
   const value = Number(raw);
   return isFinite(value) ? value : null;
+}
+
+/** A number as a field shows it: without floating-point noise ("0.30000000000000004" → "0.3"), always with a point. */
+export function plainNumber(value: number): string {
+  return String(Number(value.toPrecision(12)));
 }
 
 /** The number in a field's change or input event; null if empty or not a number. */

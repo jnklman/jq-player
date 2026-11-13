@@ -134,7 +134,15 @@
 
 {#if topLevel}
   <FieldGroup title={t('actions.group.playhead')}>
-    <CountRow {edit} key="passes" label="Repeat" options={repeatOptions} unit="GOs" own field="repeat">
+    <CountRow
+      {edit}
+      key="passes"
+      label={t('flow.repeat')}
+      options={repeatOptions}
+      unit={t('flow.repeat_unit')}
+      own
+      field="repeat"
+    >
       {#if info?.repeat_blocked}
         <span class="text-xs text-stop-soft">{t('flow.repeat_blocked')}</span>
       {:else if single && single.passes !== 0 && single.second_trigger.action === 'ignore'}

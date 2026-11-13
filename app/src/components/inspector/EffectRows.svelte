@@ -94,6 +94,7 @@
         min={-1}
         max={1}
         format={panLabel}
+        disabled={edit.locked}
         value={single.pan}
         onValueCommit={(pan) => edit.set({ pan: clamp(pan, -1, 1) })}
         reset={0}

@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
+
   import { Badge } from '$lib/components/ui/badge';
   import { Button } from '$lib/components/ui/button';
   import { Tooltip } from '$lib/components/ui/tooltip';
@@ -43,7 +45,8 @@
   // A GO dropped by the GO lockout flashes the button; the count only grows.
   const REJECTED_FLASH_MS = 400;
   const rejectedCount = $derived(ui.runtime?.go_rejected ?? 0);
-  let seenRejected = 0;
+  // Starts at the count of the moment the panel opens, so a panel mounted later does not flash for old rejections.
+  let seenRejected = untrack(() => rejectedCount);
   let rejected = $state(false);
   $effect(() => {
     const count = rejectedCount;

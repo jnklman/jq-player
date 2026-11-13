@@ -62,6 +62,17 @@ export function missingMediaFiles(view: ShowView): MissingMediaFile[] {
   return [...files.values()];
 }
 
+/** Whether `dir` is `root` or lies below it; separators (and on Windows paths the case) do not matter. */
+export function isInsideDir(dir: string, root: string): boolean {
+  const windows = /^[a-z]:|\\/i.test(root);
+  const norm = (path: string) => {
+    const slashed = path.replace(/\\/g, '/').replace(/\/+$/, '');
+    return windows ? slashed.toLowerCase() : slashed;
+  };
+  const [a, b] = [norm(dir), norm(root)];
+  return a === b || a.startsWith(`${b}/`);
+}
+
 /** Picks another media folder and stores it in the show. */
 export async function chooseMediaFolder(view: ShowView): Promise<boolean> {
   const dir = await open({ directory: true, defaultPath: view.media_dir, title: t('media.choose_folder') });
@@ -85,13 +96,13 @@ export async function pickAudio(
   const result = await open({
     multiple,
     defaultPath: view.settings.audio_dir ?? mediaDir,
-    filters: [{ name: 'Audio', extensions: AUDIO }],
+    filters: [{ name: t('add.audio'), extensions: AUDIO }],
   });
   const picked = typeof result === 'string' ? [result] : result;
   if (!picked || picked.length === 0) return null;
   const dir = await dirname(picked[0]);
   // Only a convenience: a failure must not stop adding the files.
-  api.setAudioDir(dir.startsWith(mediaDir) ? null : dir).catch(() => {});
+  api.setAudioDir(isInsideDir(dir, mediaDir) ? null : dir).catch(() => {});
 
   const check = await attempt(api.checkImport(mediaDir, picked));
   if (!check) return null;

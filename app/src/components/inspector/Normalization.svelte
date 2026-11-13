@@ -34,7 +34,7 @@
     {#if cue.type === 'sound'}
       {@const file = loudness[0]}
       {#if file}
-        <span>{fmtLufs(file.lufs)} · True Peak {fmtDb(file.peak_db)}</span>
+        <span>{fmtLufs(file.lufs)} · {t('normalization.true_peak', { peak: fmtDb(file.peak_db) })}</span>
         {#if cue.normalize_db != null}
           <span class="text-muted-foreground"
             >{t('normalization.offset', {

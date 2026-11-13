@@ -92,6 +92,7 @@
       handle.removeEventListener('pointermove', move);
       handle.removeEventListener('pointerup', up);
       handle.removeEventListener('pointercancel', cancel);
+      handle.removeEventListener('lostpointercapture', cancel);
       const drop = commit ? drag?.drop : null;
       if (drop?.kind === 'panel') layout.move(panel, drop.target, drop.zone);
       else if (drop?.kind === 'edge') layout.dock(panel, drop.edge);
@@ -103,6 +104,8 @@
     handle.addEventListener('pointermove', move);
     handle.addEventListener('pointerup', up);
     handle.addEventListener('pointercancel', cancel);
+    // The capture is gone without a pointerup (e.g. the handle left the page): nothing is dropped.
+    handle.addEventListener('lostpointercapture', cancel);
   }
 
   setArrange({ enabled: () => layout.editing, start });

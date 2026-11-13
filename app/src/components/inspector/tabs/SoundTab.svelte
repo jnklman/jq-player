@@ -2,10 +2,11 @@
   import Slider from '$lib/components/ui/slider/slider.svelte';
 
   import type { CueInfo } from '../../../lib/api';
+  import { panLabel } from '../../../lib/control';
   import { withoutNormalization } from '../../../lib/cue';
   import { type CueEdit, isMixed } from '../../../lib/cueEdit';
   import { dbToFader, faderSteps, faderToDb, roundFaderDb } from '../../../lib/fader';
-  import { fmtDb, fmtPercent } from '../../../lib/format';
+  import { fmtDb } from '../../../lib/format';
   import { t } from '../../../lib/i18n/index.svelte';
   import { clamp } from '../../../lib/input';
   import { clampRate, RATE_MAX, RATE_MIN, rateLabel, TRANSPOSE_MAX } from '../../../lib/speed';
@@ -58,7 +59,7 @@
         step={0.01}
         min={-1}
         max={1}
-        format={(pan) => fmtPercent(pan)}
+        format={panLabel}
         disabled={edit.locked}
         value={cue.pan}
         onValueChange={(pan) => edit.set({ pan: clamp(pan, -1, 1) }, true)}

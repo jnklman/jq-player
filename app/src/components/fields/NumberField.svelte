@@ -5,7 +5,7 @@
   import { Label } from '$lib/components/ui/label';
   import { Tooltip } from '$lib/components/ui/tooltip';
 
-  import { clamp, parseNumber } from '../../lib/input';
+  import { clamp, parseNumber, plainNumber } from '../../lib/input';
   import { field } from '../../lib/ui';
 
   // A number input with its label (a grid cell of a form). A change is
@@ -56,14 +56,16 @@
     const input = e.currentTarget;
     const parsed = parseNumber(input.value);
     if (parsed === null) {
-      if (optional && input.value.trim() === '') return (onchange as (value: number | null) => void)(null);
+      // An unreadable entry ("1-2") reads as empty from a number input: that is no request to clear the value.
+      if (optional && !input.validity.badInput && input.value.trim() === '')
+        return (onchange as (value: number | null) => void)(null);
       // Not a number: the field shows the value again.
-      input.value = value == null ? '' : String(value);
+      input.value = value == null ? '' : plainNumber(value);
       return;
     }
     const next = clamp(integer ? Math.round(parsed) : parsed, min, max);
     // A clamped value the field still shows unclamped would stay wrong.
-    if (next !== parsed) input.value = String(next);
+    if (next !== parsed) input.value = plainNumber(next);
     (onchange as (value: number) => void)(next);
   }
 </script>
@@ -93,7 +95,7 @@
     {placeholder}
     {disabled}
     aria-label={ariaLabel}
-    value={value ?? ''}
+    value={value == null ? '' : plainNumber(value)}
     onchange={change}
   />
 {/snippet}

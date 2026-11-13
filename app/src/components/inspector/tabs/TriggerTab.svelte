@@ -50,6 +50,18 @@
     });
   }
 
+  // Leaving the cue (another cue, another tab) ends a pending learn for it, so the next control does not bind to a
+  // cue no longer shown.
+  const learningFor = $derived(learning ? single?.id : undefined);
+  $effect(() => {
+    const id = learningFor;
+    if (!id) return;
+    return () => {
+      const pending = ui.view?.midi.learning;
+      if (pending?.kind === 'cue' && pending.cue === id) void attempt(api.midiLearn(null));
+    };
+  });
+
   function releaseHint(cue: Cue): string {
     const second = cue.second_trigger.action;
     if (second === 'stop') return t('trigger.release_stop');

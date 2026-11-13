@@ -71,7 +71,7 @@
       <SimpleSelect value={message.command} options={mscCommands} onchange={(command) => set({ command })} />
     </Label>
     <Label class="{field} w-20">
-      Cue
+      {t('midi_fields.cue')}
       <Input
         placeholder={t('midi_fields.next')}
         value={message.cue}
@@ -94,14 +94,24 @@
       onchange={(channel) => set({ channel: channel - 1 })}
     />
     {#if message.kind === 'program_change'}
-      {@render byte(t('midi.program'), 'program', message.program)}
+      <!-- Shown 1 … 128 like a learned program trigger (`fmtMidi`); sent as 0 … 127. -->
+      <NumberField
+        class="w-20"
+        label={t('midi.program')}
+        step={1}
+        min={1}
+        max={128}
+        integer
+        value={message.program + 1}
+        onchange={(program) => set({ program: program - 1 })}
+      />
     {:else if message.kind === 'control_change'}
       {@render byte(t('midi.what.controller'), 'controller', message.controller)}
       {@render byte(t('midi.what.value'), 'value', message.value)}
     {:else}
       {@render byte(t('midi.note'), 'note', message.note)}
       {#if message.kind === 'note_on'}
-        {@render byte('Velocity', 'velocity', message.velocity, 1)}
+        {@render byte(t('midi_fields.velocity'), 'velocity', message.velocity, 1)}
       {/if}
     {/if}
   {/if}

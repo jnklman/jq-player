@@ -35,6 +35,12 @@
     if (id) selected = id;
   }
 
+  /** The copy goes right after the original and becomes selected. */
+  async function duplicate() {
+    const id = selected && (await duplicateCue(selected));
+    if (id) selected = id;
+  }
+
   function move(by: number) {
     if (selected && index + by >= 0 && index + by < children.length) {
       edit({ op: 'move', ids: [selected], to: index + by });
@@ -98,7 +104,7 @@
               disabled={index < 0 || index >= children.length - 1}
               onclick={() => move(1)}><CaretDown /></Button
             >
-            <Button disabled={!selected} onclick={() => duplicateCue(selected)}>{t('group.duplicate')}</Button>
+            <Button disabled={!selected} onclick={duplicate}>{t('group.duplicate')}</Button>
             <Button variant="destructive" disabled={!selected} onclick={remove}>{t('common.delete')}</Button>
           </div>
           <div class="flex flex-wrap gap-1.5">

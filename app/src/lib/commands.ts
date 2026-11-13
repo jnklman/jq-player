@@ -2,6 +2,7 @@
 // function per command, so a button and its shortcut always do the same
 // (selection afterwards included). Every call reports a failure as a notice.
 
+import { cueAfter, firstAdded } from './added';
 import { api, type Cue, type CueId, type EditOp, type GroupCue, type LevelLimits, type ShowView } from './api';
 import type { AddItem } from './control';
 import { cueLabel, isPlaceholder } from './cue';
@@ -73,9 +74,19 @@ async function pasteAndSelect(op: EditOp) {
   if (pasted.length) void revealCue(pasted[0], 'smooth');
 }
 
-/** Duplicates the cue (default: the one in the inspector); `linked`: the copy is an instance of it. */
-export function duplicateCue(id: CueId | null = ui.selected, linked = false) {
-  if (id) void edit({ op: 'duplicate', id, linked });
+/** Duplicates the cue (default: the one in the inspector); `linked`: the copy is an instance of it. A copy in the
+ * main list gets selected; returns its id (`undefined` if nothing was duplicated). */
+export async function duplicateCue(id: CueId | null = ui.selected, linked = false): Promise<CueId | undefined> {
+  if (!id) return undefined;
+  const inMain = cues().some((cue) => cue.id === id);
+  const view = await edit({ op: 'duplicate', id, linked });
+  const copy = view && cueAfter(view.show.cues, id)?.id;
+  if (!copy) return undefined;
+  if (inMain) {
+    select(copy);
+    void revealCue(copy, 'smooth');
+  }
+  return copy;
 }
 
 /** The cue whose settings linking the selection would take (the one in the
@@ -186,10 +197,12 @@ export function placeBeforeSelection(): Place {
 export async function addCue(item: AddItem, place: Place = placeAfterSelection()): Promise<CueId | undefined> {
   const op = await addOp(item, place);
   if (!op) return undefined;
+  // Taken after the file picker, which can take long: the show may have changed meanwhile.
+  const listOf = (list: Cue[]) => (place.group ? findGroup(list, place.group)?.cues : list) ?? [];
+  const before = listOf(cues());
   const view = await edit(op);
   if (!view) return undefined;
-  const list = place.group ? findGroup(view.show.cues, place.group)?.cues : view.show.cues;
-  return list?.[place.index]?.id;
+  return firstAdded(before, listOf(view.show.cues));
 }
 
 /** Adds a cue to the main list (default: after the selection), selects it and scrolls it into view. */

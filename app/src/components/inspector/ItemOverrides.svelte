@@ -62,7 +62,7 @@
   <Popover.Content align="end" class="flex w-72 flex-col gap-3">
     <div class="flex flex-col gap-0.5">
       <span class="truncate text-[13px] font-semibold"
-        >{t('overrides.item', { number: index + 1, file: file.split('/').at(-1) ?? '' })}</span
+        >{t('overrides.item', { number: index + 1, file: file.split(/[\\/]/).at(-1) ?? '' })}</span
       >
       <span class="text-xs text-muted-foreground">{t('overrides.empty_hint')}</span>
     </div>

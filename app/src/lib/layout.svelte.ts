@@ -288,11 +288,21 @@ export class LayoutState {
   readonly #known: PanelId[];
   readonly #fallback: (mode: Mode) => Layout;
   #saveTimer: ReturnType<typeof setTimeout> | undefined;
+  /** A change is waiting for its delayed save. */
+  #dirty = false;
 
   constructor(known: PanelId[], fallback: (mode: Mode) => Layout) {
     this.#known = known;
     this.#fallback = fallback;
     this.#layouts = { edit: fallback('edit'), show: fallback('show') };
+    // A pending change must not be lost when the window closes or the app quits.
+    if (typeof window !== 'undefined') {
+      window.addEventListener('pagehide', () => this.flush());
+      window.addEventListener('beforeunload', () => this.flush());
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') this.flush();
+      });
+    }
   }
 
   get root(): LayoutNode {
@@ -421,10 +431,17 @@ export class LayoutState {
   }
 
   #save() {
+    this.#dirty = true;
     clearTimeout(this.#saveTimer);
-    this.#saveTimer = setTimeout(() => {
-      // A snapshot: `sizes` are changed in place while resizing.
-      attempt(api.setLayout(JSON.parse(JSON.stringify(this.#layouts))));
-    }, SAVE_DELAY_MS);
+    this.#saveTimer = setTimeout(() => this.flush(), SAVE_DELAY_MS);
+  }
+
+  /** Sends a change that is still waiting for its delayed save right away. */
+  flush() {
+    clearTimeout(this.#saveTimer);
+    if (!this.#dirty) return;
+    this.#dirty = false;
+    // A snapshot: `sizes` are changed in place while resizing.
+    void attempt(api.setLayout(JSON.parse(JSON.stringify(this.#layouts))));
   }
 }

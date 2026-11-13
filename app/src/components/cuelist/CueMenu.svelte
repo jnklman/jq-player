@@ -44,16 +44,19 @@
     unlinkCues,
   } from '../../lib/commands';
   import { addGroups, type AddItem } from '../../lib/control';
-  import { cueLabel, isPlaceholder } from '../../lib/cue';
+  import { canLink, cueLabel, isPlaceholder } from '../../lib/cue';
   import { addIcons } from '../../lib/cueIcons';
   import { t } from '../../lib/i18n/index.svelte';
-  import { allCues, cues, selection, ui } from '../../lib/store.svelte';
+  import { allCues, cueById, cues, selection, ui } from '../../lib/store.svelte';
 
   // Content of the cue list's context menu (edit mode): the actions of its
   // header, through the same `lib/commands`.
   const view = $derived(ui.view!);
   const selected = $derived(selection());
-  const selectedCues = $derived(allCues().filter((cue) => selected.includes(cue.id)));
+  const selectedCues = $derived.by(() => {
+    const ids = new Set(selected);
+    return allCues().filter((cue) => ids.has(cue.id));
+  });
   const source = $derived(selectedCues.find((cue) => cue.id === ui.selected));
   const linkTarget = $derived(linkSource());
   // The cue the type-specific actions (open its dialog, …) are for: one selected cue.
@@ -157,10 +160,7 @@
       <ContextMenu.Item disabled={!linkTarget} onSelect={() => linkTarget && linkCues(linkTarget.id)}>
         {t('cuemenu.link_selection', { cue: source ? cueLabel(source) : '–' })}
       </ContextMenu.Item>
-      <ContextMenu.Item
-        disabled={!ui.selected || source?.type === 'group'}
-        onSelect={() => duplicateCue(ui.selected, true)}
-      >
+      <ContextMenu.Item disabled={!canLink(cueById(ui.selected))} onSelect={() => duplicateCue(ui.selected, true)}>
         {t('cuemenu.duplicate_linked')}
       </ContextMenu.Item>
       <ContextMenu.Item disabled={!view.can_paste} onSelect={() => pasteCues(true)}>

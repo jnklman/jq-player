@@ -93,7 +93,7 @@
     <span class="h-1 min-w-0 flex-1 overflow-hidden rounded-sm bg-line">
       <span
         class="block h-full w-full origin-left bg-go"
-        style:transform="scaleX({meterPercent(running.level_db, ui.view!.show.level_limits)}%)"
+        style:transform="scaleX({meterPercent(running.level_db, ui.view!.show.level_limits) / 100})"
       ></span>
     </span>
     <PanMeter {pan} label={t('active.pan_label', { number: cue?.number ?? '' })} />

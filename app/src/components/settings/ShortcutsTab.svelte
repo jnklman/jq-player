@@ -86,7 +86,7 @@
 
   // Leaving the dialog ends a pending learn.
   $effect(() => () => {
-    if (ui.view?.midi.learning) api.midiLearn(null);
+    if (ui.view?.midi.learning) void attempt(api.midiLearn(null));
   });
 </script>
 

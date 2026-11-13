@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { tick } from 'svelte';
+
   import * as AlertDialog from '$lib/components/ui/alert-dialog';
   import { Button } from '$lib/components/ui/button';
 
@@ -13,6 +15,18 @@
       question.choices.findIndex((choice) => choice.focus),
     ),
   );
+
+  // A new question can replace an open one in the same tick: the dialog stays mounted, so its first
+  // auto-focus is not repeated and the focus would stay on a button of the old question.
+  let first = true;
+  $effect(() => {
+    void question;
+    if (first) {
+      first = false;
+      return;
+    }
+    void tick().then(() => buttons[focused]?.focus());
+  });
 </script>
 
 <!-- Esc stays STOP ALL and never answers; only the buttons do. -->

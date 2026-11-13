@@ -6,9 +6,11 @@ import { fmtNumber, i18n, t } from './i18n/index.svelte';
 export function fmtTime(secs: number | null | undefined): string {
   if (secs == null || !isFinite(secs)) return '∞';
   const total = Math.max(0, secs);
-  const minutes = Math.floor(total / 60);
-  const rest = total - minutes * 60;
-  return minutes > 0 ? `${minutes}:${rest.toFixed(0).padStart(2, '0')}` : `${fmtNumber(rest, 1)} s`;
+  // Rounded to the shown precision first, so 59.96 s turns over to "1:00" instead of printing "60.0 s".
+  const tenths = Math.round(total * 10) / 10;
+  if (tenths < 60) return `${fmtNumber(tenths, 1)} s`;
+  const whole = Math.round(total);
+  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, '0')}`;
 }
 
 /**
@@ -55,19 +57,21 @@ export function fmtSecs(secs: number): string {
 
 /** Size on disk: "0,4 MB", "312 MB". */
 export function fmtMegabytes(bytes: number): string {
-  const megabytes = bytes / (1 << 20);
-  return `${megabytes < 10 ? fmtNumber(megabytes, 1) : Math.round(megabytes)} MB`;
+  const tenths = Math.round((bytes / (1 << 20)) * 10) / 10;
+  return `${tenths < 10 ? fmtNumber(tenths, 1) : Math.round(tenths)} MB`;
 }
 
 export function fmtDb(db: number | null | undefined): string {
   if (db == null || !isFinite(db) || db <= -120) return '−∞ dB';
-  return `${db < 0 ? '−' : db > 0 ? '+' : ''}${fmtNumber(Math.abs(db), 1)} dB`;
+  const tenths = Math.round(db * 10) / 10; // a sign only for what the rounded number shows
+  return `${tenths < 0 ? '−' : tenths > 0 ? '+' : ''}${fmtNumber(Math.abs(tenths), 1)} dB`;
 }
 
 /** Loudness: "−18,3 LUFS"; silence "−∞ LUFS". */
 export function fmtLufs(lufs: number | null | undefined): string {
   if (lufs == null || !isFinite(lufs)) return '−∞ LUFS';
-  return `${lufs < 0 ? '−' : ''}${fmtNumber(Math.abs(lufs), 1)} LUFS`;
+  const tenths = Math.round(lufs * 10) / 10;
+  return `${tenths < 0 ? '−' : ''}${fmtNumber(Math.abs(tenths), 1)} LUFS`;
 }
 
 export function fmtPercent(percent: number | null | undefined): string {

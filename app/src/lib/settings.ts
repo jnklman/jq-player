@@ -257,9 +257,12 @@ export function bindKey(
     return { keys, error: t('keys.fixed', { key: keyText(chord) }), displaced: [] };
   }
   const before = keys.find((binding) => chord && binding.action !== action && sameChord(binding.chord, chord));
-  const own = keysOf(keys, action);
-  if (chord) own[index] = chord;
-  else own.splice(index, 1);
+  let own = keysOf(keys, action);
+  if (chord) {
+    own[index] = chord;
+    // The chord the action already has in another slot would be a duplicate.
+    own = own.filter((key, i) => i === index || !sameChord(key, chord));
+  } else own.splice(index, 1);
   const others = keys.filter((binding) => binding.action !== action && !(chord && sameChord(binding.chord, chord)));
   const next = [...others, ...own.map((key) => ({ chord: key, action }))];
   return {
@@ -317,12 +320,13 @@ export function displacedText(
 
 /** A whole number above 0 from a field; empty (or anything else) = null, e.g. "device default". */
 export function positiveOrNull(value: string): number | null {
+  if (!/^\s*\d+\s*$/.test(value)) return null;
   const number = parseInt(value, 10);
-  return Number.isFinite(number) && number > 0 ? number : null;
+  return number > 0 ? number : null;
 }
 
 /** A whole number from 0 from a field; empty = null (e.g. MSC off, as 0 is a device id). */
 export function idOrNull(value: string): number | null {
-  const number = parseInt(value, 10);
-  return Number.isFinite(number) && number >= 0 ? number : null;
+  if (!/^\s*\d+\s*$/.test(value)) return null;
+  return parseInt(value, 10);
 }

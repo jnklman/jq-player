@@ -16,7 +16,10 @@ async function showsDir(): Promise<string | undefined> {
 }
 
 async function pickShowFile(): Promise<string | null> {
-  return open({ defaultPath: await showsDir(), filters: [{ name: 'jQ-Show', extensions: [SHOW_EXTENSION] }] });
+  return open({
+    defaultPath: await showsDir(),
+    filters: [{ name: t('shows.file_filter'), extensions: [SHOW_EXTENSION] }],
+  });
 }
 
 async function showName(path: string): Promise<string> {

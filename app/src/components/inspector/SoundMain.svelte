@@ -12,6 +12,7 @@
   import { t } from '../../lib/i18n/index.svelte';
   import { roundMs } from '../../lib/input';
   import { loopOptions } from '../../lib/options';
+  import { nextMarkAt, nextVamp } from '../../lib/soundTimes';
   import { importFor, ui } from '../../lib/store.svelte';
   import { hint } from '../../lib/ui';
   import NumberField from '../fields/NumberField.svelte';
@@ -33,16 +34,13 @@
   // Previewing never touches the show, so it works in show mode too.
   const preview = $derived(cue && ui.runtime?.preview?.cue === cue.id ? ui.runtime.preview : null);
 
+  // The end the cue plays to, so that "+ Mark" and "+ Vamp" stay within it.
+  const playEnd = $derived(cue ? (cue.end ?? info?.file_duration ?? null) : null);
   /** Where "+ Mark" puts a mark: where the preview plays, else 1 s after the last mark (or the start). */
   const nextMark = $derived(
-    cue ? (preview?.playing ? roundMs(preview.position) : (cue.marks.at(-1) ?? cue.start) + 1) : null,
+    cue ? (preview?.playing ? roundMs(preview.position) : nextMarkAt(cue.marks, cue.start, playEnd)) : null,
   );
-
-  /** Adds a vamp after the last one (or at the start), 4 s long. */
-  function addVamp(cue: SoundCue) {
-    const from = cue.vamps.at(-1)?.end ?? cue.start;
-    edit.set({ vamps: [...cue.vamps, { start: from, end: from + 4 }] });
-  }
+  const newVamp = $derived(cue ? nextVamp(cue.vamps, cue.start, playEnd) : null);
 
   function setVamp(cue: SoundCue, index: number, edge: 'start' | 'end', value: number) {
     const next = cue.vamps.map((vamp, i) => (i === index ? { ...vamp, [edge]: value } : vamp));
@@ -133,11 +131,11 @@
   <FadeRows {edit} />
 </FieldGroup>
 
-<FieldGroup title={cue ? t('sound_main.loop_vamps') : 'Loop'}>
+<FieldGroup title={cue ? t('sound_main.loop_vamps') : t('sound_main.loop')}>
   <CountRow
     {edit}
     key="loop"
-    label="Loop"
+    label={t('sound_main.loop')}
     options={loopOptions}
     unit="×"
     disabled={vamps}
@@ -146,7 +144,7 @@
     {#if vamps && cue}<span class={hint}>{t('sound_main.vamps_no_loop')}</span>{/if}
   </CountRow>
   {#if cue}
-    <FieldRow label="Vamps">
+    <FieldRow label={t('sound_main.vamps')}>
       {#each cue.vamps as vamp, i (i)}
         <div class="flex items-center gap-1.5">
           <span class="w-14 shrink-0 text-xs text-vamp-soft">{t('sound_main.vamp', { number: i + 1 })}</span>
@@ -176,7 +174,12 @@
           >
         </div>
       {/each}
-      <Button size="sm" class="self-start" onclick={() => addVamp(cue)}>{t('sound_main.add_vamp')}</Button>
+      <Button
+        size="sm"
+        class="self-start"
+        disabled={!newVamp}
+        onclick={() => newVamp && edit.set({ vamps: [...cue.vamps, newVamp] })}>{t('sound_main.add_vamp')}</Button
+      >
       <span class={hint}>{t('sound_main.vamp_hint')}</span>
     </FieldRow>
     <FieldRow label={t('sound_main.marks')}>

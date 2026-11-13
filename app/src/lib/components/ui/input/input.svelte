@@ -3,6 +3,7 @@
 
   import CaretDown from '~icons/ph/caret-down-bold';
   import CaretUp from '~icons/ph/caret-up-bold';
+  import { t } from '$lib/i18n/index.svelte';
   import { cn, type WithElementRef } from '$lib/utils.js';
 
   type InputType = Exclude<HTMLInputTypeAttribute, 'file'>;
@@ -92,7 +93,7 @@
             <button
               type="button"
               tabindex={-1}
-              aria-label={direction > 0 ? 'Erhöhen' : 'Verringern'}
+              aria-label={direction > 0 ? t('input.increase') : t('input.decrease')}
               class="flex h-3.5 w-4 items-center justify-center rounded-sm text-muted-foreground hover:bg-accent hover:text-fg"
               onmousedown={(e) => e.preventDefault()}
               onclick={() => stepBy(direction)}
