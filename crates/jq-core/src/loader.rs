@@ -197,6 +197,8 @@ impl BufferCache {
                 first: now,
                 last: now,
             });
+            // A reloaded file has a new stream counting from zero again.
+            u.seen = u.seen.min(count);
             if count > u.seen {
                 if u.pending == 0 {
                     u.first = now;

@@ -127,7 +127,7 @@ pub fn encode(message: &OscMessage) -> Result<Vec<u8>, String> {
         })
         .collect();
     let packet = OscPacket::Message(rosc::OscMessage { addr: message.address.clone(), args });
-    rosc::encoder::encode(&packet).map_err(|e| format!("OSC: {e}"))
+    rosc::encoder::encode(&packet).map_err(|e| t!("osc.encode_failed", error = e))
 }
 
 /// `host:port` of a show device, with this machine's override from
@@ -303,8 +303,19 @@ impl OscListener {
         let handle = std::thread::Builder::new().name("jq-osc-in".into()).spawn(move || {
             let mut buf = vec![0; MAX_PACKET];
             while !flag.load(Ordering::Relaxed) {
-                if let Ok((len, _)) = socket.recv_from(&mut buf) {
-                    on_packet(&buf[..len]);
+                match socket.recv_from(&mut buf) {
+                    Ok((len, _)) => on_packet(&buf[..len]),
+                    // The read timeout, or a Windows ICMP "port unreachable" echo.
+                    Err(e)
+                        if matches!(
+                            e.kind(),
+                            std::io::ErrorKind::WouldBlock
+                                | std::io::ErrorKind::TimedOut
+                                | std::io::ErrorKind::Interrupted
+                                | std::io::ErrorKind::ConnectionReset
+                        ) => {}
+                    // A persistent error must not turn the loop into a busy spin.
+                    Err(_) => std::thread::sleep(LISTEN_POLL),
                 }
             }
         })?;

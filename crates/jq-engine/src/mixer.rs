@@ -20,6 +20,21 @@ static NEXT_VOICE: AtomicU64 = AtomicU64::new(1);
 /// a devamp jump.
 const PIN_MARGIN: Duration = Duration::from_millis(500);
 
+/// The frames of a loop a streamed buffer must keep loaded: where playback
+/// lands (the start, a chunk beyond it, so the wrap never waits for the next
+/// chunk) and where an exit lands (the end plus `margin` for the crossfade
+/// tail). The body between is only needed while playback is in it, and the
+/// reader follows that, so a long loop does not keep the whole file in memory.
+fn loop_pins(l: &LoopRegion, margin: usize) -> impl Iterator<Item = std::ops::Range<usize>> {
+    let head_end = l.start.saturating_add(crate::stream::CHUNK_FRAMES + margin);
+    let (first, second) = if head_end >= l.end {
+        (l.start..l.end + margin, None)
+    } else {
+        (l.start..head_end, Some(l.end..l.end + margin))
+    };
+    std::iter::once(first).chain(second)
+}
+
 /// How long live trim and pan changes take, so slider moves do not zipper.
 pub const PARAM_SMOOTHING: Duration = Duration::from_millis(20);
 
@@ -318,7 +333,7 @@ impl Controller {
             // Loops jump back, so their regions stay loaded; the reader
             // starts loading at the start position right away.
             let margin = self.frames(PIN_MARGIN) as usize;
-            stream.set_pins(slot, params.loops.iter().map(|l| l.start..l.end + margin).collect());
+            stream.set_pins(slot, params.loops.iter().flat_map(|l| loop_pins(l, margin)).collect());
             stream.report_position(slot, params.start);
         }
         if let Err(e) = self.send(Command::Play { id, params, slot }) {
@@ -573,13 +588,18 @@ impl Mixer {
                 let _ = self.events.push(Event::NearEnd(v.id));
             }
         }
+        // NaN (a bad float file) would pass the clamp: silence instead.
         for s in out.iter_mut() {
-            *s = s.clamp(-1.0, 1.0);
+            *s = if s.is_nan() { 0.0 } else { s.clamp(-1.0, 1.0) };
         }
 
         let mut i = 0;
         while i < self.voices.len() {
-            if self.voices[i].is_finished() {
+            // With the event queue full (a control thread that has not polled
+            // for very long), a finished voice waits silently for the next
+            // callback, so its buffer is never freed here and its stream
+            // slot comes back.
+            if self.voices[i].is_finished() && self.events.slots() > 0 {
                 let mut v = self.voices.swap_remove(i);
                 if let Some(unit) = v.stretch.take() {
                     self.pool.push(unit);
@@ -587,8 +607,6 @@ impl Mixer {
                 if let Some(slot) = v.slot {
                     v.buffer.report_position(slot, NO_POSITION);
                 }
-                // If the queue is full the buffer is dropped here; the queue
-                // is sized so that this does not happen in practice.
                 let _ = self.events.push(Event::Finished {
                     id: v.id,
                     buffer: v.buffer,

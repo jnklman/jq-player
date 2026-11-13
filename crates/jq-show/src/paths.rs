@@ -249,7 +249,7 @@ fn is_exact_file(path: &Path, listings: &mut HashMap<PathBuf, HashSet<OsString>>
 fn find_ignoring_case(media_dir: &Path, stored: &str) -> Option<String> {
     let mut dir = media_dir.to_path_buf();
     let mut actual = Vec::new();
-    for part in stored.split('/').filter(|s| !s.is_empty()) {
+    for part in stored.split(['/', '\\']).filter(|s| !s.is_empty()) {
         let wanted = part.to_lowercase();
         let entry = fs::read_dir(&dir)
             .ok()?

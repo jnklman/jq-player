@@ -115,9 +115,28 @@ impl Resampler {
         self.ended_at.is_some_and(|end| self.center >= end)
     }
 
-    /// File position the output stands at.
-    pub(crate) fn position(&self) -> usize {
-        self.positions[self.center % RING]
+    /// The head delivers again (a seek back from its end): the silence
+    /// pushed after the end that the output has not reached yet is pushed
+    /// again with what the head delivers now.
+    pub(crate) fn resume_delivery(&mut self) {
+        if let Some(end) = self.ended_at.take() {
+            self.pushed = self.pushed.min(end.max(self.center));
+        }
+    }
+
+    /// Starts afresh at the frame the head delivers next, as if engaged on
+    /// silence (a seek while nothing is heard): the lookahead pushed from
+    /// before is dropped.
+    pub(crate) fn restart(&mut self) {
+        self.frames = [(0.0, 0.0); RING];
+        self.ended_at = None;
+        self.engage();
+    }
+
+    /// File position the output stands at; `next` (the head's position)
+    /// while the frame there is not pushed yet (right after engaging).
+    pub(crate) fn position(&self, next: usize) -> usize {
+        if self.center < self.pushed { self.positions[self.center % RING] } else { next }
     }
 
     /// The output frame at the current position, then steps `rate` frames

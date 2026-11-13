@@ -62,6 +62,17 @@ impl Editor {
         self.undo.iter_mut().chain(&mut self.redo).for_each(f);
     }
 
+    /// Changes the show and its undo and redo history alike, but not the
+    /// show as saved: an edit (dirty, a new revision) without a step of its
+    /// own, so undo never takes it back and redo is kept. For what a cue
+    /// gets once as if it had come with it, e.g. the offset of automatic
+    /// normalization once its file is measured.
+    pub fn amend(&mut self, f: impl Fn(&mut Show)) {
+        f(&mut self.show);
+        self.undo.iter_mut().chain(&mut self.redo).for_each(f);
+        self.revision += 1;
+    }
+
     pub fn mark_saved(&mut self) {
         self.saved = self.show.clone();
     }

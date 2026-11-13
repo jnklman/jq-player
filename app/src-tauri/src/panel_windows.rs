@@ -328,7 +328,12 @@ fn create(app: &AppHandle, spec: &PanelWindow, support: WindowSupport) -> tauri:
     let window = builder.build()?;
     #[cfg(windows)]
     crate::window_border(&window, crate::BORDER_LINE);
-    window.show()?;
+    // Not counted as open on failure: a hidden window left behind would
+    // block its label, so the panel could never be opened again.
+    if let Err(e) = window.show() {
+        let _ = window.destroy();
+        return Err(e);
+    }
     Ok(())
 }
 

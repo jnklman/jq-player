@@ -3,6 +3,7 @@
 //! the About dialog, and installing is refused while a show could be
 //! disturbed, because on Windows the installer ends the program.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, mpsc};
 use std::time::Duration;
 
@@ -20,9 +21,19 @@ const EVENT_PROGRESS: &str = "update_progress";
 const CHECK_TIMEOUT: Duration = Duration::from_secs(2);
 const NETWORK_TIMEOUT: Duration = Duration::from_secs(20);
 
-/// The update found by the last `check_update`, installed by `install_update`.
+/// The update found by the last `check_update`, installed by `install_update`,
+/// and whether an install is under way (a second one is refused).
 #[derive(Default)]
-pub struct Pending(Mutex<Option<Update>>);
+pub struct Pending(Mutex<Option<Update>>, AtomicBool);
+
+/// Clears the "install under way" flag when the install ends either way.
+struct Installing<'a>(&'a AtomicBool);
+
+impl Drop for Installing<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
+}
 
 #[derive(Clone, Serialize)]
 pub struct UpdateInfo {
@@ -70,13 +81,49 @@ pub async fn check_update(app: AppHandle, pending: State<'_, Pending>) -> Result
 
 /// Downloads and installs the update found by `check_update`, then restarts.
 /// Refused while a show is in show mode, a cue is running or the show has
-/// unsaved changes.
+/// unsaved changes: checked before the download and again right before
+/// installing, since the download takes a while and the installer ends the
+/// program on Windows. The update stays pending if it fails, so a retry
+/// needs no new check.
 #[tauri::command]
 pub async fn install_update(
     app: AppHandle,
     backend: State<'_, Backend>,
     pending: State<'_, Pending>,
 ) -> Result<(), String> {
+    if pending.1.swap(true, Ordering::AcqRel) {
+        return Err(t!("update.installing"));
+    }
+    let _installing = Installing(&pending.1);
+    show_allows_update(&backend).await?;
+    let update = pending
+        .0
+        .lock()
+        .map_err(|_| t!("app.backend_locked"))?
+        .clone()
+        .ok_or_else(|| t!("update.none_pending"))?;
+    let mut downloaded = 0;
+    let progress = app.clone();
+    let bytes = update
+        .download(
+            move |chunk, total| {
+                downloaded += chunk as u64;
+                let _ = progress.emit(EVENT_PROGRESS, Progress { downloaded, total });
+            },
+            || {},
+        )
+        .await
+        .map_err(|e| t!("update.install_failed", error = e))?;
+    // Meanwhile a cue may have started or show mode begun.
+    show_allows_update(&backend).await?;
+    update.install(bytes).map_err(|e| t!("update.install_failed", error = e))?;
+    // The installer ends the program on Windows; elsewhere this starts the new version.
+    app.restart();
+}
+
+/// Refuses an update while the show could be disturbed: show mode, cues
+/// running, files being copied in, unsaved changes.
+async fn show_allows_update(backend: &Backend) -> Result<(), String> {
     let (tx, rx) = mpsc::channel();
     // No answer in time counts as "something may be running".
     let check = match backend.send(Request::CloseCheck(tx)) {
@@ -87,29 +134,10 @@ pub async fn install_update(
         Err(_) => None,
     };
     let check = check.unwrap_or(Some(CloseCheck { show_mode: true, dirty: false, running: 1, imports: 0 }));
-    if let Some(check) = check
-        && (check.show_mode || check.running > 0 || check.imports > 0 || check.dirty)
-    {
-        return Err(if check.dirty { t!("update.unsaved") } else { t!("update.busy") });
+    match check {
+        Some(check) if check.show_mode || check.running > 0 || check.imports > 0 || check.dirty => {
+            Err(if check.dirty { t!("update.unsaved") } else { t!("update.busy") })
+        }
+        _ => Ok(()),
     }
-    let update = pending
-        .0
-        .lock()
-        .map_err(|_| t!("app.backend_locked"))?
-        .take()
-        .ok_or_else(|| t!("update.none_pending"))?;
-    let mut downloaded = 0;
-    let progress = app.clone();
-    update
-        .download_and_install(
-            move |chunk, total| {
-                downloaded += chunk as u64;
-                let _ = progress.emit(EVENT_PROGRESS, Progress { downloaded, total });
-            },
-            || {},
-        )
-        .await
-        .map_err(|e| t!("update.install_failed", error = e))?;
-    // The installer ends the program on Windows; elsewhere this starts the new version.
-    app.restart();
 }

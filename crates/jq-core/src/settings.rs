@@ -293,8 +293,17 @@ impl LocalSettings {
     /// shows, outputs and OSC addresses for `show`. Other shows' entries are
     /// read again first, so another instance's changes are kept.
     pub fn save(&self, path: &Path, show: &str) -> Result<(), String> {
-        // An unreadable file was reported (and ignored) on loading.
-        let mut file = SettingsFile::read(path).ok().flatten().unwrap_or_default();
+        // An unreadable file was reported (and ignored) on loading. Keep a copy
+        // before it is overwritten, so other shows' entries are not lost for good.
+        let mut file = match SettingsFile::read(path) {
+            Ok(file) => file.unwrap_or_default(),
+            Err(_) => {
+                let mut backup = path.as_os_str().to_owned();
+                backup.push(".bak");
+                let _ = std::fs::copy(path, backup);
+                SettingsFile::default()
+            }
+        };
         file.shows.insert(
             show.to_owned(),
             ShowSettings { outputs: self.outputs.clone(), osc_hosts: self.osc_hosts.clone() },
@@ -394,6 +403,18 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn unreadable_file_is_backed_up_before_save() {
+        let dir = tempdir("backup");
+        let path = dir.join("settings.json");
+        std::fs::write(&path, r#"{"language": 5, "shows": {"x": {}}}"#).unwrap();
+        assert!(LocalSettings::load(&path, "a").is_err());
+        LocalSettings::default().save(&path, "a").unwrap();
+        let bak = dir.join("settings.json.bak");
+        assert!(std::fs::read_to_string(bak).unwrap().contains("\"x\""));
+        assert!(LocalSettings::load(&path, "a").is_ok());
     }
 
     #[test]

@@ -538,11 +538,16 @@ struct Timer {
     go: u64,
     /// Time left while paused.
     paused: Option<Duration>,
+    /// The go-to/start nesting it was set in, if it was due at once: it
+    /// fires in the same tick, so a loop of cues with no time between them
+    /// runs over the timers instead of recursion and is broken off the same
+    /// way (see [`GOTO_DEPTH`]).
+    depth: u32,
 }
 
 impl Timer {
     fn new(at: Instant, cue: CueId, kind: TimerKind, owner: CueId, go: u64) -> Self {
-        Self { at, cue, kind, owner, go, paused: None }
+        Self { at, cue, kind, owner, go, paused: None, depth: 0 }
     }
 }
 
@@ -796,6 +801,22 @@ impl Runner {
             self.importing = files;
             self.arm();
         }
+    }
+
+    /// Hands what outlives the audio device to `next`, a runner on the
+    /// reopened output for the same show: the stopwatch times (a countdown
+    /// keeps running), the GO count of Repeat, the GO lockout and the last
+    /// panic, the orders drawn for shuffled playlists to come and the files
+    /// being imported. Only while idle: running cues are not handed over.
+    pub fn carry_over(&mut self, next: &mut Runner) {
+        next.stopwatches = std::mem::take(&mut self.stopwatches);
+        next.stopwatches.retain(|id, _| next.show.stopwatches.iter().any(|w| &w.id == id));
+        next.repeat_done = if next.playhead == self.playhead { self.repeat_done } else { 0 };
+        (next.last_go, next.go_rejected, next.panic_until) =
+            (self.last_go, self.go_rejected, self.panic_until);
+        next.drawn = std::mem::take(&mut self.drawn);
+        next.importing = std::mem::take(&mut self.importing);
+        next.arm();
     }
 
     pub fn settings(&self) -> &LocalSettings {
@@ -1238,9 +1259,17 @@ impl Runner {
         for event in events {
             match event {
                 Event::Started(v) => {
+                    let rate = self.engine.config().sample_rate as f64;
                     if let Some(a) = self.active.iter_mut().find(|a| a.voice == v) {
-                        // Paused before it played, it starts when the pause began.
-                        a.started = Some(a.paused_at.unwrap_or(now));
+                        // Paused before it played, it starts when the pause
+                        // began. Started from a position, the part before it
+                        // counts as played, as after a jump (see `seek_voices`),
+                        // so the time left and the follows are right.
+                        let at = a.paused_at.unwrap_or(now);
+                        let played = a.frame.saturating_sub(a.start_frame) as f64
+                            / rate
+                            / (a.rate_now as f64).max(0.01);
+                        a.started = Some(at.checked_sub(secs(played)).unwrap_or(at));
                     }
                     self.preview_event(&Event::Started(v), now);
                 }
@@ -1304,13 +1333,15 @@ impl Runner {
 
         while let Some(i) = self.timers.iter().position(|t| t.paused.is_none() && t.at <= now) {
             let t = self.timers.remove(i);
+            let outer = std::mem::replace(&mut self.goto_depth, t.depth);
             match t.kind {
                 TimerKind::Fire { direct, from } => self.fire(t.cue, now, t.go, direct, from),
                 TimerKind::Follow => self.trigger(t.cue, now, false, t.go),
                 TimerKind::Item { step, carry } => {
-                    self.start_items_from(t.cue, step, carry, t.go, None);
+                    self.next_items_from(t.cue, step, carry, t.go, None, now);
                 }
             }
+            self.goto_depth = outer;
         }
         // Orders of the playlists that have ended (or go on with no next item).
         let (active, timers) = (&self.active, &self.timers);
@@ -1723,10 +1754,18 @@ impl Runner {
         }
         if cue.pre_wait > 0.0 {
             let kind = TimerKind::Fire { direct, from };
-            self.timers.push(Timer::new(now + secs(cue.pre_wait), id, kind, id, go));
+            self.add_timer(now, Timer::new(now + secs(cue.pre_wait), id, kind, id, go));
         } else {
             self.fire(id, now, go, direct, from);
         }
+    }
+
+    /// Sets timer `t`; one due at once keeps the go-to/start nesting.
+    fn add_timer(&mut self, now: Instant, mut t: Timer) {
+        if t.at <= now {
+            t.depth = self.goto_depth;
+        }
+        self.timers.push(t);
     }
 
     /// The cue `cue` starts by itself, and when (see [`effective_at`]).
@@ -1828,7 +1867,11 @@ impl Runner {
                         }
                     }
                     Err(e) => {
-                        self.notices.push(Notice::Error(format!("Cue {}: {e}", label(&cue))));
+                        self.notices.push(Notice::Error(t!(
+                            "runner.cue_problem",
+                            cue = label(&cue),
+                            problem = e
+                        )));
                         // A broken cue must not break the chain.
                         ended = true;
                     }
@@ -1921,13 +1964,21 @@ impl Runner {
             }
             CueKind::Osc(o) => {
                 if let Err(e) = self.send_osc(o) {
-                    self.notices.push(Notice::Error(format!("Cue {}: {e}", label(&cue))));
+                    self.notices.push(Notice::Error(t!(
+                        "runner.cue_problem",
+                        cue = label(&cue),
+                        problem = e
+                    )));
                 }
                 ended = true;
             }
             CueKind::Midi(m) => {
                 if let Err(e) = self.send_midi(m) {
-                    self.notices.push(Notice::Error(format!("Cue {}: {e}", label(&cue))));
+                    self.notices.push(Notice::Error(t!(
+                        "runner.cue_problem",
+                        cue = label(&cue),
+                        problem = e
+                    )));
                 }
                 ended = true;
             }
@@ -1995,7 +2046,7 @@ impl Runner {
         match delay {
             // The cue is the timer's owner, so pausing it holds the time.
             Some(delay) => {
-                self.timers.push(Timer::new(now + secs(delay), next, TimerKind::Follow, cue.id, go))
+                self.add_timer(now, Timer::new(now + secs(delay), next, TimerKind::Follow, cue.id, go))
             }
             None => self.trigger(next, now, false, go),
         }
@@ -2017,7 +2068,7 @@ impl Runner {
             (_, Some((next, lead))) => (next, secs(lead)),
             _ => return,
         };
-        self.timers.push(Timer::new(now + duration.saturating_sub(lead), next, TimerKind::Follow, id, go));
+        self.add_timer(now, Timer::new(now + duration.saturating_sub(lead), next, TimerKind::Follow, id, go));
     }
 
     /// Moves the playhead to a go-to cue's target, or starts the target as
@@ -2258,9 +2309,9 @@ impl Runner {
         }
         if p.gap > 0.0 {
             let at = now + secs(p.gap);
-            self.timers.push(Timer::new(at, id, TimerKind::Item { step, carry }, id, go));
+            self.add_timer(now, Timer::new(at, id, TimerKind::Item { step, carry }, id, go));
         } else {
-            self.start_items_from(id, step, carry, go, None);
+            self.next_items_from(id, step, carry, go, None, now);
         }
     }
 
@@ -2273,7 +2324,7 @@ impl Runner {
             && let TimerKind::Item { step, carry } = self.timers[i].kind
         {
             let t = self.timers.remove(i);
-            self.start_items_from(id, step, carry, t.go, t.paused.map(|_| now));
+            self.next_items_from(id, step, carry, t.go, t.paused.map(|_| now), now);
             return;
         }
         let Some(i) = self.active.iter().position(|a| {
@@ -2287,7 +2338,7 @@ impl Runner {
             self.send(|e| e.stop(a.voice));
             let Some(item) = a.item else { return };
             let carry = Carry { level: a.level, pan: a.pan_set, speed: a.speed_set };
-            self.start_items_from(id, item.step + 1, carry, a.go, Some(now));
+            self.next_items_from(id, item.step + 1, carry, a.go, Some(now), now);
             return;
         }
         let a = &mut self.active[i];
@@ -2345,6 +2396,28 @@ impl Runner {
     /// the show's limits; [`SILENCE_DB`] for silence.
     fn level_db(&self, volume_db: f64, normalize_db: f64) -> f64 {
         self.show.level_limits.level(volume_db, normalize_db).unwrap_or(SILENCE_DB)
+    }
+
+    /// Goes on with a playlist's items from step `from` on, as
+    /// [`Runner::start_items_from`]; if none can start, the playlist is over
+    /// and its next cue waiting for the end starts, which a later item
+    /// would have carried (a broken cue must not break the chain).
+    fn next_items_from(
+        &mut self,
+        id: CueId,
+        from: usize,
+        carry: Carry,
+        go: u64,
+        paused: Option<Instant>,
+        now: Instant,
+    ) {
+        if self.start_items_from(id, from, carry, go, paused) {
+            return;
+        }
+        let advance = self.show.cue(id).and_then(|cue| self.advance_of(cue));
+        if let Some((next, AdvanceAt::End | AdvanceAt::BeforeEnd { .. })) = advance {
+            self.trigger(next, now, false, go);
+        }
     }
 
     /// Starts the first playable item from step `from` on; a broken file is
@@ -2580,7 +2653,10 @@ impl Runner {
                 (
                     if stop { cancel_follow(a) } else { a.voice },
                     a.fade_out,
-                    a.trim_db,
+                    // A cue edited to silence has no trim to make up for (it
+                    // would take +100 dB): its fade target plays once its
+                    // volume is raised again, not that much over it.
+                    if a.trim_db == SILENCE_DB - a.base_db { 0.0 } else { a.trim_db },
                     a.normalize_db,
                     current,
                     a.paused_at.is_some(),

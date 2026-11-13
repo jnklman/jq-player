@@ -100,6 +100,9 @@ fn describe(error: &SymError) -> String {
 /// memory, where any jump is instant and the disk plays no part.
 pub const STREAM_AFTER: f64 = 30.0;
 
+/// Longest stretch (seconds) [`decode_file`] reserves memory for in advance.
+const MAX_RESERVE_SECS: f64 = 600.0;
+
 /// Loads `path` for playback at `target_rate`: long files as a stream,
 /// others completely into RAM.
 pub fn load(path: &Path, target_rate: u32) -> Result<AudioBuffer, MediaError> {
@@ -114,7 +117,10 @@ pub fn decode_file(path: &Path, target_rate: u32) -> Result<AudioBuffer, MediaEr
     let mut decoder = stream::StreamDecoder::open(path, Some(target_rate))?;
     // Reserved up front and trimmed at the end: grown by doubling, the
     // buffer could hold up to twice the memory it needs.
-    let estimate = decoder.duration().map_or(0, |secs| (secs * target_rate as f64) as usize + 1024);
+    // A header that claims an absurd length must not reserve it all.
+    let estimate = decoder
+        .duration()
+        .map_or(0, |secs| (secs.min(MAX_RESERVE_SECS) * target_rate as f64) as usize + 1024);
     let mut samples = Vec::with_capacity(estimate * 2);
     while decoder.read(&mut samples, 1 << 16)? > 0 {}
     samples.shrink_to_fit();
@@ -464,6 +470,32 @@ mod tests {
         data.set_hints(vec![late]);
         assert!(wait(&|| !data.is_loaded(0)));
         assert!(buf.is_ready_at(late));
+        drop(buf);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn stream_keeps_the_old_position_while_a_jump_fades() {
+        use jq_engine::stream::CHUNK_FRAMES;
+        let dir = test_dir("evict-delay");
+        let path = dir.join("long.wav");
+        write_test_wav(&path, 8_000, 1, &tone(CHUNK_FRAMES * 30));
+        let buf = stream::open_stream(&path, 8_000).unwrap();
+        let data = buf.stream().unwrap().clone();
+        let wait = |ready: &dyn Fn() -> bool| {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while !ready() && std::time::Instant::now() < deadline {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            ready()
+        };
+        let slot = data.claim_slot(1).unwrap();
+        data.report_position(slot, CHUNK_FRAMES * 5);
+        assert!(wait(&|| data.is_loaded(5)));
+        // Far jump: the new place loads, the old chunk is still readable.
+        data.report_position(slot, CHUNK_FRAMES * 25);
+        assert!(wait(&|| data.is_loaded(25)));
+        assert!(data.is_loaded(5), "evicted while the crossfade tail may still read it");
         drop(buf);
         std::fs::remove_dir_all(&dir).unwrap();
     }

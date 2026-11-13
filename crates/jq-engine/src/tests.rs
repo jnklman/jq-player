@@ -1280,6 +1280,48 @@ fn a_rearmed_vamp_reports_its_exit_again() {
 }
 
 #[test]
+fn a_rearming_seek_within_a_counted_loop_keeps_its_pass() {
+    // Three passes through 2–5.
+    let counted = || {
+        let (mut ctl, mix) = setup(2);
+        let mut p = VoiceParams::new(ramp_buffer(10));
+        p.loops = [LoopRegion { start: 2, end: 5, repeats: Some(2) }].into();
+        let id = ctl.play(p).unwrap();
+        (ctl, mix, id)
+    };
+    // On the second pass, a jump back within the loop plays it on.
+    let (mut ctl, mut mix, id) = counted();
+    assert_eq!(played_frames(&mut mix, 7), [0, 1, 2, 3, 4, 2, 3]);
+    ctl.seek_rearming(id, 2, 0).unwrap();
+    assert_eq!(played_frames(&mut mix, 9), [2, 3, 4, 2, 3, 4, 5, 6, 7]);
+    // So on the last pass: it stays the last, the count does not start again.
+    let (mut ctl, mut mix, id) = counted();
+    assert_eq!(played_frames(&mut mix, 10), [0, 1, 2, 3, 4, 2, 3, 4, 2, 3]);
+    ctl.seek_rearming(id, 2, 0).unwrap();
+    assert_eq!(played_frames(&mut mix, 10), [2, 3, 4, 5, 6, 7, 8, 9, 0, 0]);
+    assert_eq!(notifications(&mut ctl), "F");
+    // A jump back before the loop counts it from the start again.
+    let (mut ctl, mut mix, id) = counted();
+    played_frames(&mut mix, 10);
+    ctl.seek_rearming(id, 0, 0).unwrap();
+    assert_eq!(played_frames(&mut mix, 13), [0, 1, 2, 3, 4, 2, 3, 4, 2, 3, 4, 5, 6]);
+}
+
+#[test]
+fn a_rearming_seek_on_the_last_pass_holds_the_vamps_after_it_again() {
+    let (mut ctl, mut mix) = setup(2);
+    let mut p = VoiceParams::new(ramp_buffer(12));
+    p.loops = [LoopRegion { start: 2, end: 5, repeats: Some(1) }, vamp(6, 8)].into();
+    let id = ctl.play(p).unwrap();
+    assert_eq!(played_frames(&mut mix, 7), [0, 1, 2, 3, 4, 2, 3]);
+    // Released ahead, then back within the counted loop's last pass.
+    ctl.exit_loop(id, LoopExit::AtLoopEnd, false, false).unwrap();
+    ctl.seek_rearming(id, 3, 0).unwrap();
+    assert_eq!(played_frames(&mut mix, 7), [3, 4, 5, 6, 7, 6, 7], "the vamp holds again");
+    assert_eq!(notifications(&mut ctl), "", "no exit to report");
+}
+
+#[test]
 fn positions_report_the_pan_as_it_moves() {
     let (mut ctl, mut mix) = engine(EngineConfig { report_rate_hz: 100, ..EngineConfig::new(RATE, 2) });
     let id = ctl.play(VoiceParams::new(constant_buffer(1000, 1.0))).unwrap();
@@ -1733,6 +1775,213 @@ fn a_paused_stretched_voice_goes_on_where_it_stood() {
     assert!(level > 0.3, "{level}");
 }
 
+/// The left channel as (fractional) frame indices of [`ramp_buffer`].
+fn played_at(mixer: &mut Mixer, frames: usize) -> Vec<f32> {
+    left(mixer, frames).iter().map(|s| s * 1000.0).collect()
+}
+
+/// `got[from..to]` follows `first + i * step`.
+fn follows(got: &[f32], from: usize, to: usize, first: f32, step: f32) -> bool {
+    (from..to).all(|i| (got[i] - (first + (i - from) as f32 * step)).abs() < 0.01)
+}
+
+#[test]
+fn a_varispeed_voice_sought_back_from_its_end_plays_on() {
+    let (mut ctl, mut mix) = setup(2);
+    let mut p = VoiceParams::new(ramp_buffer(200));
+    p.rate = 0.5;
+    p.pitch = 0.5;
+    let id = ctl.play(p).unwrap();
+    // At frame 150 the lookahead has run into the end (200) already.
+    let got = played_at(&mut mix, 300);
+    assert!(follows(&got, 40, 300, 20.0, 0.5), "{got:?}");
+    ctl.seek(id, 100, 0).unwrap();
+    // The lookahead (150–199) plays out, then from 100 on to the end.
+    let got = played_at(&mut mix, 290);
+    assert!(follows(&got, 0, 60, 150.0, 0.5), "{got:?}");
+    assert!(follows(&got, 140, 260, 120.0, 0.5), "{got:?}");
+    assert_eq!(mix.active_voices(), 1, "{got:?}");
+    played_at(&mut mix, 20);
+    assert_eq!(mix.active_voices(), 0);
+}
+
+#[test]
+fn a_stretched_voice_sought_back_from_its_end_plays_on() {
+    let (mut ctl, mut mix) = setup_hz(1);
+    let mut p = VoiceParams::new(sine_buffer(440.0, 1.0));
+    p.rate = 0.9;
+    p.pitch = 1.0;
+    let id = ctl.play(p).unwrap();
+    // 1 s at 0.9 is heard for 53_333 frames; 50 ms before that, the
+    // stretcher has been fed the end already.
+    let mut out = vec![0.0; 256 * 2];
+    for _ in 0..(53_333 - 2400) / 256 {
+        mix.process(&mut out);
+    }
+    assert!(ctl.poll_events().all(|e| !matches!(e, Event::Finished { .. })));
+    ctl.seek(id, 24_000, 480).unwrap();
+    let (left, end) = render_until_finished(&mut ctl, &mut mix, 2 * HZ as usize);
+    // Half a second at 0.9 more, after the stretcher's latency.
+    let end = end.unwrap();
+    assert!(end > 26_666 && end < 26_666 + 12_000, "ended after {end}");
+    assert!(rms(&left[10_000..20_000]) > 0.3);
+}
+
+#[test]
+fn a_seek_while_paused_on_varispeed_stands_at_the_target_and_plays_from_there() {
+    let (mut ctl, mut mix) = engine(EngineConfig { report_rate_hz: 1000, ..EngineConfig::new(RATE, 2) });
+    let mut p = VoiceParams::new(ramp_buffer(600));
+    p.rate = 0.5;
+    p.pitch = 0.5;
+    let id = ctl.play(p).unwrap();
+    played_at(&mut mix, 100);
+    ctl.pause(id).unwrap();
+    played_at(&mut mix, 20);
+    ctl.seek(id, 300, 5).unwrap();
+    played_at(&mut mix, 10);
+    let frame = ctl
+        .poll_events()
+        .filter_map(|e| match e {
+            Event::Position { frame, .. } => Some(frame),
+            _ => None,
+        })
+        .last();
+    assert_eq!(frame, Some(300), "the position follows at once");
+    ctl.resume(id).unwrap();
+    // From 300 at once, nothing of the old place (55) first.
+    let got = played_at(&mut mix, 100);
+    assert!(follows(&got, 40, 100, 320.0, 0.5), "{got:?}");
+}
+
+#[test]
+fn a_voice_started_paused_on_varispeed_reports_its_start() {
+    let (mut ctl, mut mix) = engine(EngineConfig { report_rate_hz: 1000, ..EngineConfig::new(RATE, 2) });
+    let mut p = VoiceParams::new(ramp_buffer(600));
+    p.start = 300;
+    p.rate = 0.5;
+    p.pitch = 0.5;
+    p.paused = true;
+    ctl.play(p).unwrap();
+    played_at(&mut mix, 10);
+    let frames: Vec<usize> = ctl
+        .poll_events()
+        .filter_map(|e| match e {
+            Event::Position { frame, .. } => Some(frame),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(frames, [300]);
+}
+
+#[test]
+fn a_seek_while_paused_when_stretched_drops_what_the_stretcher_holds() {
+    // A tone for 1 s, then silence.
+    let (mut ctl, mut mix) = engine(EngineConfig {
+        stretchers: 1,
+        prime_ratio: 16,
+        report_rate_hz: 1000,
+        ..EngineConfig::new(HZ, 2)
+    });
+    let samples = (0..2 * HZ as usize)
+        .flat_map(|i| {
+            let s = if i < HZ as usize { (i as f32 * 0.05).sin() * 0.5 } else { 0.0 };
+            [s, s]
+        })
+        .collect();
+    let mut p = VoiceParams::new(Arc::new(AudioBuffer::from_interleaved_stereo(HZ, samples)));
+    p.rate = 0.9;
+    p.pitch = 1.0;
+    let id = ctl.play(p).unwrap();
+    let mut out = vec![0.0; 256 * 2];
+    for _ in 0..60 {
+        mix.process(&mut out);
+    }
+    ctl.pause(id).unwrap();
+    for _ in 0..4 {
+        mix.process(&mut out);
+    }
+    let _: Vec<_> = ctl.poll_events().collect();
+    ctl.seek(id, 60_000, 480).unwrap();
+    for _ in 0..4 {
+        mix.process(&mut out);
+    }
+    let frames: Vec<usize> = ctl
+        .poll_events()
+        .filter_map(|e| match e {
+            Event::Position { frame, .. } => Some(frame),
+            _ => None,
+        })
+        .collect();
+    assert!(frames.iter().all(|&f| f == 60_000), "stands at the target: {frames:?}");
+    ctl.resume(id).unwrap();
+    let mut out = vec![0.0; 9600 * 2];
+    mix.process(&mut out);
+    let level = rms(&out.chunks(2).map(|f| f[0]).collect::<Vec<_>>());
+    assert!(level < 0.001, "the tone from before is not heard: {level}");
+    let (_, end) = render_until_finished(&mut ctl, &mut mix, 2 * HZ as usize);
+    let end = end.unwrap() + 9600;
+    assert!(end.abs_diff(40_000) < 8_000, "ends after the rest at 0.9: {end}");
+}
+
+#[test]
+fn a_stop_during_the_pause_blend_blends_on_down() {
+    let (mut ctl, mut mix) = setup(2);
+    let id = ctl.play(VoiceParams::new(constant_buffer(100, 1.0))).unwrap();
+    left(&mut mix, 2);
+    ctl.pause(id).unwrap();
+    let blend = left(&mut mix, 3);
+    ctl.stop(id).unwrap();
+    let stop = left(&mut mix, 12);
+    // From where the pause blend stood (0.7) down over STOP_FADE (10 frames).
+    assert!(close(blend[2], 0.8) && close(stop[0], 0.7) && close(stop[9], 0.07), "{blend:?} {stop:?}");
+    assert!(stop.windows(2).all(|w| w[1] <= w[0]) && stop[10..] == [0.0, 0.0], "{stop:?}");
+    assert_eq!(finished(&mut ctl), [id]);
+}
+
+#[test]
+fn nan_samples_are_silence_at_the_output() {
+    let (mut ctl, mut mix) = setup(2);
+    let mut samples = vec![0.25; 8];
+    samples[2] = f32::NAN;
+    ctl.play(VoiceParams::new(Arc::new(AudioBuffer::from_interleaved_stereo(RATE, samples)))).unwrap();
+    let mut out = vec![0.0; 4 * 2];
+    mix.process(&mut out);
+    assert_eq!(out, [0.25, 0.25, 0.0, 0.25, 0.25, 0.25, 0.25, 0.25]);
+}
+
+#[test]
+fn a_full_event_queue_holds_finished_voices_until_there_is_room() {
+    let (mut ctl, mut mix) = setup(2);
+    let buf = constant_buffer(1000, 0.0);
+    let looped = || {
+        let mut p = VoiceParams::new(buf.clone());
+        p.loops = [LoopRegion { start: 0, end: 1000, repeats: None }].into();
+        p
+    };
+    let first = ctl.play(looped()).unwrap();
+    let mut out = vec![0.0; 16 * 2];
+    // Every voice slot taken, then rejections until no event fits any more.
+    for _ in 1..64 {
+        ctl.play(looped()).unwrap();
+    }
+    mix.process(&mut out);
+    for _ in 0..5 {
+        for _ in 0..1000 {
+            ctl.play(looped()).unwrap();
+        }
+        mix.process(&mut out);
+    }
+    ctl.stop(first).unwrap();
+    for _ in 0..3 {
+        mix.process(&mut out);
+    }
+    assert_eq!(mix.active_voices(), 64, "waits for room");
+    let _: Vec<_> = ctl.poll_events().collect();
+    mix.process(&mut out);
+    assert_eq!(mix.active_voices(), 63);
+    assert_eq!(finished(&mut ctl), [first]);
+}
+
 /// Counts allocations and frees of the current thread while armed.
 mod counting {
     use std::alloc::{GlobalAlloc, Layout, System};
@@ -1870,4 +2119,17 @@ fn idle_stream_reader_is_woken_by_the_control_thread() {
     let seen = data.changes();
     data.stop();
     data.wait_for_change(seen, None);
+}
+
+#[test]
+fn long_stream_loops_pin_only_their_ends() {
+    let (mut ctl, _mix) = setup(2);
+    let chunk = stream::CHUNK_FRAMES;
+    let (buf, data) = stream_buffer(40, &[]);
+    let mut p = VoiceParams::new(buf);
+    let (start, end) = (10, 38 * chunk);
+    p.loops = [LoopRegion { start, end, repeats: None }].into();
+    ctl.play(p).unwrap();
+    // RATE 1000 → 500 frames of margin.
+    assert_eq!(data.pins(), vec![start..start + chunk + 500, end..end + 500]);
 }

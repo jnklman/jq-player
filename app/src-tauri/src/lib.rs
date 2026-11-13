@@ -74,6 +74,23 @@ async fn open_show(backend: State<'_, Backend>, path: PathBuf) -> Result<serde_j
     backend.ask(|r| Request::Open(path, r)).await
 }
 
+/// A show that could not be opened at startup is said so, and offered on
+/// the start screen (if it has not asked yet), where opening it again shows
+/// why. Without this the operator would only see the start screen.
+fn startup_open_failed(
+    app: &AppHandle,
+    path: PathBuf,
+    opened: mpsc::Receiver<Result<serde_json::Value, String>>,
+) {
+    let Ok(Err(e)) = opened.recv() else { return };
+    let notice =
+        jq_core::Notice::Error(jq_i18n::t!("app.startup_open_failed", path = path.display(), error = e));
+    if let Ok(mut offer) = app.state::<StartupOffer>().0.lock() {
+        offer.get_or_insert(path);
+    }
+    let _ = app.emit_to(panel_windows::MAIN, backend::EVENT_NOTICE, notice);
+}
+
 /// The last show the start screen offers to open; only the first call gets
 /// it.
 #[tauri::command]
@@ -472,11 +489,15 @@ pub fn run() {
                     cli
                 }
             };
-            if let Some(path) = open {
-                let (reply, _ignored) = mpsc::channel();
-                let _ = tx.send(Request::Open(path, reply));
-            }
             app.manage(StartupOffer(Mutex::new(offer)));
+            if let Some(path) = open {
+                let (reply, opened) = mpsc::channel();
+                let _ = tx.send(Request::Open(path.clone(), reply));
+                let app = app.handle().clone();
+                std::thread::Builder::new()
+                    .name("jq-startup-open".into())
+                    .spawn(move || startup_open_failed(&app, path, opened))?;
+            }
             app.manage(Backend(Mutex::new(tx)));
             Ok(())
         })

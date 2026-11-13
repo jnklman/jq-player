@@ -11,6 +11,7 @@ use serde::Deserialize;
 use tauri::State;
 
 use crate::backend::Request;
+use crate::session::real_path;
 use crate::{Backend, REPLY_TIMEOUT};
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
@@ -37,12 +38,14 @@ pub async fn save_show_as(
         .await
         .map_err(|e| e.to_string())?
         .map_err(|_| jq_i18n::t!("app.no_reply"))??;
+    // The show thread checks that nothing it uses now was left out.
+    let copied = (media == MediaChoice::Copy).then(|| files.clone());
     let (path, media_root, warnings) =
         tauri::async_runtime::spawn_blocking(move || prepare(&dir, &name, &media_dir, &files, media))
             .await
             .map_err(|e| e.to_string())??;
     // From here on the show thread removes the folder if it fails.
-    backend.ask(|reply| Request::SaveAs { path, media_root, warnings, reply }).await
+    backend.ask(|reply| Request::SaveAs { path, media_root, copied, warnings, reply }).await
 }
 
 /// Creates the new show folder and fills its media folder. Returns the show
@@ -87,7 +90,7 @@ fn copy(from: &Path, to: &Path, files: &[String]) -> Result<(String, Vec<String>
 /// The media folder relative to the new show folder when it is inside it;
 /// otherwise its absolute path.
 fn linked_root(folder: &Path, media_dir: &Path) -> String {
-    let real = |p: &Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+    let real = |p: &Path| real_path(p).unwrap_or_else(|_| p.to_path_buf());
     paths::media_root(&real(folder), &real(media_dir))
         .unwrap_or_else(|| media_dir.to_string_lossy().replace('\\', "/"))
 }
@@ -113,7 +116,7 @@ mod tests {
 
         let (path, root, warnings) = prepare(&dir, "Verknüpft", &media, &files, MediaChoice::Link).unwrap();
         assert_eq!(path, dir.join("Verknüpft/Verknüpft.jqshow"));
-        let media_root = media.canonicalize().unwrap().to_str().unwrap().replace('\\', "/");
+        let media_root = real_path(&media).unwrap().to_str().unwrap().replace('\\', "/");
         assert_eq!((root.as_str(), warnings.len()), (media_root.as_str(), 0));
         assert!(!dir.join("Verknüpft/media").exists());
         assert!(paths::resolve(path.parent().unwrap(), &root).join("a.wav").is_file());

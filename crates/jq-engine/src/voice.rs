@@ -280,12 +280,21 @@ impl Head {
     }
 
     /// Moves to `to`. Loops before it count as passed; with `rearm`, those
-    /// from it on hold again even if released before.
+    /// from it on hold again even if released before. A jump within the
+    /// loop it is in keeps the pass (as on any earlier pass), so a counted
+    /// loop that is on its last pass stays there.
     fn seek(&mut self, loops: &[LoopRegion], to: usize, crossfade: u32, rearm: bool) {
         self.jump(to, crossfade);
         self.jump_at = None;
         let current = loops.iter().position(|l| l.end > to).unwrap_or(loops.len());
-        if rearm && self.released > current {
+        let out_of_repeats = current == self.current
+            && self.loops_left == Some(0)
+            && loops.get(current).is_some_and(|l| l.repeats.is_some() && l.start <= to);
+        if rearm && out_of_repeats {
+            // Only the loops after it hold again.
+            self.released = current + 1;
+            self.exit_released = self.exit_released.min(current);
+        } else if rearm && self.released > current {
             self.current = current;
             self.released = current;
             self.exit_released = self.exit_released.min(current);
@@ -397,7 +406,7 @@ impl Feed {
 
     /// File position of what this feed delivers next.
     fn position(&self) -> usize {
-        if self.resampled { self.resampler.position() } else { self.head.pos }
+        if self.resampled { self.resampler.position(self.head.pos) } else { self.head.pos }
     }
 }
 
@@ -858,9 +867,10 @@ impl Voice {
     }
 
     /// Ends the voice after a short blend (`stop_frames`), so a hard stop
-    /// does not click; a paused voice is silent already and ends at once.
+    /// does not click; a paused voice is silent already and ends at once
+    /// (during the pause blend, the stop blend takes it down from where it is).
     pub(crate) fn stop(&mut self) {
-        if self.paused || self.stop_frames == 0 || self.starting() {
+        if (self.paused && self.hold.is_done()) || self.stop_frames == 0 || self.starting() {
             self.finished = true;
             self.stopping = true;
         } else if !self.stopping {
@@ -915,9 +925,14 @@ impl Voice {
 
     /// Passes on the stretched feed's exits whose time has come.
     fn deliver_pending(&mut self) {
+        self.deliver_pending_until(self.clock);
+    }
+
+    /// Passes on the stretched feed's exits heard by output frame `until`.
+    fn deliver_pending_until(&mut self, until: i64) {
         let Some(unit) = self.stretch.as_mut() else { return };
         let mut stop = false;
-        while let Some(p) = unit.pending.first().copied().filter(|p| p.at <= self.clock) {
+        while let Some(p) = unit.pending.first().copied().filter(|p| p.at <= until) {
             unit.pending.remove(0);
             if p.total > self.delivered {
                 self.ready += (p.total - self.delivered) as u32;
@@ -947,7 +962,28 @@ impl Voice {
         // A paused voice has nothing to crossfade from.
         let crossfade = self.now_if_paused(crossfade);
         self.feed.head.seek(&self.loops, to, crossfade, rearm);
+        // Nothing is heard: what was computed ahead from the old position
+        // (the lookahead, the stretcher's content) is dropped, so the voice
+        // stands at `to` now and plays on from there.
+        let silent = self.paused && self.hold.is_done();
+        if silent {
+            self.feed.resampler.restart();
+        } else {
+            // The head may deliver again after its end.
+            self.feed.resampler.resume_delivery();
+        }
         self.restart_switch();
+        if self.path == Path::Stretched && self.switch.is_none() {
+            self.end_heard_at = None;
+            // (A pre-roll from silence would end a fade to a stop at once.)
+            if silent && !self.stop_after_ramp {
+                // Exits made before the seek but not heard yet: better early than never.
+                self.deliver_pending_until(i64::MAX);
+                if let Some(unit) = self.stretch.take() {
+                    self.begin_switch(unit, true);
+                }
+            }
+        }
         let fade_span = match self.path {
             Path::Direct => self.end_fade as usize,
             _ => (self.end_fade as f64 * self.rate.value() as f64) as usize,
@@ -1083,6 +1119,10 @@ impl Voice {
             self.feed = sw.feed;
             self.switch = None;
             self.path = Path::Stretched;
+            // The feed is ahead now: report what is heard (also while paused).
+            if let Some(unit) = self.stretch.as_mut() {
+                self.heard_pos = unit.heard_at(self.clock).or(self.heard_pos);
+            }
             if let Some(m) = self.pending.take() {
                 self.start_speed(m);
             }

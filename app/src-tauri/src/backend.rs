@@ -42,6 +42,9 @@ const MEDIA_INTERVAL: Duration = IDLE_POLL;
 const AUTOSAVE_INTERVAL: Duration = Duration::from_secs(1);
 /// Requests handled before the next tick at most.
 const MAX_BATCH: usize = 256;
+/// Shortest time between two "internal error" notices: a bug hit on every
+/// tick would otherwise send hundreds a second.
+const INTERNAL_ERROR_INTERVAL: Duration = Duration::from_secs(5);
 /// Machine settings, in the app's config folder.
 const SETTINGS_FILE: &str = "settings.json";
 
@@ -76,6 +79,8 @@ pub enum Request {
     SaveAs {
         path: PathBuf,
         media_root: String,
+        /// The files copied into the new media folder (`None`: linked).
+        copied: Option<Vec<String>>,
         warnings: Vec<String>,
         reply: Reply,
     },
@@ -152,6 +157,7 @@ fn run(app: AppHandle, rx: Receiver<Request>, midi_tx: Sender<Request>) {
     // stand for up to `IDLE_POLL`.
     let mut state_pending = false;
     let (mut media, mut autosave) = (Every::new(MEDIA_INTERVAL), Every::new(AUTOSAVE_INTERVAL));
+    let mut internal_errors = Every::new(INTERNAL_ERROR_INTERVAL);
     loop {
         let wait = match session.as_ref() {
             Some(s) if !s.runner.is_quiet() => POLL,
@@ -172,13 +178,11 @@ fn run(app: AppHandle, rx: Receiver<Request>, midi_tx: Sender<Request>) {
         let requests: Vec<Request> = first.into_iter().chain(rx.try_iter().take(MAX_BATCH)).collect();
         let mut notices = Vec::new();
         // A bug in one request must not take the running show down.
-        let internal_error = || Notice::Error(jq_i18n::t!("backend.internal_error"));
+        let mut failed = false;
         for r in requests {
             let handled =
                 catch_unwind(AssertUnwindSafe(|| handle(&app, &mut session, r, &midi_tx, &mut notices)));
-            if handled.is_err() {
-                notices.push(internal_error());
-            }
+            failed |= handled.is_err();
         }
         let ticked = catch_unwind(AssertUnwindSafe(|| {
             let mut view_changed = false;
@@ -209,8 +213,9 @@ fn run(app: AppHandle, rx: Receiver<Request>, midi_tx: Sender<Request>) {
                 let _ = publish(&app, &session);
             }
         }));
-        if ticked.is_err() {
-            notices.push(internal_error());
+        failed |= ticked.is_err();
+        if failed && internal_errors.due(Instant::now()) {
+            notices.push(Notice::Error(jq_i18n::t!("backend.internal_error")));
         }
         for n in notices {
             let _ = app.emit_to(crate::panel_windows::MAIN, EVENT_NOTICE, n);
@@ -363,10 +368,10 @@ fn handle(
                 session.as_ref().ok_or_else(|| jq_i18n::t!("app.no_show")).and_then(Session::save_as_plan),
             );
         }
-        Request::SaveAs { path, media_root, warnings, reply } => {
+        Request::SaveAs { path, media_root, copied, warnings, reply } => {
             let result = match session.as_mut() {
                 Some(s) => s
-                    .save_as(path, media_root)
+                    .save_as(path, media_root, copied.as_deref())
                     .map(|()| s.remember_path(notices))
                     .and_then(|()| publish(app, session)),
                 None => no_show(),
@@ -524,4 +529,19 @@ fn publish(app: &AppHandle, session: &Option<Session>) -> Result<serde_json::Val
     let view = serde_json::to_value(session.as_ref().map(|s| s.view())).map_err(|e| e.to_string())?;
     let _ = app.emit(EVENT_SHOW, &view);
     Ok(view)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn internal_errors_are_reported_at_most_every_interval() {
+        let mut every = Every::new(INTERNAL_ERROR_INTERVAL);
+        let start = Instant::now();
+        assert!(every.due(start), "the first one at once");
+        assert!(!every.due(start + POLL), "not again on the next tick");
+        assert!(!every.due(start + INTERNAL_ERROR_INTERVAL / 2));
+        assert!(every.due(start + INTERNAL_ERROR_INTERVAL));
+    }
 }

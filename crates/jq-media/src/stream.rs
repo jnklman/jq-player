@@ -2,7 +2,7 @@
 //! seek position) as stereo at a target rate, and [`open_stream`] runs a
 //! reader thread that keeps the chunks of a streamed buffer loaded.
 
-use std::collections::{BTreeSet, HashMap, VecDeque};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -35,6 +35,13 @@ const FOLLOW: Duration = Duration::from_millis(10);
 /// How long a chunk that failed to decode is left alone, so a broken spot
 /// neither spins nor holds up the chunks other voices need.
 const ERROR_PAUSE: Duration = Duration::from_millis(500);
+/// How long a chunk that is no longer wanted stays loaded. A jump crossfades
+/// from the old position, whose chunk the voice still reads for the length
+/// of the fade; unloading it at once would cut the tail short.
+const EVICT_DELAY: Duration = Duration::from_secs(3);
+/// Longest stream the chunk table is sized for, in seconds. A bogus header
+/// duration must not allocate an absurd table; the reader finds the real end.
+const MAX_STREAM_SECS: f64 = 48.0 * 3600.0;
 /// Resampler input chunk (frames).
 const RESAMPLE_CHUNK: usize = 1024;
 /// Source frames a resampled seek starts early, so the resampler has its
@@ -325,8 +332,11 @@ fn gcd(mut a: u32, mut b: u32) -> u32 {
 /// header states its length.
 pub fn open_stream(path: &Path, target_rate: u32) -> Result<AudioBuffer, MediaError> {
     let decoder = StreamDecoder::open(path, Some(target_rate))?;
-    let secs = decoder.duration().ok_or_else(|| MediaError::NoAudioTrack { path: path.to_owned() })?;
-    let data = Arc::new(StreamData::new((secs * target_rate as f64).ceil() as usize));
+    let secs = decoder
+        .duration()
+        .filter(|s| s.is_finite() && *s > 0.0)
+        .ok_or_else(|| MediaError::NoAudioTrack { path: path.to_owned() })?;
+    let data = Arc::new(StreamData::new((secs.min(MAX_STREAM_SECS) * target_rate as f64).ceil() as usize));
     let reader_data = data.clone();
     std::thread::Builder::new()
         .name("jq-stream".into())
@@ -342,6 +352,8 @@ fn read_chunks(data: &StreamData, mut decoder: StreamDecoder) {
     // Only this thread stores and evicts, so it knows what is loaded without
     // looking at every chunk of a long file.
     let mut loaded = BTreeSet::new();
+    // Since when each loaded chunk is no longer wanted.
+    let mut unwanted_since: HashMap<usize, Instant> = HashMap::new();
     // Chunks that failed to decode, and until when they are skipped.
     let mut failed: HashMap<usize, Instant> = HashMap::new();
     // Chunk the decoder would deliver next without seeking.
@@ -354,8 +366,20 @@ fn read_chunks(data: &StreamData, mut decoder: StreamDecoder) {
         }
         failed.retain(|_, until| *until > now);
         let wanted = wanted_chunks(data);
-        let unwanted: Vec<usize> = loaded.iter().copied().filter(|c| !wanted.contains(c)).collect();
-        for c in unwanted {
+        let wanted_set: HashSet<usize> = wanted.iter().copied().collect();
+        unwanted_since.retain(|c, _| loaded.contains(c) && !wanted_set.contains(c));
+        for &c in &loaded {
+            if !wanted_set.contains(&c) {
+                unwanted_since.entry(c).or_insert(now);
+            }
+        }
+        let expired: Vec<usize> = unwanted_since
+            .iter()
+            .filter(|(_, since)| now.duration_since(**since) >= EVICT_DELAY)
+            .map(|(&c, _)| c)
+            .collect();
+        for c in expired {
+            unwanted_since.remove(&c);
             loaded.remove(&c);
             retired.extend(data.evict(c).map(|r| (now, r)));
         }
@@ -365,8 +389,12 @@ fn read_chunks(data: &StreamData, mut decoder: StreamDecoder) {
             } else {
                 // Only retired chunks to free and failed ones to retry come
                 // due by themselves.
-                let due =
-                    retired.front().map(|(at, _)| *at + GRACE).into_iter().chain(failed.values().copied());
+                let due = retired
+                    .front()
+                    .map(|(at, _)| *at + GRACE)
+                    .into_iter()
+                    .chain(failed.values().copied())
+                    .chain(unwanted_since.values().map(|since| *since + EVICT_DELAY));
                 due.min().map(|at| at.saturating_duration_since(now))
             };
             data.wait_for_change(seen, timeout);
@@ -406,8 +434,9 @@ fn wanted_chunks(data: &StreamData) -> Vec<usize> {
     let count = data.chunk_count();
     let last = data.frames().div_ceil(CHUNK_FRAMES);
     let mut wanted = Vec::new();
-    let add = |c: usize, wanted: &mut Vec<usize>| {
-        if c < count && c < last.max(1) && !wanted.contains(&c) {
+    let mut seen = HashSet::new();
+    let mut add = |c: usize, wanted: &mut Vec<usize>| {
+        if c < count && c < last.max(1) && seen.insert(c) {
             wanted.push(c);
         }
     };
@@ -418,7 +447,7 @@ fn wanted_chunks(data: &StreamData) -> Vec<usize> {
         }
     }
     for pin in data.pins() {
-        for c in pin.start / CHUNK_FRAMES..=pin.end.saturating_sub(1) / CHUNK_FRAMES {
+        for c in pin.start / CHUNK_FRAMES..=(pin.end.saturating_sub(1) / CHUNK_FRAMES).min(count) {
             add(c, &mut wanted);
         }
     }
