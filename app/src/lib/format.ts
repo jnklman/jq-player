@@ -104,8 +104,19 @@ export function fmtMidi(trigger: MidiTrigger): string {
   const channel = t('midi.channel', { channel: trigger.channel + 1 });
   if (trigger.kind === 'cc') return `CC ${trigger.controller} · ${channel}`;
   if (trigger.kind === 'program') return `${t('midi.program')} ${trigger.program} · ${channel}`;
-  const name = noteNames()[trigger.note % 12] + (Math.floor(trigger.note / 12) - 1);
-  return `${t('midi.note')} ${name} · ${channel}`;
+  return `${t('midi.note')} ${noteName(trigger.note)} · ${channel}`;
+}
+
+/** `fmtMidi` for tight spaces: "C4 · Ch 1", "CC 64 · Ch 10", "PC 5 · Ch 2". */
+export function fmtMidiShort(trigger: MidiTrigger): string {
+  const channel = t('midi.channel_short', { channel: trigger.channel + 1 });
+  if (trigger.kind === 'cc') return `CC ${trigger.controller} · ${channel}`;
+  if (trigger.kind === 'program') return `${t('midi.program_short')} ${trigger.program} · ${channel}`;
+  return `${noteName(trigger.note)} · ${channel}`;
+}
+
+function noteName(note: number): string {
+  return noteNames()[note % 12] + (Math.floor(note / 12) - 1);
 }
 
 /** Stopwatch time: "0:07", "12:34", "1:02:03" (whole seconds, rounded down). */

@@ -255,6 +255,8 @@ const de: Record<MessageKey, string> = {
   'midi.note_b': 'H',
   'midi.channel': 'Kanal {channel}',
   'midi.program': 'Programm',
+  'midi.channel_short': 'Ch {channel}',
+  'midi.program_short': 'PC',
   'midi.note': 'Note',
   'midi.note_on': 'Note {note} an',
   'midi.note_off': 'Note {note} aus',

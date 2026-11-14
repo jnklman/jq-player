@@ -255,6 +255,8 @@ const en = {
   'midi.note_b': 'B',
   'midi.channel': 'Channel {channel}',
   'midi.program': 'Program',
+  'midi.channel_short': 'Ch {channel}',
+  'midi.program_short': 'PC',
   'midi.note': 'Note',
   'midi.note_on': 'Note {note} on',
   'midi.note_off': 'Note {note} off',

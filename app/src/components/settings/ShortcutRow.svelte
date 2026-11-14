@@ -6,11 +6,12 @@
   import { Tooltip } from '$lib/components/ui/tooltip';
 
   import type { Chord, MidiBinding } from '../../lib/api';
-  import { fmtMidi } from '../../lib/format';
+  import { fmtMidi, fmtMidiShort } from '../../lib/format';
   import { t } from '../../lib/i18n/index.svelte';
   import { keyText } from '../../lib/keys.svelte';
   import { useSetting } from '../../lib/settingsView.svelte';
   import KeyCapture from '../KeyCapture.svelte';
+  import MidiLabel from '../MidiLabel.svelte';
 
   // One global action in the shortcut table: up to two keys, the learned
   // MIDI control (null `midi` = keys only) and a reset to its default keys.
@@ -60,7 +61,7 @@
         keywords,
         ...(fixedKey ? [keyText(fixedKey)] : []),
         ...keys.map(keyText),
-        midi ? fmtMidi(midi.trigger) : '',
+        midi ? `${fmtMidi(midi.trigger)} ${fmtMidiShort(midi.trigger)}` : '',
       ].join(' '),
     () => el,
   );
@@ -107,9 +108,13 @@
       <span class="truncate text-xs text-primary motion-safe:animate-pulse">{t('trigger.press_controller')}</span>
       <Button variant="ghost" size="sm" onclick={() => onlearn(false)}>{t('common.cancel')}</Button>
     {:else if midi}
-      <span class="truncate font-mono text-[11.5px] text-fg-2">{fmtMidi(midi.trigger)}</span>
-      <Button variant="ghost" size="icon-xs" aria-label={t('shortcuts.remove_midi', { label })} onclick={onunbind}
-        ><XMark /></Button
+      <MidiLabel trigger={midi.trigger} />
+      <Button
+        variant="ghost"
+        size="icon-xs"
+        class="shrink-0"
+        aria-label={t('shortcuts.remove_midi', { label })}
+        onclick={onunbind}><XMark /></Button
       >
     {:else}
       <Tooltip tip={canLearn ? undefined : learnTip}>
