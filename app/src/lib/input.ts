@@ -20,6 +20,34 @@ export function numberOf(e: Event): number | null {
   return parseNumber((e.currentTarget as HTMLInputElement).value);
 }
 
+/**
+ * Puts `text` back into a field. A number field holding something unreadable ("1-2") already has the value
+ * `''`, so setting `''` changes nothing and the entry would stay: it goes through another value first.
+ */
+export function showValue(input: HTMLInputElement, text: string) {
+  if (text === '' && input.validity.badInput) input.value = '0';
+  input.value = text;
+}
+
+type FieldEvent = Event & { currentTarget: HTMLInputElement };
+
+/**
+ * The handlers of a number field that writes on each edit (a settings draft): `set` gets the text. An
+ * unreadable entry ("1-2") reads as empty but clears nothing, and when the field is left it shows `get()` again.
+ */
+export function liveNumber(get: () => number | null, set: (text: string) => void) {
+  return {
+    oninput: (e: FieldEvent) => {
+      if (!e.currentTarget.validity.badInput) set(e.currentTarget.value);
+    },
+    // On Enter and blur, not change: an unreadable entry over an empty field leaves the value '' and sends no change.
+    onkeydown: (e: KeyboardEvent & { currentTarget: HTMLInputElement }) => {
+      if (e.key === 'Enter') showValue(e.currentTarget, String(get() ?? ''));
+    },
+    onblur: (e: FieldEvent) => showValue(e.currentTarget, String(get() ?? '')),
+  };
+}
+
 /** `value` within `min`…`max` (either may be left out). */
 export function clamp(value: number, min = -Infinity, max = Infinity): number {
   return Math.max(min, Math.min(max, value));

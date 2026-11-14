@@ -5,7 +5,7 @@
   import { Label } from '$lib/components/ui/label';
   import { Tooltip } from '$lib/components/ui/tooltip';
 
-  import { clamp, parseNumber, plainNumber } from '../../lib/input';
+  import { clamp, parseNumber, plainNumber, showValue } from '../../lib/input';
   import { field } from '../../lib/ui';
 
   // A number input with its label (a grid cell of a form). A change is
@@ -60,13 +60,19 @@
       if (optional && !input.validity.badInput && input.value.trim() === '')
         return (onchange as (value: number | null) => void)(null);
       // Not a number: the field shows the value again.
-      input.value = value == null ? '' : plainNumber(value);
+      showValue(input, value == null ? '' : plainNumber(value));
       return;
     }
     const next = clamp(integer ? Math.round(parsed) : parsed, min, max);
     // A clamped value the field still shows unclamped would stay wrong.
     if (next !== parsed) input.value = plainNumber(next);
     (onchange as (value: number) => void)(next);
+  }
+
+  // Over an empty field, an unreadable entry leaves the value '' and so sends no change: Enter or leaving the
+  // field puts the value back.
+  function restore(input: HTMLInputElement) {
+    if (input.validity.badInput) showValue(input, value == null ? '' : plainNumber(value));
   }
 </script>
 
@@ -97,6 +103,14 @@
     aria-label={ariaLabel}
     value={value == null ? '' : plainNumber(value)}
     onchange={change}
+    onblur={(e: FocusEvent & { currentTarget: HTMLInputElement }) => {
+      (props.onblur as ((e: FocusEvent) => void) | undefined)?.(e);
+      restore(e.currentTarget);
+    }}
+    onkeydown={(e: KeyboardEvent & { currentTarget: HTMLInputElement }) => {
+      (props.onkeydown as ((e: KeyboardEvent) => void) | undefined)?.(e);
+      if (e.key === 'Enter') restore(e.currentTarget);
+    }}
   />
 {/snippet}
 

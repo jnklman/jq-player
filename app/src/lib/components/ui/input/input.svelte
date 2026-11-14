@@ -40,6 +40,13 @@
     input.dispatchEvent(new Event('input', { bubbles: true }));
     input.dispatchEvent(new Event('change', { bubbles: true }));
   }
+
+  // A number field without negative values takes no minus sign, so "1-2" cannot be typed.
+  const noMinus = $derived(restProps.min != null && restProps.min !== '' && Number(restProps.min) >= 0);
+  function keydown(e: KeyboardEvent & { currentTarget: EventTarget & HTMLInputElement }) {
+    if (noMinus && (e.key === '-' || e.key === '−')) e.preventDefault();
+    restProps.onkeydown?.(e);
+  }
 </script>
 
 {#if type === 'file'}
@@ -75,6 +82,7 @@
       type="number"
       bind:value
       {...restProps}
+      onkeydown={keydown}
     />
     <span class="grid shrink-0 place-items-center">
       {#if unit}

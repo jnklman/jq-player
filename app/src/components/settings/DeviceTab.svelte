@@ -4,6 +4,7 @@
   import type { LocalSettings } from '../../lib/api';
   import type { AudioSetup } from '../../lib/audioSetup.svelte';
   import { t } from '../../lib/i18n/index.svelte';
+  import { liveNumber } from '../../lib/input';
   import { withMissing } from '../../lib/options';
   import { positiveOrNull } from '../../lib/settings';
   import { settingsView } from '../../lib/settingsView.svelte';
@@ -93,7 +94,10 @@
           placeholder={t('device.default')}
           aria-label={t('device.channels')}
           value={draft.channels ?? ''}
-          oninput={(e) => (draft.channels = positiveOrNull(e.currentTarget.value))}
+          {...liveNumber(
+            () => draft.channels,
+            (text) => (draft.channels = positiveOrNull(text)),
+          )}
         />
         {#if setup.tooManyChannels}
           <span class="text-xs text-stop-soft">{t('device.only_channels', { count: setup.mainMax ?? 0 })}</span>
