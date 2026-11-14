@@ -5,6 +5,7 @@
 
   import XIcon from '~icons/ph/x-bold';
   import { Button } from '$lib/components/ui/button/index.js';
+  import { t } from '$lib/i18n/index.svelte.js';
   import { dialogEscape } from '$lib/store.svelte.js';
   import { cn, type WithoutChildrenOrChild } from '$lib/utils.js';
 
@@ -44,7 +45,7 @@
         {#snippet child({ props })}
           <Button variant="ghost" class="absolute top-2 right-2.5" size="icon-sm" {...props}>
             <XIcon />
-            <span class="sr-only">Schließen</span>
+            <span class="sr-only">{t('common.close')}</span>
           </Button>
         {/snippet}
       </DialogPrimitive.Close>
