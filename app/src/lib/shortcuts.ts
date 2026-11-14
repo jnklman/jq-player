@@ -4,6 +4,7 @@
 
 import { type Action, api, type CueId } from './api';
 import { copyCues, cutCues, deleteCues, pasteCues, redo, selectEveryCue, undo } from './commands';
+import { commitTyping } from './commit';
 import { t } from './i18n/index.svelte';
 import { chordOf, isPanicKey, keyCapture, learnKeyLabel, ON_SELECTED, REPEATING, sameChord } from './keys.svelte';
 import type { Format } from './richText';
@@ -84,23 +85,6 @@ function overlayOpen(): boolean {
   const slots = ['dialog', 'dropdown-menu', 'context-menu', 'popover', 'select'];
   return document.querySelector(slotSelector(slots.map((slot) => `${slot}-content`))) !== null;
 }
-
-/**
- * Fields commit what was typed when they lose the focus (the detail text a moment later), so that Ctrl+S saves
- * it: the focus leaves the field and comes back after the commit.
- */
-async function commitTyping() {
-  const field = document.activeElement;
-  if (!(field instanceof HTMLElement) || !isTextField(field)) return;
-  field.blur();
-  await new Promise((resolve) => setTimeout(resolve, COMMIT_WAIT_MS));
-  if (field.isConnected && (document.activeElement === null || document.activeElement === document.body)) {
-    field.focus();
-  }
-}
-
-// Longer than the detail text editor (CodeMirror) takes to notice that it lost the focus (10 ms).
-const COMMIT_WAIT_MS = 30;
 
 /** Takes the focus from a clicked control (see `pointerFocus`); focus moved with Tab stays. */
 function releasePointerFocus() {
@@ -209,20 +193,20 @@ export function onKeydown(e: KeyboardEvent) {
   if (letter === 's') {
     e.preventDefault();
     if (e.repeat) return;
-    void commitTyping().then(() => {
-      if (!e.shiftKey) saveShow();
-
-      // "Save as" is disabled in show mode, return early
-      if (mode() === 'show' || !e.shiftKey) return;
-      else if (isMainWindow) saveShowAs();
-      else runInMain('save_show_as');
-    });
+    commitTyping();
+    if (!e.shiftKey) saveShow();
+    // "Save as" is disabled in show mode.
+    else if (mode() === 'show') return;
+    else if (isMainWindow) saveShowAs();
+    else runInMain('save_show_as');
     return;
   }
   if (!e.shiftKey && (letter === 'n' || letter === 'o')) {
     e.preventDefault();
     // Not under an open dialog, which would stay open on another show.
     if (e.repeat || inDialog) return;
+    // The main window commits only its own fields (see `exclusive` in shows.ts).
+    commitTyping();
     if (!isMainWindow) runInMain(letter === 'n' ? 'new_show' : 'open_show');
     else if (letter === 'n') createShow();
     else openShow();

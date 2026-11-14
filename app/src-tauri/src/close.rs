@@ -3,11 +3,12 @@
 //! (`close_requested` event); if it does not confirm receipt in time because
 //! the WebView hangs, a native dialog asks instead.
 
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, mpsc};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use tauri::{Emitter, Manager, Window, WindowEvent};
+use tauri::{AppHandle, Emitter, Manager, Window, WindowEvent};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind, MessageDialogResult};
 use tauri_plugin_window_state::AppHandleExt;
 
@@ -27,11 +28,17 @@ const ACK_TIMEOUT: Duration = Duration::from_secs(1);
 const FLUSH_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub const EVENT_CLOSE_REQUESTED: &str = "close_requested";
+/// To windows about to close: commit the field being typed in; `fields_committed` answers.
+const EVENT_COMMIT_FIELDS: &str = "commit_fields";
+/// How long the windows have to commit; a hanging WebView does not hold up closing.
+const COMMIT_TIMEOUT: Duration = Duration::from_millis(500);
 
 /// Only one question at a time, however often × is clicked.
 static ASKING: AtomicBool = AtomicBool::new(false);
 /// Waits for `close_ack` from the UI.
 static PENDING_ACK: Mutex<Option<mpsc::Sender<()>>> = Mutex::new(None);
+/// Wait for `fields_committed` (the window's label), one per `commit_fields` under way.
+static PENDING_COMMITS: Mutex<Vec<mpsc::Sender<String>>> = Mutex::new(Vec::new());
 
 pub fn on_window_event(window: &Window, event: &WindowEvent) {
     let WindowEvent::CloseRequested { api, .. } = event else { return };
@@ -48,6 +55,9 @@ pub fn on_window_event(window: &Window, event: &WindowEvent) {
 }
 
 fn check_and_ask(window: &Window) {
+    // Text typed in a field is not in the show yet; without it closing would not ask about it.
+    let labels: Vec<String> = window.app_handle().webview_windows().into_keys().collect();
+    commit_fields(window.app_handle(), &labels);
     let backend = window.state::<Backend>();
     let check = match ask_backend(&backend, Request::CloseCheck, CHECK_TIMEOUT) {
         Some(None) => return destroy(window),
@@ -76,6 +86,36 @@ fn ask_in_ui(window: &Window, check: CloseCheck) -> bool {
         *pending = None;
     }
     acked
+}
+
+/// Has the windows `labels` commit what is typed in their focused field (the show gets it only when the field
+/// loses the focus) and waits until they did and their edits are applied, at most `COMMIT_TIMEOUT`. Blocks, so
+/// never on the event loop.
+pub fn commit_fields(app: &AppHandle, labels: &[String]) {
+    let (tx, rx) = mpsc::channel();
+    let Ok(mut pending) = PENDING_COMMITS.lock() else { return };
+    pending.push(tx);
+    drop(pending);
+    let mut waiting: HashSet<&str> = HashSet::new();
+    for label in labels {
+        if app.emit_to(label.as_str(), EVENT_COMMIT_FIELDS, ()).is_ok() {
+            waiting.insert(label);
+        }
+    }
+    let deadline = Instant::now() + COMMIT_TIMEOUT;
+    while !waiting.is_empty() {
+        let Ok(label) = rx.recv_timeout(deadline.saturating_duration_since(Instant::now())) else { break };
+        waiting.remove(label.as_str());
+    }
+    // With `rx` gone, the next `fields_committed` drops its sender.
+}
+
+/// A window has committed its field and the edit is applied (`commit_fields`).
+#[tauri::command]
+pub fn fields_committed(window: Window) {
+    if let Ok(mut pending) = PENDING_COMMITS.lock() {
+        pending.retain(|tx| tx.send(window.label().to_string()).is_ok());
+    }
 }
 
 /// The UI shows the close question.

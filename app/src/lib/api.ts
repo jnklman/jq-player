@@ -12,7 +12,9 @@
 //             `open_requested` (path of a show file opened from outside,
 //             e.g. in the file manager, while the program runs),
 //             `panel_window_moved`, `panel_window_closed` (panel windows,
-//             see `setPanelWindows`), `app_focus` (boolean).
+//             see `setPanelWindows`), `app_focus` (boolean),
+//             `commit_fields` (to every window before it or the program
+//             closes: commit the field being typed in, then `fieldsCommitted`).
 //             `notice`, `close_requested`, `open_requested` and the panel
 //             window events are meant for the main window only; panel
 //             windows don't listen to them.
@@ -1251,6 +1253,30 @@ export interface LanguageInfo {
   resolved: string;
 }
 
+// Edits sent and not answered yet. Tauri runs async commands concurrently, so a save sent right after an edit (Ctrl+S
+// committing the field being typed in) could reach the backend first: it would save without the edit, and its show
+// event would bring back the old value. Saves wait for these.
+const pendingEdits = new Set<Promise<Revision | undefined>>();
+
+function trackEdit(promise: Promise<Revision>): Promise<Revision> {
+  const done = promise.catch(() => undefined);
+  pendingEdits.add(done);
+  void done.then(() => pendingEdits.delete(done));
+  return promise;
+}
+
+/** Resolves once the edits sent so far are answered, with the revisions of those that succeeded. */
+export async function editsAnswered(): Promise<Revision[]> {
+  const revisions = await Promise.all(pendingEdits);
+  return revisions.filter((revision) => revision !== undefined);
+}
+
+/** Runs `command` once the edits sent before it are answered. */
+async function afterEdits<T>(command: () => Promise<T>): Promise<T> {
+  await editsAnswered();
+  return command();
+}
+
 export const api = {
   /** The language setting and the language in use; works without a show (start screen). */
   getLanguage: () => invoke<LanguageInfo>('get_language'),
@@ -1261,14 +1287,14 @@ export const api = {
   startupShow: () => invoke<string | null>('startup_show'),
   newShow: (dir: string, name: string, createFolder: boolean) =>
     invoke<Revision>('new_show', { dir, name, createFolder }),
-  saveShow: () => invoke<Revision>('save_show'),
+  saveShow: () => afterEdits(() => invoke<Revision>('save_show')),
   /** Also sends the current `state` event first; listen to it before calling (on start, after a reload). */
   getShow: () => invoke<ShowEvent>('get_show'),
   /** Fire-and-forget; GO never waits for a reply. */
   action: (action: Action) => invoke<void>('action', { action }),
   /** Fire-and-forget: starts, stops or resets a stopwatch of the show (by id). */
   stopwatch: (id: string, action: StopwatchAction) => invoke<void>('stopwatch', { id, action }),
-  edit: (op: EditOp) => invoke<Revision>('edit', { op }),
+  edit: (op: EditOp) => trackEdit(invoke<Revision>('edit', { op })),
   /**
    * Fire-and-forget, for every step of a slider: running cues follow `cue`
    * (volume, pan), but show and undo history stay. End the edit with
@@ -1332,7 +1358,8 @@ export const api = {
    * the new folder's own media folder, `link` points the new show at the current media folder.
    * Fails in show mode, while cues run or files are being copied in, and if the folder exists.
    */
-  saveShowAs: (dir: string, name: string, media: SaveAsMedia) => invoke<Revision>('save_show_as', { dir, name, media }),
+  saveShowAs: (dir: string, name: string, media: SaveAsMedia) =>
+    afterEdits(() => invoke<Revision>('save_show_as', { dir, name, media })),
   /** Renames the show folder; fails in show mode and while cues run. */
   renameShow: (name: string) => invoke<Revision>('rename_show', { name }),
   setShowMode: (enabled: boolean) => invoke<Revision>('set_show_mode', { enabled }),
@@ -1361,6 +1388,8 @@ export const api = {
    * backend assumes a hung UI and asks with a native dialog.
    */
   closeAck: () => invoke<void>('close_ack'),
+  /** Answers `commit_fields`: what was typed in this window is committed and the edit answered. */
+  fieldsCommitted: () => invoke<void>('fields_committed'),
   /** Looks for a newer release on GitHub; `null` if this is the latest. Never installs anything. */
   checkUpdate: () => invoke<UpdateInfo | null>('check_update'),
   /**
@@ -1414,6 +1443,8 @@ export const events = {
   /** The operator closed a panel window (its × or Alt+F4); not sent when `setPanelWindows` closes it. */
   onPanelWindowClosed: (handler: (panel: string) => void): Promise<UnlistenFn> =>
     listen<{ panel: string }>('panel_window_closed', (e) => handler(e.payload.panel)),
+  /** To every window before the program or a panel window closes; answer with `fieldsCommitted`. */
+  onCommitFields: (handler: () => void): Promise<UnlistenFn> => listen<null>('commit_fields', () => handler()),
   /** Whether any window of the app has the keyboard focus; sent once it settled (not while moving between them). */
   onAppFocus: (handler: (focused: boolean) => void): Promise<UnlistenFn> =>
     listen<boolean>('app_focus', (e) => handler(e.payload)),

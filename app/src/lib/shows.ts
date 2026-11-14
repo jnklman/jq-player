@@ -4,6 +4,7 @@ import { basename, dirname, join } from '@tauri-apps/api/path';
 import { open, save } from '@tauri-apps/plugin-dialog';
 
 import { api, type CloseCheck, type SaveAsMedia, SHOW_EXTENSION } from './api';
+import { commitFields } from './commit';
 import { t } from './i18n/index.svelte';
 import { ask, attempt, attemptChange, mode, ui, whenShown } from './store.svelte';
 
@@ -36,12 +37,14 @@ async function pickShowDir(createFolder: boolean): Promise<string | null> {
 
 /**
  * Runs `task` unless another one is under way, so a slow load (e.g. files
- * coming from a cloud folder) cannot be started twice.
+ * coming from a cloud folder) cannot be started twice. What is typed in a
+ * field is committed first, so it is saved or asked about like any change.
  */
 async function exclusive(task: () => Promise<unknown>) {
   if (ui.openingShow) return;
   ui.openingShow = true;
   try {
+    await commitFields();
     await task();
   } finally {
     ui.openingShow = false;

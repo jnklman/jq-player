@@ -14,6 +14,7 @@ import {
   type ViewUpdate,
 } from '@codemirror/view';
 
+import { COMMIT_EVENT } from './commit';
 import { type Format, parsePieces, pieceClass, toggleFormat } from './richText';
 import { formatShortcut } from './shortcuts';
 import { tw } from './ui';
@@ -117,6 +118,8 @@ export function createRichTextEditor(
     });
 
   const view = new EditorView({ parent, state: stateFor(options.text) });
+  // Ctrl+S commits the text while it keeps the focus (see `commitTyping` in shortcuts.ts).
+  view.contentDOM.addEventListener(COMMIT_EVENT, () => flush());
 
   // Sends a change not sent yet; CodeMirror reports a lost focus only later, too late for an editor that goes away.
   const flush = () => {

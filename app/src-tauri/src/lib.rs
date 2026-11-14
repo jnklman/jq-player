@@ -563,6 +563,7 @@ pub fn run() {
             panel_windows::focus_main,
             panel_windows::window_support,
             close::close_ack,
+            close::fields_committed,
             close::confirm_close,
             updates::check_update,
             updates::install_update
