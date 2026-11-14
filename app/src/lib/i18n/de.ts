@@ -467,7 +467,7 @@ const de: Record<MessageKey, string> = {
   'group.select_left': 'Cue links auswählen.',
   'header.show_settings': 'Einstellungen dieser Show',
   'header.show': 'Show',
-  'header.edit': 'Bearbeiten',
+  'header.edit': 'Edit',
   'input.increase': 'Erhöhen',
   'input.decrease': 'Verringern',
   'shows.file_filter': 'jQ-Show',
