@@ -65,6 +65,14 @@
   <Separator orientation="vertical" class="mx-1 h-5 bg-line-strong data-vertical:self-center" />
 {/snippet}
 
+<!-- Shared by both modes, so the field sits in the same place in each. -->
+{#snippet trailing()}
+  <div class="flex items-center gap-1.5">
+    <GotoField />
+    <SelectionModePicker />
+  </div>
+{/snippet}
+
 {#if editing}
   <div class="flex flex-wrap items-center justify-end gap-1.5">
     <ButtonGroup>
@@ -226,8 +234,7 @@
     >
 
     {@render divider()}
-    <GotoField />
-    <SelectionModePicker />
+    {@render trailing()}
   </div>
 {:else}
   <div class="flex items-center justify-end gap-3">
@@ -237,7 +244,6 @@
         {t('toolbar.in_scenes', { count: sceneCount })}
       {/if}
     </span>
-    <GotoField />
-    <SelectionModePicker />
+    {@render trailing()}
   </div>
 {/if}
