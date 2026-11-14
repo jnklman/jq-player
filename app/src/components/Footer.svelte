@@ -32,8 +32,9 @@
       !ui.runtime?.gaps.length,
   );
 
-  async function chooseFolder() {
-    if (ui.view && (await chooseMediaFolder(ui.view))) mediaMenuOpen = false;
+  function chooseFolder() {
+    mediaMenuOpen = false;
+    if (ui.view) void chooseMediaFolder(ui.view);
   }
 
   function scanMedia() {
