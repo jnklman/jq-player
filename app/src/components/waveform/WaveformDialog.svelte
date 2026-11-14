@@ -19,7 +19,7 @@
   import { fmtPosition } from '../../lib/format';
   import { t } from '../../lib/i18n/index.svelte';
   import { roundMs } from '../../lib/input';
-  import { isTextField } from '../../lib/shortcuts';
+  import { isTextField, keepsSpace } from '../../lib/shortcuts';
   import { rateLabel, speedOf } from '../../lib/speed';
   import { cueById, mode, ui } from '../../lib/store.svelte';
   import { hint } from '../../lib/ui';
@@ -106,9 +106,13 @@
     else playFrom(cursor ?? shown.start);
   }
 
-  /** Whether Space goes to the player: not in fields, which keep their keys. */
+  /**
+   * Whether Space goes to the player: not in fields, which keep their keys, nor (while editing) on a button reached
+   * with Tab, which clicks with it. A clicked button or the dialog itself leaves Space to the player.
+   */
   function playerKey(e: KeyboardEvent): boolean {
-    return e.key === ' ' && !e.defaultPrevented && !e.ctrlKey && !e.metaKey && !e.altKey && !isTextField(e.target);
+    if (e.key !== ' ' || e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey) return false;
+    return !(locked ? isTextField(e.target) : keepsSpace(e.target));
   }
 
   // Space works the player here instead of GO (the shortcuts leave it alone

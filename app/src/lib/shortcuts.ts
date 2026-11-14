@@ -65,6 +65,15 @@ function isTabbedControl(target: EventTarget | null): boolean {
   return modal !== null && modal !== target;
 }
 
+/**
+ * Whether the focused `target` keeps Space for itself in edit mode: a field, an open list or menu, or a control
+ * reached with Tab (a dialog's button clicks with it). Dialogs that take Space for something of their own (the
+ * waveform's player) leave it to these.
+ */
+export function keepsSpace(target: EventTarget | null): boolean {
+  return isTyping(target) || isTabbedControl(target);
+}
+
 /** A dialog or question is open: the cue list behind it does not take keys. */
 function modalOpen(): boolean {
   return document.querySelector(MODALS) !== null;
@@ -116,8 +125,7 @@ export function releaseAllKeys() {
 
 /** Space must never also "click" a focused button on keyup: that would be a second GO. */
 export function onKeyup(e: KeyboardEvent) {
-  const own = isTyping(e.target) || isTabbedControl(e.target);
-  if (e.key === ' ' && ui.view && !(mode() === 'edit' && own)) e.preventDefault();
+  if (e.key === ' ' && ui.view && !(mode() === 'edit' && keepsSpace(e.target))) e.preventDefault();
 }
 
 /** Ctrl (or Cmd) with a letter, by the letter typed (so it follows the layout). */
