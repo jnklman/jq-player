@@ -11,6 +11,7 @@
   import { addCue, duplicateCue, edit } from '../lib/commands';
   import { addGroups, type AddItem, mainListOnly, typeLabel } from '../lib/control';
   import { t } from '../lib/i18n/index.svelte';
+  import { isTextField } from '../lib/shortcuts';
   import { cueById, dialogEscape, mode } from '../lib/store.svelte';
   import { empty, hint, panel } from '../lib/ui';
   import Inspector from './inspector/Inspector.svelte';
@@ -54,6 +55,24 @@
     selected = next;
   }
 
+  let content = $state<HTMLElement | null>(null);
+
+  /**
+   * Delete removes the selected cue of the group (the main shortcut handler leaves the key to open dialogs). Not
+   * while typing, in show mode, or when another dialog or menu is on top of this one.
+   */
+  function onkeydown(e: KeyboardEvent) {
+    if (e.code !== 'Delete' || e.ctrlKey || e.altKey || e.shiftKey || e.metaKey || e.defaultPrevented) return;
+    if (locked || !selected || isTextField(e.target)) return;
+    const top = [
+      ...document.querySelectorAll('[data-slot="dialog-content"], [data-slot="alert-dialog-content"]'),
+    ].pop();
+    if (!content || top !== content) return;
+    if (document.querySelector('[data-slot="dropdown-menu-content"], [data-slot="select-content"]')) return;
+    e.preventDefault();
+    if (!e.repeat) remove();
+  }
+
   $effect(() => {
     // A group deleted meanwhile (undo, another edit) closes the dialog.
     if (!group) onclose();
@@ -61,8 +80,14 @@
 </script>
 
 <!-- Esc closes the dialog only with "close_first" (else it stays a panic), a click outside always. -->
+<svelte:window {onkeydown} />
+
 <Dialog.Root open onOpenChange={(open) => !open && onclose()}>
-  <Dialog.Content class="h-[min(760px,calc(100%-2rem))] max-w-6xl" escapeKeydownBehavior={dialogEscape()}>
+  <Dialog.Content
+    bind:ref={content}
+    class="h-[min(760px,calc(100%-2rem))] max-w-6xl"
+    escapeKeydownBehavior={dialogEscape()}
+  >
     <Dialog.Header>
       <Dialog.Title>
         {t('group.title', { number: group?.number ?? '' })} · {group?.title || t('group.untitled')}
