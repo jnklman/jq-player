@@ -1031,6 +1031,142 @@ fn endless_loop_can_be_devamped() {
     assert!(rig.active().is_empty());
 }
 
+/// A sound cue of one second per pass that loops `times` times.
+fn counted(number: &str, times: u32) -> Cue {
+    let mut c = sound(number, "len1000.wav");
+    if let CueKind::Sound(s) = &mut c.kind {
+        s.loop_mode = LoopMode::Times(times);
+    }
+    c
+}
+
+#[test]
+fn exit_loop_ends_a_counted_loop_after_the_pass_it_is_on() {
+    let song = counted("1", 5);
+    let id = song.id;
+    let mut rig = Rig::new(vec![song, devamp("2", id, DevampMode::LoopEnd)]);
+    rig.act(Action::Go);
+    rig.run(1300);
+    let a = active_state(&rig, "1").unwrap();
+    assert_eq!(a.pass, Some(PassState { pass: 2, count: Some(5), vamp: None }));
+    assert!((a.remaining.unwrap() - 3.7).abs() < 0.03, "{:?}", a.remaining);
+    rig.act(Action::Go);
+    rig.run(100);
+    let a = active_state(&rig, "1").unwrap();
+    assert_eq!(a.pass, Some(PassState { pass: 2, count: Some(2), vamp: None }), "now the last pass");
+    assert!((a.remaining.unwrap() - 0.6).abs() < 0.03, "{:?}", a.remaining);
+    assert!((a.progress - 0.4).abs() < 0.02, "{}", a.progress);
+    rig.run(550);
+    assert_eq!(rig.active(), ["1"], "the pass plays to its end");
+    rig.run(100);
+    assert!(rig.active().is_empty(), "not three passes later");
+}
+
+#[test]
+fn a_counted_loop_left_early_follows_at_its_new_end() {
+    // Auto-follow at the end.
+    let song = with_advance(counted("1", 5), AdvanceAt::End);
+    let id = song.id;
+    let mut rig = Rig::new(vec![song, sound("2", "len500.wav")]);
+    rig.act(Action::Go);
+    rig.run(1300);
+    rig.act(Action::ExitLoopCue(id));
+    rig.run(100);
+    let follow = rig.runner.state(rig.now()).following;
+    assert_eq!(follow.len(), 1);
+    assert!((follow[0].remaining.unwrap() - 0.6).abs() < 0.03, "{follow:?}");
+    rig.run(550);
+    assert_eq!(rig.active(), ["1"]);
+    rig.run(100);
+    assert_eq!(rig.active(), ["2"]);
+
+    // Before the end: the near end comes on the pass that is now the last.
+    let song = with_advance(counted("1", 5), AdvanceAt::BeforeEnd { secs: 0.2 });
+    let id = song.id;
+    let mut rig = Rig::new(vec![song, sound("2", "len500.wav")]);
+    rig.act(Action::Go);
+    rig.run(1300);
+    rig.act(Action::ExitLoopCue(id));
+    rig.run(100);
+    let follow = rig.runner.state(rig.now()).following;
+    assert!((follow[0].remaining.unwrap() - 0.4).abs() < 0.03, "{follow:?}");
+    rig.run(350);
+    assert_eq!(rig.active(), ["1"]);
+    rig.run(100);
+    assert_eq!(sorted(rig.active()), ["1", "2"]);
+}
+
+#[test]
+fn the_loop_exit_of_a_counted_loop_waits_for_the_end_of_its_pass() {
+    let song = counted("1", 5);
+    let id = song.id;
+    let mut rig = Rig::new(vec![
+        song,
+        with_loop_exit(devamp("2", id, DevampMode::LoopEnd), None),
+        sound("3", "len500.wav"),
+    ]);
+    rig.act(Action::Go);
+    rig.run(1300);
+    rig.act(Action::Go);
+    rig.run(650);
+    assert_eq!(rig.active(), ["1"], "not at the devamp");
+    rig.run(100);
+    assert_eq!(rig.active(), ["3"], "at the end of the pass, when the cue ends");
+}
+
+#[test]
+fn exit_loop_on_the_last_pass_of_a_counted_loop_leaves_nothing() {
+    let song = counted("1", 3);
+    let id = song.id;
+    let mut rig = Rig::new(vec![
+        song,
+        with_loop_exit(devamp("2", id, DevampMode::Immediate), None),
+        sound("3", "len2000.wav"),
+    ]);
+    rig.act(Action::Go);
+    rig.run(2300);
+    rig.act(Action::Go);
+    rig.run(20);
+    assert_eq!(sorted(rig.active()), ["1", "3"], "nothing to leave: the chain goes on at once");
+    let a = active_state(&rig, "1").unwrap();
+    assert_eq!(a.pass, Some(PassState { pass: 3, count: Some(3), vamp: None }));
+    assert!((a.remaining.unwrap() - 0.68).abs() < 0.03, "{:?}", a.remaining);
+    rig.run(650);
+    assert_eq!(sorted(rig.active()), ["1", "3"], "the pass plays on");
+    rig.run(50);
+    assert_eq!(rig.active(), ["3"]);
+}
+
+#[test]
+fn a_jump_back_holds_a_counted_loop_left_early_again() {
+    let song = counted("1", 5);
+    let id = song.id;
+    let mut rig = Rig::new(vec![song]);
+    let mut settings = rig.runner.settings().clone();
+    (settings.jump_back, settings.jump_forward) = (0.5, 0.25);
+    rig.runner.set_settings(settings);
+    rig.act(Action::Go);
+    rig.run(1300);
+    rig.act(Action::ExitLoopCue(id));
+    rig.run(100);
+    // Forward the exit stays.
+    rig.act(Action::JumpForward(id));
+    rig.run(20);
+    let a = active_state(&rig, "1").unwrap();
+    assert_eq!(a.pass, Some(PassState { pass: 2, count: Some(2), vamp: None }));
+    assert!((a.remaining.unwrap() - 0.33).abs() < 0.03, "{:?}", a.remaining);
+    // Back the loop holds again, on the pass it is on.
+    rig.act(Action::JumpBack(id));
+    rig.run(20);
+    let a = active_state(&rig, "1").unwrap();
+    assert_eq!(a.pass, Some(PassState { pass: 2, count: Some(5), vamp: None }));
+    assert!((a.remaining.unwrap() - 3.81).abs() < 0.05, "{:?}", a.remaining);
+    rig.run(3760);
+    assert_eq!(rig.active(), ["1"], "the passes it had left");
+    rig.run(80);
+    assert!(rig.active().is_empty(), "ends as shown");
+}
+
 fn wait(number: &str, duration: f64) -> Cue {
     let mut c = Cue::new(CueKind::Wait(WaitCue { duration }));
     c.number = number.into();

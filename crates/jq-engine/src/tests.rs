@@ -1321,6 +1321,76 @@ fn a_rearming_seek_on_the_last_pass_holds_the_vamps_after_it_again() {
     assert_eq!(notifications(&mut ctl), "", "no exit to report");
 }
 
+/// Five passes through 2–5 of a ramp of 10 frames.
+fn five_passes() -> (Controller, Mixer, VoiceId) {
+    let (mut ctl, mix) = setup(2);
+    let mut p = VoiceParams::new(ramp_buffer(10));
+    p.loops = [LoopRegion { start: 2, end: 5, repeats: Some(4) }].into();
+    let id = ctl.play(p).unwrap();
+    (ctl, mix, id)
+}
+
+#[test]
+fn a_counted_loop_left_early_plays_its_pass_to_the_end_and_goes_on() {
+    let (mut ctl, mut mix, id) = five_passes();
+    // On the second pass.
+    assert_eq!(played_frames(&mut mix, 6), [0, 1, 2, 3, 4, 2]);
+    ctl.exit_loop(id, LoopExit::AtLoopEnd, false, false).unwrap();
+    assert_eq!(played_frames(&mut mix, 9), [3, 4, 5, 6, 7, 8, 9, 0, 0]);
+    assert_eq!(notifications(&mut ctl), "LF", "the exit is reported like a vamp's");
+    // At once, too.
+    let (mut ctl, mut mix, id) = five_passes();
+    assert_eq!(played_frames(&mut mix, 6), [0, 1, 2, 3, 4, 2]);
+    ctl.exit_loop(id, LoopExit::Immediate { crossfade_frames: 0 }, false, false).unwrap();
+    assert_eq!(played_frames(&mut mix, 6), [5, 6, 7, 8, 9, 0]);
+}
+
+#[test]
+fn leaving_a_counted_loop_on_its_last_pass_changes_nothing() {
+    let (mut ctl, mut mix) = setup(2);
+    let mut p = VoiceParams::new(ramp_buffer(10));
+    p.loops = [LoopRegion { start: 2, end: 5, repeats: Some(1) }].into();
+    let id = ctl.play(p).unwrap();
+    assert_eq!(played_frames(&mut mix, 6), [0, 1, 2, 3, 4, 2]);
+    ctl.exit_loop(id, LoopExit::Immediate { crossfade_frames: 0 }, false, false).unwrap();
+    assert_eq!(played_frames(&mut mix, 10), [3, 4, 5, 6, 7, 8, 9, 0, 0, 0]);
+    assert_eq!(notifications(&mut ctl), "F", "nothing was left");
+}
+
+#[test]
+fn a_counted_loop_left_early_waits_for_near_end_until_its_last_pass() {
+    let (mut ctl, mut mix) = setup(2);
+    let mut p = VoiceParams::new(ramp_buffer(10));
+    p.loops = [LoopRegion { start: 0, end: 10, repeats: Some(4) }].into();
+    p.notify_before_end = Some(3);
+    let id = ctl.play(p).unwrap();
+    played_frames(&mut mix, 12);
+    assert_eq!(notifications(&mut ctl), "");
+    ctl.exit_loop(id, LoopExit::AtLoopEnd, false, false).unwrap();
+    // The second pass is now the last: near end three frames before its end.
+    played_frames(&mut mix, 4);
+    assert_eq!(notifications(&mut ctl), "");
+    played_frames(&mut mix, 1);
+    assert_eq!(notifications(&mut ctl), "N");
+    played_frames(&mut mix, 10);
+    assert_eq!(notifications(&mut ctl), "LF");
+}
+
+#[test]
+fn a_rearming_seek_back_holds_a_counted_loop_left_early_for_its_passes_left() {
+    let (mut ctl, mut mix, id) = five_passes();
+    // Second pass, released, then back within the loop: passes 2–5 again.
+    assert_eq!(played_frames(&mut mix, 6), [0, 1, 2, 3, 4, 2]);
+    ctl.exit_loop(id, LoopExit::AtLoopEnd, false, false).unwrap();
+    ctl.seek_rearming(id, 2, 0).unwrap();
+    assert_eq!(
+        played_frames(&mut mix, 16),
+        [2, 3, 4, 2, 3, 4, 2, 3, 4, 2, 3, 4, 5, 6, 7, 8],
+        "the pass stays, the count does not start again"
+    );
+    assert_eq!(notifications(&mut ctl), "", "no exit to report");
+}
+
 #[test]
 fn positions_report_the_pan_as_it_moves() {
     let (mut ctl, mut mix) = engine(EngineConfig { report_rate_hz: 100, ..EngineConfig::new(RATE, 2) });

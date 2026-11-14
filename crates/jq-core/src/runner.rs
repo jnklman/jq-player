@@ -384,10 +384,15 @@ struct Active {
     end_frame: usize,
     loop_mode: LoopMode,
     loops: Vec<LoopRegion>,
-    /// Loops that repeat until devamped (vamps, or an endless loop).
+    /// Loops that repeat until devamped (vamps, or an endless loop). A
+    /// counted loop is not one: it can be left early only while it has
+    /// passes left (see [`Active::counted_left`]).
     open_loops: usize,
     /// Devamps sent to this voice so far.
     devamped: usize,
+    /// The counted loop over the range was left early: it ends after the
+    /// pass it is on, which is now its last.
+    cut_short: bool,
     started: Option<Instant>,
     /// The file's part at the start is still being read (see
     /// [`VoiceParams::wait_frames`]); cleared once it plays.
@@ -446,6 +451,32 @@ struct Active {
     paused_at: Option<Instant>,
     /// Fading out as one of the others of an exclusive cue.
     excluded: bool,
+}
+
+impl Active {
+    /// The pass through the loop over the range, from 1.
+    fn range_pass(&self) -> u32 {
+        self.pass.map_or(1, |p| p.pass)
+    }
+
+    /// The counted loop over the range (vamps leave none) still has passes
+    /// to come after the one it is on, so an exit can end it early.
+    fn counted_left(&self) -> bool {
+        !self.vamps
+            && !self.cut_short
+            && !self.loops.is_empty()
+            && matches!(self.loop_mode, LoopMode::Times(n) if self.range_pass() < n)
+    }
+
+    /// Passes through the loop over the range still to come after this one.
+    fn passes_left(&self) -> u32 {
+        match self.loop_mode {
+            LoopMode::Times(n) if !self.vamps && !self.cut_short => {
+                n.max(1).saturating_sub(self.range_pass())
+            }
+            _ => 0,
+        }
+    }
 }
 
 /// A playlist item playing.
@@ -1443,7 +1474,8 @@ impl Runner {
     }
 
     /// Seconds (real time, at the rate of now) until a voice ends; `None`
-    /// while a vamp or endless loop is open.
+    /// while a vamp or endless loop is open. A counted loop counts all its
+    /// passes, or up to the end of the one it is on once it was left early.
     fn remaining(&self, a: &Active, now: Instant) -> Option<f64> {
         let rate = self.engine.config().sample_rate as f64;
         let speed = (a.rate_now as f64).max(0.01);
@@ -1454,14 +1486,11 @@ impl Runner {
         } else if a.open_loops > 0 {
             // Devamped: the rest of the file from the current position.
             Some(a.end_frame.saturating_sub(a.frame) as f64 / rate / speed)
-        } else if a.speed_moved {
-            // The rate changed on the way: from the position, the passes
-            // still to come, at the rate of now.
-            let passes_left = match a.loop_mode {
-                LoopMode::Times(n) => n.max(1).saturating_sub(a.pass.map_or(1, |p| p.pass)) as usize,
-                _ => 0,
-            };
-            let left = a.end_frame.saturating_sub(a.frame) + passes_left * range_frames;
+        } else if a.speed_moved || a.cut_short {
+            // The rate changed on the way, or a counted loop was left early
+            // (its passes no longer follow from the clock): from the
+            // position, the passes still to come, at the rate of now.
+            let left = a.end_frame.saturating_sub(a.frame) + a.passes_left() as usize * range_frames;
             let since = match (a.paused_at, a.frame_at) {
                 (None, Some(at)) => now.saturating_duration_since(at).as_secs_f64(),
                 _ => 0.0,
@@ -1566,7 +1595,12 @@ impl Runner {
                         let region = a.loops.get(p.index)?;
                         Some(PassState {
                             pass: p.pass,
-                            count: region.repeats.map(|r| r.saturating_add(1)),
+                            // Left early, the pass it is on is the last.
+                            count: if a.cut_short {
+                                Some(p.pass)
+                            } else {
+                                region.repeats.map(|r| r.saturating_add(1))
+                            },
                             vamp: a.vamps.then_some(p.index + 1),
                         })
                     }),
@@ -2265,6 +2299,7 @@ impl Runner {
             loops: kept_loops,
             open_loops,
             devamped: passed,
+            cut_short: false,
             started: None,
             loading,
             frame: play_from,
@@ -2894,7 +2929,8 @@ impl Runner {
     }
 
     /// Moves voices to frames; vamps jumped over count as devamped, and a
-    /// jump back before vamps left already holds there again.
+    /// jump back before vamps left already holds there again (as does a
+    /// counted loop left early).
     fn seek_voices(&mut self, seeks: &[(VoiceId, usize)], now: Instant, crossfade: u32) {
         let rate = self.engine.config().sample_rate as f64;
         let mut sends = Vec::new();
@@ -2913,6 +2949,9 @@ impl Runner {
             let back = target < a.frame;
             let passed = a.loops.iter().filter(|l| l.repeats.is_none() && l.end <= target).count();
             a.devamped = if back { passed } else { a.devamped.max(passed) };
+            // A counted loop left early holds again for the passes it had
+            // left (the engine keeps its pass).
+            a.cut_short &= !back;
             a.frame = target;
             sends.push((a.voice, target, back));
         }
@@ -3069,9 +3108,12 @@ impl Runner {
         }
     }
 
-    /// Leaves the next vamp (or all loops) of the running cues `ids`; none
-    /// running counts as success. Devamp cues and second triggers share it.
-    /// Returns the voices that leave a loop.
+    /// Leaves the innermost loop or vamp (or all of them) of the running
+    /// cues `ids`: the next vamp not yet released, an endless loop, or a
+    /// counted loop with passes left (it ends after the pass it is on; on
+    /// its last pass there is nothing to leave). None running counts as
+    /// success. Devamp cues and second triggers share it. Returns the
+    /// voices that leave a loop.
     fn exit_loops(&mut self, ids: &[CueId], exit: ExitLoop) -> Vec<VoiceId> {
         let (all, stop) = (exit.level == LoopLevel::All, exit.stop);
         let exit = match exit.mode {
@@ -3086,9 +3128,13 @@ impl Runner {
         let voices: Vec<VoiceId> = self
             .active
             .iter_mut()
-            .filter(|a| ids.contains(&a.cue) && a.devamped < a.open_loops)
+            .filter(|a| ids.contains(&a.cue) && (a.devamped < a.open_loops || a.counted_left()))
             .map(|a| {
-                a.devamped = if all { a.open_loops } else { a.devamped + 1 };
+                if a.devamped < a.open_loops {
+                    a.devamped = if all { a.open_loops } else { a.devamped + 1 };
+                } else {
+                    a.cut_short = true;
+                }
                 a.voice
             })
             .collect();

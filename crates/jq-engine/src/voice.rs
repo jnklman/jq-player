@@ -281,24 +281,26 @@ impl Head {
 
     /// Moves to `to`. Loops before it count as passed; with `rearm`, those
     /// from it on hold again even if released before. A jump within the
-    /// loop it is in keeps the pass (as on any earlier pass), so a counted
-    /// loop that is on its last pass stays there.
+    /// counted loop it is in keeps the pass (as on any earlier pass), so a
+    /// counted loop that is on its last pass stays there, and one released
+    /// early holds again for the passes it had left.
     fn seek(&mut self, loops: &[LoopRegion], to: usize, crossfade: u32, rearm: bool) {
         self.jump(to, crossfade);
         self.jump_at = None;
         let current = loops.iter().position(|l| l.end > to).unwrap_or(loops.len());
-        let out_of_repeats = current == self.current
-            && self.loops_left == Some(0)
+        let within_counted = current == self.current
             && loops.get(current).is_some_and(|l| l.repeats.is_some() && l.start <= to);
-        if rearm && out_of_repeats {
-            // Only the loops after it hold again.
+        if rearm && within_counted && self.loops_left == Some(0) {
+            // Out of repeats: only the loops after it hold again.
             self.released = current + 1;
             self.exit_released = self.exit_released.min(current);
         } else if rearm && self.released > current {
             self.current = current;
             self.released = current;
             self.exit_released = self.exit_released.min(current);
-            self.enter_loop(loops);
+            if !within_counted {
+                self.enter_loop(loops);
+            }
         } else if current != self.current {
             self.current = current;
             self.released = self.released.max(current);

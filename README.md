@@ -48,7 +48,7 @@ in English and German.
 | **Start/Stop, Pause** | Start, stop, pause or resume target cues. |
 | **Volume, Pan, Rate, Reset** | Change level, pan or rate of running cues over a time, or bring them back. |
 | **Position** | Jump within running cues: to a time, by a time, or to a mark. |
-| **Exit loop** | Release the vamp or loop of a running cue: at the loop end, the next mark or at once. |
+| **Exit loop** | Release the vamp or loop of a running cue: at the loop end, the next mark or at once. A counted loop ("loop ×5") ends after the pass it is on. |
 | **GoTo** | Move the playhead to another cue, optionally starting it. |
 | **Wait** | A timed pause in a chain. |
 | **Stopwatch** | Start, stop, reset or restart a stopwatch. |
