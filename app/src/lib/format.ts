@@ -99,11 +99,11 @@ export function clock(date: Date): string {
 /** Note names of the octave; German calls the B natural "H". */
 const noteNames = () => ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', t('midi.note_b')];
 
-/** e.g. "Note C4 · Channel 1", "CC 64 · Channel 10", "Program 5 · Channel 2". */
+/** e.g. "Note C4 · Channel 1", "CC 64 · Channel 10", "Program 5 · Channel 2" (program numbers are the raw 0 … 127). */
 export function fmtMidi(trigger: MidiTrigger): string {
   const channel = t('midi.channel', { channel: trigger.channel + 1 });
   if (trigger.kind === 'cc') return `CC ${trigger.controller} · ${channel}`;
-  if (trigger.kind === 'program') return `${t('midi.program')} ${trigger.program + 1} · ${channel}`;
+  if (trigger.kind === 'program') return `${t('midi.program')} ${trigger.program} · ${channel}`;
   const name = noteNames()[trigger.note % 12] + (Math.floor(trigger.note / 12) - 1);
   return `${t('midi.note')} ${name} · ${channel}`;
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { fmtDb, fmtLufs, fmtMegabytes, fmtTime } from './format';
+import { fmtDb, fmtLufs, fmtMegabytes, fmtMidi, fmtTime } from './format';
 
 describe('fmtTime', () => {
   it('turns over to the next minute instead of printing 60', () => {
@@ -32,5 +32,12 @@ describe('rounded units', () => {
     expect(fmtDb(-3)).toBe('−3.0 dB');
     expect(fmtDb(0.5)).toBe('+0.5 dB');
     expect(fmtLufs(-0.01)).toBe('0.0 LUFS');
+  });
+});
+
+describe('fmtMidi', () => {
+  it('shows program numbers raw (0 … 127) and channels from 1', () => {
+    expect(fmtMidi({ kind: 'program', channel: 0, program: 0 })).toBe('Program 0 · Channel 1');
+    expect(fmtMidi({ kind: 'program', channel: 9, program: 127 })).toBe('Program 127 · Channel 10');
   });
 });

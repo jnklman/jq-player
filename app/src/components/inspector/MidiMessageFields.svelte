@@ -94,16 +94,16 @@
       onchange={(channel) => set({ channel: channel - 1 })}
     />
     {#if message.kind === 'program_change'}
-      <!-- Shown 1 … 128 like a learned program trigger (`fmtMidi`); sent as 0 … 127. -->
+      <!-- The raw program number 0 … 127, like a learned program trigger (`fmtMidi`). -->
       <NumberField
         class="w-20"
         label={t('midi.program')}
         step={1}
-        min={1}
-        max={128}
+        min={0}
+        max={127}
         integer
-        value={message.program + 1}
-        onchange={(program) => set({ program: program - 1 })}
+        value={message.program}
+        onchange={(program) => set({ program })}
       />
     {:else if message.kind === 'control_change'}
       {@render byte(t('midi.what.controller'), 'controller', message.controller)}
