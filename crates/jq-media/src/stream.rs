@@ -338,16 +338,50 @@ pub fn open_stream(path: &Path, target_rate: u32) -> Result<AudioBuffer, MediaEr
         .ok_or_else(|| MediaError::NoAudioTrack { path: path.to_owned() })?;
     let data = Arc::new(StreamData::new((secs.min(MAX_STREAM_SECS) * target_rate as f64).ceil() as usize));
     let reader_data = data.clone();
+    let source = Source { path: path.to_owned(), target_rate, stamp: stamp(path) };
     std::thread::Builder::new()
         .name("jq-stream".into())
-        .spawn(move || read_chunks(&reader_data, decoder))
+        .spawn(move || read_chunks(&reader_data, source, decoder))
         .map_err(|source| MediaError::Io { path: path.to_owned(), source })?;
     Ok(AudioBuffer::streamed(target_rate, data))
 }
 
+/// The file a stream reads, as it was when the stream was opened.
+struct Source {
+    path: PathBuf,
+    target_rate: u32,
+    stamp: Option<(u64, std::time::SystemTime)>,
+}
+
+impl Source {
+    /// Opens the file again, unless it changed since: one buffer must not
+    /// mix chunks of two different files. The media watcher reads a changed
+    /// file anew anyway.
+    fn reopen(&self) -> Result<StreamDecoder, MediaError> {
+        if stamp(&self.path) != self.stamp {
+            let source = std::io::Error::other("the file changed since it was read");
+            return Err(MediaError::Io { path: self.path.clone(), source });
+        }
+        StreamDecoder::open(&self.path, Some(self.target_rate))
+    }
+}
+
+/// Length and modification time of `path`, as far as they can be read.
+fn stamp(path: &Path) -> Option<(u64, std::time::SystemTime)> {
+    let meta = std::fs::metadata(path).ok()?;
+    Some((meta.len(), meta.modified().ok()?))
+}
+
 /// The reader loop: load the most urgent missing chunk, drop unwanted ones,
 /// free retired chunks after the grace period.
-fn read_chunks(data: &StreamData, mut decoder: StreamDecoder) {
+///
+/// While no voice plays and nothing is left to load, the reader closes the
+/// file and opens it again for the next chunk it needs. An open file cannot
+/// be replaced on Windows (Explorer refuses to copy over it), and a loaded
+/// cue would otherwise keep it open as long as the show is. In show mode the
+/// media lock keeps the files from being changed instead.
+fn read_chunks(data: &StreamData, source: Source, decoder: StreamDecoder) {
+    let mut decoder = Some(decoder);
     let mut retired: VecDeque<(Instant, Retired)> = VecDeque::new();
     // Only this thread stores and evicts, so it knows what is loaded without
     // looking at every chunk of a long file.
@@ -387,6 +421,7 @@ fn read_chunks(data: &StreamData, mut decoder: StreamDecoder) {
             let timeout = if data.has_voices() {
                 Some(FOLLOW)
             } else {
+                decoder = None;
                 // Only retired chunks to free and failed ones to retry come
                 // due by themselves.
                 let due = retired
@@ -402,6 +437,14 @@ fn read_chunks(data: &StreamData, mut decoder: StreamDecoder) {
         };
         let mut samples = Vec::with_capacity(CHUNK_FRAMES * 2);
         let result = (|| {
+            let decoder = match &mut decoder {
+                Some(d) => d,
+                None => {
+                    // A freshly opened decoder stands at the start.
+                    next = Some(0);
+                    decoder.insert(source.reopen()?)
+                }
+            };
             if next != Some(chunk) {
                 decoder.seek(chunk * CHUNK_FRAMES)?;
             }

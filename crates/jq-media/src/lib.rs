@@ -475,6 +475,59 @@ mod tests {
     }
 
     #[test]
+    fn idle_stream_lets_go_of_its_file() {
+        use jq_engine::stream::CHUNK_FRAMES;
+        let dir = test_dir("release");
+        let path = dir.join("long.wav");
+        let frames = CHUNK_FRAMES * 6;
+        write_test_wav(&path, 8_000, 1, &tone(frames));
+        let whole = decode_file(&path, 8_000).unwrap();
+        let buf = stream::open_stream(&path, 8_000).unwrap();
+        let data = buf.stream().unwrap().clone();
+        let wait = |ready: &dyn Fn() -> bool| {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while !ready() && std::time::Instant::now() < deadline {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            ready()
+        };
+        assert!(wait(&|| buf.is_ready_at(0)));
+
+        // Idle, the file is closed: Windows lets a copy replace it.
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            let exclusive = || std::fs::OpenOptions::new().write(true).share_mode(0).open(&path).is_ok();
+            assert!(wait(&exclusive), "the idle stream keeps its file open");
+        }
+        #[cfg(not(windows))]
+        std::thread::sleep(std::time::Duration::from_millis(200));
+
+        // Played again, the file is opened again.
+        data.set_hints(vec![CHUNK_FRAMES * 3]);
+        assert!(wait(&|| data.is_loaded(3)));
+        assert_eq!(buf.frame(CHUNK_FRAMES * 3 + 7), whole.frame(CHUNK_FRAMES * 3 + 7));
+        assert!(wait(&|| {
+            #[cfg(windows)]
+            {
+                use std::os::windows::fs::OpenOptionsExt;
+                std::fs::OpenOptions::new().write(true).share_mode(0).open(&path).is_ok()
+            }
+            #[cfg(not(windows))]
+            true
+        }));
+
+        // Replaced meanwhile: no chunk of the new file joins the old ones.
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        write_test_wav(&path, 8_000, 1, &tone(frames * 2));
+        data.set_hints(vec![CHUNK_FRAMES * 5]);
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        assert!(!data.is_loaded(5));
+        drop(buf);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
     fn stream_keeps_the_old_position_while_a_jump_fades() {
         use jq_engine::stream::CHUNK_FRAMES;
         let dir = test_dir("evict-delay");
