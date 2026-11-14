@@ -27,6 +27,7 @@
     onclose,
     status,
     children,
+    ref = $bindable(null),
   }: {
     title: string | Snippet;
     /** Classes of the dialog box, e.g. its width. */
@@ -49,10 +50,11 @@
     /** Left in the footer, e.g. how much was changed. */
     status?: Snippet;
     children: Snippet;
+    /** The dialog box (e.g. for `claimUndo`). */
+    ref?: HTMLElement | null;
   } = $props();
 
   let saving = $state(false);
-  let content = $state<HTMLElement | null>(null);
 
   async function apply() {
     saving = true;
@@ -82,13 +84,13 @@
   }
 >
   <Dialog.Content
-    bind:ref={content}
+    bind:ref
     class={['outline-none', className]}
     tabindex={focusDialog ? -1 : undefined}
     onOpenAutoFocus={(e) => {
       if (!focusDialog) return;
       e.preventDefault();
-      content?.focus();
+      ref?.focus();
     }}
   >
     <Dialog.Header>

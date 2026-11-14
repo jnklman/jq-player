@@ -146,8 +146,8 @@ export function formatShortcut(e: KeyboardEvent): Format | null {
 
 /**
  * The fixed Ctrl shortcuts of edit mode; true if `e` was one (and nothing else may act on it). Behind a dialog
- * (`inDialog`) the ones on the list's selection are left to the dialog; undo and redo stay, as the group dialog
- * edits the show directly.
+ * (`inDialog`) the ones on the list's selection are left to the dialog; undo and redo act only in a dialog that
+ * claimed them (`claimUndo`: the group dialog for the show, the waveform for its draft).
  */
 function editShortcut(e: KeyboardEvent, letter: string, inDialog: boolean): boolean {
   if (inDialog && ['c', 'x', 'a', 'v'].includes(letter)) return true;

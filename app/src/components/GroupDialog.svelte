@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte';
+
   import CaretDown from '~icons/ph/caret-down-bold';
   import CaretUp from '~icons/ph/caret-up-bold';
   import XMark from '~icons/ph/x-bold';
@@ -8,7 +10,7 @@
   import { ScrollArea } from '$lib/components/ui/scroll-area';
 
   import type { CueId } from '../lib/api';
-  import { addCue, duplicateCue, edit } from '../lib/commands';
+  import { addCue, claimUndo, duplicateCue, edit, SHOW_HISTORY } from '../lib/commands';
   import { addGroups, type AddItem, mainListOnly, typeLabel } from '../lib/control';
   import { t } from '../lib/i18n/index.svelte';
   import { isTextField } from '../lib/shortcuts';
@@ -56,6 +58,9 @@
   }
 
   let content = $state<HTMLElement | null>(null);
+
+  // The dialog edits the show directly: undo and redo stay the show's.
+  onDestroy(claimUndo({ owner: () => content, ...SHOW_HISTORY }));
 
   /**
    * Delete removes the selected cue of the group (the main shortcut handler leaves the key to open dialogs). Not

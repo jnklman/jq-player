@@ -15,7 +15,8 @@
   import { Tooltip } from '$lib/components/ui/tooltip';
 
   import { api, type Cue, type CueId } from '../../lib/api';
-  import { edit } from '../../lib/commands';
+  import { claimUndo, edit } from '../../lib/commands';
+  import { DraftHistory } from '../../lib/draftHistory';
   import { fmtPosition } from '../../lib/format';
   import { t } from '../../lib/i18n/index.svelte';
   import { roundMs } from '../../lib/input';
@@ -69,10 +70,32 @@
   let dragged = $state<Times | null>(null);
   const shown: Times = $derived(dragged ?? draft);
 
+  // Ctrl+Z/Y step through the draft's changes, not the show's history.
+  const history = new DraftHistory<Times>();
+
   /** Into the draft only; "Fertig" sends it. */
   function commit(changes: Partial<Times>) {
-    if (!locked) draft = { ...$state.snapshot(draft), ...changes };
+    if (locked) return;
+    const before = $state.snapshot(draft);
+    draft = { ...before, ...changes };
+    history.record(before, $state.snapshot(draft));
   }
+
+  /** One step of the draft's history; not while a handle is dragged. */
+  function step(to: (current: Times) => Times | null) {
+    if (locked || dragged) return;
+    const next = to($state.snapshot(draft));
+    if (next) draft = next;
+  }
+
+  let box = $state<HTMLElement | null>(null);
+  onDestroy(
+    claimUndo({
+      owner: () => box,
+      undo: () => step((current) => history.undo(current)),
+      redo: () => step((current) => history.redo(current)),
+    }),
+  );
 
   /** "Fertig": the draft onto the cue as it is now, as one undo step. */
   async function apply(): Promise<boolean> {
@@ -145,6 +168,7 @@
 
 <EditDialog
   {title}
+  bind:ref={box}
   class="h-[min(820px,calc(100%-2rem))] max-w-7xl"
   {dirty}
   applyLabel={t('common.done')}

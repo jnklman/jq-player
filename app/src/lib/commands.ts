@@ -133,12 +133,54 @@ export function selectScene(id: CueId) {
   selectAll(list.slice(at, next < 0 ? undefined : next).map((cue) => cue.id));
 }
 
+/** What undo and redo do while a dialog is open (see `claimUndo`). */
+export interface DialogUndo {
+  /** The dialog box: the claim holds only while it is the topmost dialog. */
+  owner: () => Element | null | undefined;
+  undo(): void;
+  redo(): void;
+}
+
+/** The show's own history, for a dialog that edits the show directly (the group dialog). */
+export const SHOW_HISTORY = {
+  undo: () => void edit({ op: 'undo' }),
+  redo: () => void edit({ op: 'redo' }),
+};
+
+// Claims of open dialogs, the latest (opened on top) last.
+const claims: DialogUndo[] = [];
+
+/**
+ * While the returned function is not called, undo and redo (keys and buttons) in the dialog `claim.owner` go to
+ * `claim`. In any other dialog they do nothing: a draft applied at the end would overwrite what they changed,
+ * and the operator would not see it anyway.
+ */
+export function claimUndo(claim: DialogUndo): () => void {
+  claims.push(claim);
+  return () => {
+    const at = claims.indexOf(claim);
+    if (at >= 0) claims.splice(at, 1);
+  };
+}
+
+/** The topmost open dialog or question, if any. */
+function topDialog(): Element | undefined {
+  return [...document.querySelectorAll('[data-slot="dialog-content"], [data-slot="alert-dialog-content"]')].pop();
+}
+
+/** What undo and redo act on now: the show's history, the topmost dialog's claim, or nothing (another dialog). */
+function history(): { undo(): void; redo(): void } | null {
+  const top = topDialog();
+  if (!top) return SHOW_HISTORY;
+  return claims.find((claim) => claim.owner() === top) ?? null;
+}
+
 export function undo() {
-  void edit({ op: 'undo' });
+  history()?.undo();
 }
 
 export function redo() {
-  void edit({ op: 'redo' });
+  history()?.redo();
 }
 
 export function renumber() {
