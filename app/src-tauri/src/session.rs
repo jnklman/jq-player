@@ -29,12 +29,16 @@ use serde::{Deserialize, Serialize};
 
 use crate::backend::{CloseCheck, Request};
 use crate::jobs::{self, Copier, Copy, Found, Prober};
+use crate::writer::{Key, Writer};
 
 const MAX_VOICES: usize = 64;
 /// One preview at a time, plus room for one that is still stopping.
 const PREVIEW_VOICES: usize = 2;
 /// Quiet time after the last edit before the autosave is written.
 const AUTOSAVE_DELAY: Duration = Duration::from_secs(1);
+/// Longest wait on opening a show for writes still queued (the previous
+/// show's settings and autosave) before the files are read anyway.
+const OPEN_FLUSH_TIMEOUT: Duration = Duration::from_secs(5);
 /// How often media files are checked for changes on disk when polling
 /// ([`jq_core::WatchMode::Poll`]).
 const WATCH_INTERVAL: Duration = Duration::from_secs(1);
@@ -560,6 +564,8 @@ pub struct Session {
     settings: LocalSettings,
     /// The machine's settings file.
     settings_path: PathBuf,
+    /// Writes the settings file and the autosave off the show thread.
+    writer: Writer,
     /// Media files by stored path.
     media: HashMap<String, MediaFile>,
     /// Cues added with `normalize_on_import`, normalized as soon as their
@@ -622,9 +628,15 @@ impl Session {
         show_mode: bool,
         settings_path: PathBuf,
         peaks: Arc<PeakCache>,
+        writer: Writer,
         midi_tx: Sender<Request>,
         notices: &mut Vec<Notice>,
     ) -> Self {
+        // The settings file and the autosave are read back below: what is
+        // still queued for them (the previous show's) goes first.
+        if !writer.flush(OPEN_FLUSH_TIMEOUT) {
+            notices.push(Notice::Warning(t!("writer.pending")));
+        }
         let mut settings =
             LocalSettings::load(&settings_path, &file.show.id.to_string()).unwrap_or_else(|e| {
                 notices.push(Notice::Warning(t!("session.settings_ignored", error = e)));
@@ -660,6 +672,7 @@ impl Session {
             keep_alive,
             settings,
             settings_path,
+            writer,
             media: HashMap::new(),
             auto_normalize: HashSet::new(),
             measured: (false, Instant::now()),
@@ -1176,20 +1189,42 @@ impl Session {
         }
     }
 
+    /// Saves the show and waits until it is on disk. It runs on the writer
+    /// thread, after an autosave still queued, so that one cannot land after
+    /// the autosave is removed here.
     pub fn save(&mut self) -> Result<(), String> {
         self.file.show = self.editor.show().clone();
-        self.file.save().map_err(|e| e.to_string())?;
+        let (file, remove_autosave) = (self.file.clone(), self.recovery.is_none());
+        let (saved, removed) = self.writer.wait(move || {
+            let saved = file.save().map_err(|e| e.to_string());
+            let removed = match (&saved, remove_autosave) {
+                (Ok(()), true) => file.remove_autosave().map_err(|e| e.to_string()),
+                _ => Ok(()),
+            };
+            (saved, removed)
+        })?;
+        saved?;
         self.editor.mark_saved();
         self.autosaved = self.editor.revision();
-        if self.recovery.is_none() {
-            self.file.remove_autosave().map_err(|e| e.to_string())?;
-        }
-        Ok(())
+        removed
+    }
+
+    /// The show file without its show, for removing its autosave.
+    fn autosave_target(&self) -> (Option<Key>, ShowFile) {
+        let key = Key::new(self.file.autosave_path(), "autosave");
+        (Some(key), ShowFile { path: self.file.path.clone(), show: Show::default() })
+    }
+
+    /// Removes the autosave on the writer thread, after a write of it still
+    /// queued, and waits for the result.
+    fn remove_autosave(&self) -> Result<(), String> {
+        let (_, file) = self.autosave_target();
+        self.writer.wait(move || file.remove_autosave().map_err(|e| e.to_string()))?
     }
 
     /// Writes the autosave once edits have been quiet for a moment. Edits are
     /// locked in show mode, so this never writes during a performance.
-    pub fn autosave_tick(&mut self, now: Instant, notices: &mut Vec<Notice>) {
+    pub fn autosave_tick(&mut self, now: Instant) {
         let revision = self.editor.revision();
         if revision == self.autosaved || self.recovery.is_some() {
             return;
@@ -1202,14 +1237,17 @@ impl Session {
             return;
         }
         self.autosaved = revision;
-        let result = if self.editor.is_dirty() {
-            self.file.write_autosave(self.editor.show())
-        } else {
-            self.file.remove_autosave()
-        };
-        if let Err(e) = result {
-            notices.push(Notice::Warning(t!("session.autosave_failed", error = e)));
+        // Queued: the show thread never waits for the disk here. A failure
+        // comes back as a notice from the writer.
+        let (key, mut file) = self.autosave_target();
+        let write = self.editor.is_dirty();
+        if write {
+            file.show = self.editor.show().clone();
         }
+        self.writer.submit(key, move || {
+            let result = if write { file.write_autosave(&file.show) } else { file.remove_autosave() };
+            result.map_err(|e| t!("session.autosave_failed", error = e))
+        });
     }
 
     /// Restores (one undo step) or discards the autosave found on opening.
@@ -1223,7 +1261,7 @@ impl Session {
             self.update_lock(notices);
             self.enforce_show_mode_lock(notices);
         } else {
-            self.file.remove_autosave().map_err(|e| e.to_string())?;
+            self.remove_autosave()?;
         }
         Ok(())
     }
@@ -1234,7 +1272,7 @@ impl Session {
         if self.recovery.is_some() {
             return Ok(());
         }
-        self.file.remove_autosave().map_err(|e| e.to_string())
+        self.remove_autosave()
     }
 
     /// Applies and saves machine settings. A changed audio device is opened
@@ -1318,7 +1356,7 @@ impl Session {
             notices.push(Notice::Warning(t!("session.keep_awake_failed", error = e)));
         }
         self.settings = settings;
-        self.save_settings(notices);
+        self.save_settings();
         if reopen {
             self.reopen_audio(notices);
         } else {
@@ -1364,28 +1402,28 @@ impl Session {
     /// Remembers where the audio file picker was last used. Unlike
     /// `set_settings` it touches nothing else, so it works while cues run
     /// or the audio device has failed.
-    pub fn set_audio_dir(&mut self, dir: Option<PathBuf>, notices: &mut Vec<Notice>) {
+    pub fn set_audio_dir(&mut self, dir: Option<PathBuf>, _notices: &mut Vec<Notice>) {
         if self.settings.audio_dir != dir {
             self.settings.audio_dir = dir;
-            self.save_settings(notices);
+            self.save_settings();
         }
     }
 
     /// Stores the UI's panel layout; like `set_audio_dir` it touches nothing
     /// else.
-    pub fn set_layout(&mut self, layout: Option<serde_json::Value>, notices: &mut Vec<Notice>) {
+    pub fn set_layout(&mut self, layout: Option<serde_json::Value>, _notices: &mut Vec<Notice>) {
         if self.settings.layout != layout {
             self.settings.layout = layout;
-            self.save_settings(notices);
+            self.save_settings();
         }
     }
 
     /// Stores the cue list's selection mode; like `set_audio_dir` it
     /// touches nothing else.
-    pub fn set_selection_mode(&mut self, mode: SelectionMode, notices: &mut Vec<Notice>) {
+    pub fn set_selection_mode(&mut self, mode: SelectionMode, _notices: &mut Vec<Notice>) {
         if self.settings.selection_mode != mode {
             self.settings.selection_mode = mode;
-            self.save_settings(notices);
+            self.save_settings();
         }
     }
 
@@ -1398,17 +1436,24 @@ impl Session {
     }
 
     /// Notes this show as the one opened last (for opening it on startup).
-    pub fn remember_path(&mut self, notices: &mut Vec<Notice>) {
+    pub fn remember_path(&mut self, _notices: &mut Vec<Notice>) {
         if self.settings.last_show.as_ref() != Some(&self.file.path) {
             self.settings.last_show = Some(self.file.path.clone());
-            self.save_settings(notices);
+            self.save_settings();
         }
     }
 
-    fn save_settings(&self, notices: &mut Vec<Notice>) {
-        if let Err(e) = self.settings.save(&self.settings_path, &self.file.show.id.to_string()) {
-            notices.push(Notice::Warning(t!("session.settings_not_saved", error = e)));
-        }
+    /// Queues the settings for writing; the show thread never waits for the
+    /// disk here (layout, selection mode and the like change mid-show too).
+    /// Only the newest of several queued states is written; a failure comes
+    /// back as a notice from the writer.
+    fn save_settings(&self) {
+        let (settings, path, show) =
+            (self.settings.clone(), self.settings_path.clone(), self.file.show.id.to_string());
+        let key = Key::new(path.clone(), format!("settings {show}"));
+        self.writer.submit(Some(key), move || {
+            settings.save(&path, &show).map_err(|e| t!("session.settings_not_saved", error = e))
+        });
     }
 
     /// Changes the display name; refused in show mode.
@@ -1487,8 +1532,13 @@ impl Session {
                 return Err(e);
             }
         };
-        // Lost, the old autosave would only offer changes saved here.
-        let _ = self.file.remove_autosave();
+        // Lost, the old autosave would only offer changes saved here. Queued
+        // after a write of it that may still be waiting.
+        let (key, old) = self.autosave_target();
+        self.writer.submit(key, move || {
+            let _ = old.remove_autosave();
+            Ok(())
+        });
         self.file = file;
         let show_name = self.file.show.name.clone();
         self.editor.change_history(|s| {
@@ -1661,7 +1711,7 @@ impl Session {
             match target {
                 LearnTarget::Action { action } => {
                     midi::learn(&mut self.settings.midi, action, event.trigger);
-                    self.save_settings(notices);
+                    self.save_settings();
                     self.runner.set_settings(self.settings.clone());
                 }
                 LearnTarget::Cue { cue } => {
@@ -3221,6 +3271,105 @@ mod tests {
 
     fn device(max_channels: Option<u16>) -> DeviceProbe {
         DeviceProbe { name: "AG08".into(), max_channels }
+    }
+
+    fn tempdir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("jq-session-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// A new show in `dir` with the settings file next to it.
+    fn open_session(dir: &Path, writer: &Writer) -> Session {
+        let file = ShowFile::load(&dir.join("Show.jqshow"))
+            .or_else(|_| ShowFile::create(dir, "Show", false))
+            .unwrap();
+        let (midi_tx, _) = std::sync::mpsc::channel();
+        let peaks = Arc::new(PeakCache::disabled());
+        Session::open(file, false, dir.join("settings.json"), peaks, writer.clone(), midi_tx, &mut Vec::new())
+    }
+
+    /// Makes an edit and lets the autosave queue it.
+    fn edit_and_autosave(session: &mut Session, name: &str) {
+        session.rename(name).unwrap();
+        let now = Instant::now();
+        session.autosave_tick(now);
+        session.autosave_tick(now + AUTOSAVE_DELAY * 2);
+    }
+
+    #[test]
+    fn settings_are_written_in_the_background() {
+        let dir = tempdir("settings");
+        let (writer, notices) = Writer::spawn();
+        let mut session = open_session(&dir, &writer);
+        let release = writer.hold();
+        session.set_layout(Some(serde_json::json!({ "root": "cues" })), &mut Vec::new());
+        session.set_selection_mode(SelectionMode::PlayheadFollows, &mut Vec::new());
+        session.set_audio_dir(Some(dir.clone()), &mut Vec::new());
+        // The show thread went on without waiting for the disk.
+        let path = dir.join("settings.json");
+        assert_eq!(LocalSettings::load(&path, "x").unwrap().layout, None);
+        drop(release);
+        writer.flush_all();
+        let saved = LocalSettings::load(&path, &session.file.show.id.to_string()).unwrap();
+        assert_eq!(saved.layout, Some(serde_json::json!({ "root": "cues" })));
+        assert_eq!(
+            (saved.selection_mode, saved.audio_dir),
+            (SelectionMode::PlayheadFollows, Some(dir.clone()))
+        );
+        assert!(notices.try_iter().next().is_none());
+
+        // A failed write is reported, not lost silently.
+        std::fs::remove_file(&path).unwrap();
+        std::fs::create_dir(&path).unwrap();
+        session.set_audio_dir(None, &mut Vec::new());
+        writer.flush_all();
+        let failed: Vec<Notice> = notices.try_iter().collect();
+        assert!(
+            matches!(&failed[..], [Notice::Warning(e)] if e.starts_with("Setting not saved")),
+            "{failed:?}"
+        );
+        drop(session);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn an_explicit_save_comes_after_a_queued_autosave() {
+        let dir = tempdir("save-order");
+        let (writer, notices) = Writer::spawn();
+        let mut session = open_session(&dir, &writer);
+        let autosave = session.file.autosave_path();
+        let release = writer.hold();
+        edit_and_autosave(&mut session, "Neu");
+        assert!(!autosave.exists(), "queued, not written yet");
+        let releasing = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(50));
+            drop(release);
+        });
+        // Waits behind the autosave, then removes it.
+        session.save().unwrap();
+        releasing.join().unwrap();
+        assert!(!autosave.exists(), "the older autosave did not land after the save");
+        assert_eq!(ShowFile::load(&session.file.path).unwrap().show.name, "Neu");
+        assert!(!session.close_check(Instant::now()).dirty);
+
+        // Leaving without saving removes an autosave still queued as well.
+        edit_and_autosave(&mut session, "Verworfen");
+        session.discard_autosave().unwrap();
+        writer.flush_all();
+        assert!(!autosave.exists());
+
+        // Reopening reads back what is still queued: the autosave is offered.
+        let release = writer.hold();
+        edit_and_autosave(&mut session, "Absturz");
+        drop(session);
+        drop(release);
+        let reopened = open_session(&dir, &writer);
+        assert_eq!(reopened.recovery.as_ref().map(|(show, _)| show.name.as_str()), Some("Absturz"));
+        assert!(notices.try_iter().next().is_none());
+        drop(reopened);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

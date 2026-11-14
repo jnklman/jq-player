@@ -13,6 +13,7 @@ import {
   allCues,
   ask,
   attempt,
+  attemptChange,
   cueById,
   cues,
   type Mode,
@@ -23,9 +24,10 @@ import {
   ui,
 } from './store.svelte';
 
-/** Sends one edit; the new view, or `undefined` if it failed (shown as a notice). */
+/** Sends one edit; resolves once the store shows it, with the new view, or `undefined` if it failed (shown as a
+ * notice). */
 export function edit(op: EditOp): Promise<ShowView | undefined> {
-  return attempt(api.edit(op));
+  return attemptChange(api.edit(op));
 }
 
 // --- Clipboard and selection

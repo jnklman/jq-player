@@ -15,11 +15,14 @@ use jq_i18n::t;
 
 use crate::Backend;
 use crate::backend::{CloseCheck, Request};
+use crate::writer::Writer;
 
 const EVENT_PROGRESS: &str = "update_progress";
 /// A hanging show thread counts as "something may be running".
 const CHECK_TIMEOUT: Duration = Duration::from_secs(2);
 const NETWORK_TIMEOUT: Duration = Duration::from_secs(20);
+/// How long queued settings and autosave writes may take before installing.
+const FLUSH_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// The update found by the last `check_update`, installed by `install_update`,
 /// and whether an install is under way (a second one is refused).
@@ -116,6 +119,12 @@ pub async fn install_update(
         .map_err(|e| t!("update.install_failed", error = e))?;
     // Meanwhile a cue may have started or show mode begun.
     show_allows_update(&backend).await?;
+    // The installer ends the program: what is still queued goes to disk first.
+    let writer = app.state::<Writer>().inner().clone();
+    let flushed = tauri::async_runtime::spawn_blocking(move || writer.flush(FLUSH_TIMEOUT)).await;
+    if !flushed.unwrap_or(false) {
+        return Err(t!("update.writes_pending"));
+    }
     update.install(bytes).map_err(|e| t!("update.install_failed", error = e))?;
     // The installer ends the program on Windows; elsewhere this starts the new version.
     app.restart();

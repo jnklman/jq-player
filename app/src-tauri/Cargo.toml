@@ -22,7 +22,8 @@ tauri-plugin-single-instance = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-window-state = "2"
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# raw_value: the show view is serialized once and sent as it is (`backend::publish`).
+serde_json = { version = "1", features = ["raw_value"] }
 jq-audio = { path = "../../crates/jq-audio" }
 jq-core = { path = "../../crates/jq-core" }
 jq-engine = { path = "../../crates/jq-engine" }

@@ -15,12 +15,16 @@ use jq_i18n::t;
 
 use crate::Backend;
 use crate::backend::{CloseCheck, Request};
+use crate::writer::Writer;
 
 /// A hanging show thread counts as "something may be running".
 const CHECK_TIMEOUT: Duration = Duration::from_secs(2);
 const SAVE_TIMEOUT: Duration = Duration::from_secs(10);
 /// Time the UI has to confirm it shows the question.
 const ACK_TIMEOUT: Duration = Duration::from_secs(1);
+/// How long queued settings and autosave writes may take on quitting before
+/// the operator is asked whether to wait longer.
+const FLUSH_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub const EVENT_CLOSE_REQUESTED: &str = "close_requested";
 
@@ -96,8 +100,8 @@ pub async fn confirm_close(
     } else {
         backend.ask(Request::DiscardAutosave).await?;
     }
-    destroy(&window);
-    Ok(())
+    // Waiting for the writes (and maybe a dialog) must not block the async runtime.
+    tauri::async_runtime::spawn_blocking(move || destroy(&window)).await.map_err(|e| e.to_string())
 }
 
 /// Fallback while the UI hangs.
@@ -182,7 +186,32 @@ fn ask_backend<T>(
     rx.recv_timeout(timeout).ok()
 }
 
+/// Waits until the settings and autosave writes still queued are on disk.
+/// If the disk does not respond, the operator decides: wait longer (also
+/// when the dialog is dismissed) or quit and possibly lose them.
+fn flush_writes(window: &Window) {
+    let Some(writer) = window.try_state::<Writer>() else { return };
+    let quit_now = t!("close.quit_now");
+    while !writer.flush(FLUSH_TIMEOUT) {
+        let answer = window
+            .dialog()
+            .message(t!("close.writes_pending"))
+            .title(t!("close.writes_pending_title"))
+            .kind(MessageDialogKind::Warning)
+            .buttons(MessageDialogButtons::OkCancelCustom(quit_now.clone(), t!("close.keep_waiting")))
+            .parent(window)
+            .blocking_show_with_result();
+        match answer {
+            MessageDialogResult::Custom(label) if label == quit_now => return,
+            MessageDialogResult::Ok => return,
+            _ => {}
+        }
+    }
+}
+
 fn destroy(window: &Window) {
+    // Everything the operator changed is on disk before the program ends.
+    flush_writes(window);
     // Saved here as well: on exit the destroyed window can no longer be asked.
     let _ = window.app_handle().save_window_state(crate::WINDOW_STATE);
     // Else the app would go on without its main window.

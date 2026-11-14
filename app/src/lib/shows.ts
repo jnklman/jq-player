@@ -5,7 +5,7 @@ import { open, save } from '@tauri-apps/plugin-dialog';
 
 import { api, type CloseCheck, type SaveAsMedia, SHOW_EXTENSION } from './api';
 import { t } from './i18n/index.svelte';
-import { ask, attempt, mode, ui } from './store.svelte';
+import { ask, attempt, attemptChange, mode, ui, whenShown } from './store.svelte';
 
 /** A useful start directory for show pickers. */
 async function showsDir(): Promise<string | undefined> {
@@ -52,7 +52,7 @@ async function exclusive(task: () => Promise<unknown>) {
 export function openShow(): Promise<void> {
   return exclusive(async () => {
     const path = await pickShowFile();
-    if (path) await replaceShow(() => api.openShow(path));
+    if (path) await replaceShow(() => api.openShow(path).then(whenShown));
   });
 }
 
@@ -63,14 +63,14 @@ export function openShow(): Promise<void> {
  */
 export function openShowFile(path: string): Promise<void> {
   if (ui.leaving) return Promise.resolve();
-  return exclusive(() => replaceShow(() => api.openShow(path)));
+  return exclusive(() => replaceShow(() => api.openShow(path).then(whenShown)));
 }
 
 /** Picks a folder and creates the show `name` in it or directly there. */
 export function newShow(name: string, createFolder = true): Promise<void> {
   return exclusive(async () => {
     const dir = await pickShowDir(createFolder);
-    if (dir) await replaceShow(() => api.newShow(dir, name, createFolder));
+    if (dir) await replaceShow(() => api.newShow(dir, name, createFolder).then(whenShown));
   });
 }
 
@@ -92,7 +92,9 @@ export function createShow(): Promise<void> {
       { value: 'folder', label: t('shows.new_folder'), focus: true },
     ]);
     if (placement !== 'cancel') {
-      await replaceShow(async () => api.newShow(await dirname(path), await showName(path), placement === 'folder'));
+      await replaceShow(async () =>
+        whenShown(await api.newShow(await dirname(path), await showName(path), placement === 'folder')),
+      );
     }
   });
 }
@@ -122,7 +124,7 @@ export function saveShowAs(): Promise<void> {
     const name = await showName(path);
     ui.savingAs = true;
     try {
-      await attempt(api.saveShowAs(await dirname(path), name, media));
+      await attemptChange(api.saveShowAs(await dirname(path), name, media));
     } finally {
       ui.savingAs = false;
     }
@@ -130,7 +132,7 @@ export function saveShowAs(): Promise<void> {
 }
 
 /**
- * Replaces the open show with `load`. Asks first in show mode, while cues
+ * Replaces the open show with `load` (which resolves once the new show is shown). Asks first in show mode, while cues
  * run (they stop) or with unsaved changes, like closing the window.
  */
 async function replaceShow(load: () => Promise<unknown>) {

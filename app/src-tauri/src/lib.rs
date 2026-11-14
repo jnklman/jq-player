@@ -11,6 +11,7 @@ mod panel_windows;
 mod save_as;
 mod session;
 mod updates;
+mod writer;
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Sender};
@@ -23,7 +24,7 @@ use jq_core::{Action, LocalSettings, PeakCache, SelectionMode, Startup};
 use jq_show::{Cue, CueId, StopwatchAction};
 use serde::Serialize;
 use session::EditOp;
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, RunEvent, State};
 use tauri_plugin_window_state::StateFlags;
 
 /// Window state kept between runs. Decorations and visibility come from
@@ -40,6 +41,11 @@ const STARTUP_GRACE: Duration = Duration::from_secs(5);
 
 /// Requests that take longer than this are reported as failed.
 const REPLY_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Longest wait on exit for settings and autosave writes still queued; the
+/// window's close asks the operator before (see `close`), this is the last
+/// resort for other ways out.
+const EXIT_FLUSH_TIMEOUT: Duration = Duration::from_secs(5);
 
 struct Backend(Mutex<Sender<Request>>);
 
@@ -460,18 +466,32 @@ pub fn run() {
             if jq_core::LocalSettings::load_general(&settings_file).unwrap_or_default().check_updates {
                 updates::check_at_startup(app.handle().clone());
             }
-            let tx = backend::spawn(app.handle().clone());
+            // Before the show thread, which queues its settings and autosave writes there.
+            let (writer, writes) = writer::Writer::spawn();
+            app.manage(writer.clone());
+            let tx = backend::spawn(app.handle().clone(), writes);
             // A show path on the command line (e.g. a show file opened in the file
             // manager) is opened right away: no show is open yet to ask about.
             let cwd = std::env::current_dir().unwrap_or_default();
             let cli = show_arg(std::env::args().skip(1), &cwd);
             let settings = backend::settings_path(app.handle());
+            // Through the writer, like every other write of the settings file, so
+            // they cannot interleave. Read before anything is queued.
+            let set_pending = |pending: bool| {
+                let path = settings.clone();
+                let key = writer::Key::new(path.clone(), "startup");
+                writer.submit(Some(key), move || {
+                    // As before, a failure here is not worth a notice.
+                    let _ = Startup::set_pending(&path, pending);
+                    Ok(())
+                });
+            };
             let mut offer = None;
             let open = match Startup::read(&settings, cli.is_some()) {
                 Startup::Open(path) => {
                     // Cleared once the show has run for a while; still set on the
                     // next start, it is only offered then.
-                    let _ = Startup::set_pending(&settings, true);
+                    set_pending(true);
                     let survived = tx.clone();
                     std::thread::Builder::new().name("jq-startup".into()).spawn(move || {
                         std::thread::sleep(STARTUP_GRACE);
@@ -481,11 +501,11 @@ pub fn run() {
                 }
                 Startup::Ask(path) => {
                     offer = Some(path);
-                    let _ = Startup::set_pending(&settings, false);
+                    set_pending(false);
                     None
                 }
                 Startup::Nothing => {
-                    let _ = Startup::set_pending(&settings, false);
+                    set_pending(false);
                     cli
                 }
             };
@@ -547,8 +567,17 @@ pub fn run() {
             updates::check_update,
             updates::install_update
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|app, event| {
+            // Whatever way the program ends, the queued writes go to disk first.
+            if let RunEvent::Exit = event
+                && let Some(writer) = app.try_state::<writer::Writer>()
+                && !writer.flush(EXIT_FLUSH_TIMEOUT)
+            {
+                eprintln!("writes still pending on exit");
+            }
+        });
 }
 
 #[cfg(test)]

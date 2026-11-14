@@ -5,16 +5,19 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
 
 use jq_core::{Action, LocalSettings, Notice, PeakCache, SelectionMode, Startup, State};
 use jq_show::{Cue, CueId, LevelLimits, ShowFile, StopwatchAction};
 use serde::Serialize;
+use serde_json::value::RawValue;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::language;
-use crate::session::{EditOp, ImportState, LearnTarget, Session};
+use crate::session::{EditOp, ImportState, LearnTarget, Session, ShowView};
+use crate::writer::{Key, Writer};
 
 /// UI events; see `app/src/lib/api.ts` for the TypeScript side.
 pub const EVENT_STATE: &str = "state";
@@ -134,17 +137,18 @@ struct StateEvent<'a> {
     searching: bool,
 }
 
-pub fn spawn(app: AppHandle) -> Sender<Request> {
+/// `writes`: the notices of the [`Writer`] (failed background writes).
+pub fn spawn(app: AppHandle, writes: Receiver<Notice>) -> Sender<Request> {
     let (tx, rx) = mpsc::channel();
     let midi_tx = tx.clone();
     std::thread::Builder::new()
         .name("jq-show".into())
-        .spawn(move || run(app, rx, midi_tx))
+        .spawn(move || run(app, rx, midi_tx, writes))
         .expect("spawn show thread");
     tx
 }
 
-fn run(app: AppHandle, rx: Receiver<Request>, midi_tx: Sender<Request>) {
+fn run(app: AppHandle, rx: Receiver<Request>, midi_tx: Sender<Request>, writes: Receiver<Notice>) {
     let mut session: Option<Session> = None;
     let mut last_state = Instant::now();
     // The state last sent; an unchanged one (a quiet show) is not sent
@@ -191,7 +195,7 @@ fn run(app: AppHandle, rx: Receiver<Request>, midi_tx: Sender<Request>) {
                 let now = Instant::now();
                 s.runner.tick(now);
                 if autosave.due(now) {
-                    s.autosave_tick(now, &mut notices);
+                    s.autosave_tick(now);
                 }
                 s.update_busy();
                 if media.due(now) {
@@ -214,6 +218,7 @@ fn run(app: AppHandle, rx: Receiver<Request>, midi_tx: Sender<Request>) {
             }
         }));
         failed |= ticked.is_err();
+        notices.extend(writes.try_iter());
         if failed && internal_errors.due(Instant::now()) {
             notices.push(Notice::Error(jq_i18n::t!("backend.internal_error")));
         }
@@ -279,8 +284,9 @@ fn handle(
             if let Some(s) = session {
                 let _ = app.emit(EVENT_STATE, state_event(s, Instant::now()));
             }
-            let view = session.as_ref().map(|s| s.view());
-            let _ = reply.send(serde_json::to_value(view).map_err(|e| e.to_string()));
+            // Numbered like the last `show` event: a window takes whichever of the two is newer.
+            let event = ShowEvent { revision: revision(), view: session.as_ref().map(|s| s.view()) };
+            let _ = reply.send(serde_json::to_value(event).map_err(|e| e.to_string()));
         }
         Request::Action(action) => {
             if let Some(s) = session.as_mut() {
@@ -350,9 +356,11 @@ fn handle(
             let _ = reply.send(result);
         }
         Request::StartupSurvived => {
-            if let Err(e) = Startup::set_pending(&settings_path(app), false) {
-                notices.push(Notice::Warning(jq_i18n::t!("session.settings_not_saved", error = e)));
-            }
+            let path = settings_path(app);
+            app.state::<Writer>().submit(Some(Key::new(path.clone(), "startup")), move || {
+                Startup::set_pending(&path, false)
+                    .map_err(|e| jq_i18n::t!("session.settings_not_saved", error = e))
+            });
         }
         Request::Rename(name, reply) => {
             let result = match session.as_mut() {
@@ -498,7 +506,9 @@ fn replace(
         notices.push(Notice::Warning(jq_i18n::t!("backend.autosave_not_deleted", error = e)));
     }
     let peaks = app.state::<Arc<PeakCache>>().inner().clone();
-    let mut opened = Session::open(file, show_mode, settings_path(app), peaks, midi_tx.clone(), notices);
+    let writer = app.state::<Writer>().inner().clone();
+    let mut opened =
+        Session::open(file, show_mode, settings_path(app), peaks, writer, midi_tx.clone(), notices);
     opened.remember_path(notices);
     *session = Some(opened);
 }
@@ -518,17 +528,45 @@ fn state_event(s: &Session, now: Instant) -> serde_json::Value {
     serde_json::to_value(event).unwrap_or_default()
 }
 
-/// Sends the current show view as event and returns it. The state goes
-/// first: after deleting the playhead cue the old state would point the
-/// new view at a cue it no longer has until the next tick (GO flashes
-/// disabled), while the new playhead is almost always in the old view too.
+/// Number of the last show view sent (0: none yet). Only the show thread
+/// counts it up; it only ever grows, also across shows.
+static REVISION: AtomicU64 = AtomicU64::new(0);
+
+fn revision() -> u64 {
+    REVISION.load(Ordering::Relaxed)
+}
+
+/// The `show` event (and `get_show`'s reply): the view with its number, so a
+/// window can tell which of two views is newer and a caller can wait for the
+/// view its command caused.
+#[derive(Serialize)]
+struct ShowEvent<V> {
+    revision: u64,
+    view: V,
+}
+
+/// The `show` event as JSON, serialized once for every window.
+fn show_event(revision: u64, view: impl Serialize) -> Result<Box<RawValue>, String> {
+    serde_json::value::to_raw_value(&ShowEvent { revision, view }).map_err(|e| e.to_string())
+}
+
+/// Sends the current show view as event to every window and returns its
+/// revision, the reply of the command that caused it: the view itself goes
+/// out only once, as the event (`whenShown` in the UI waits for it). The
+/// state goes first: after deleting the playhead cue the old state would
+/// point the new view at a cue it no longer has until the next tick (GO
+/// flashes disabled), while the new playhead is almost always in the old
+/// view too.
 fn publish(app: &AppHandle, session: &Option<Session>) -> Result<serde_json::Value, String> {
     if let Some(s) = session {
         let _ = app.emit(EVENT_STATE, state_event(s, Instant::now()));
     }
-    let view = serde_json::to_value(session.as_ref().map(|s| s.view())).map_err(|e| e.to_string())?;
-    let _ = app.emit(EVENT_SHOW, &view);
-    Ok(view)
+    let next = revision() + 1;
+    let view: Option<ShowView> = session.as_ref().map(|s| s.view());
+    let event = show_event(next, view)?;
+    REVISION.store(next, Ordering::Relaxed);
+    let _ = app.emit(EVENT_SHOW, &*event);
+    Ok(next.into())
 }
 
 #[cfg(test)]
@@ -543,5 +581,14 @@ mod tests {
         assert!(!every.due(start + POLL), "not again on the next tick");
         assert!(!every.due(start + INTERNAL_ERROR_INTERVAL / 2));
         assert!(every.due(start + INTERNAL_ERROR_INTERVAL));
+    }
+
+    #[test]
+    fn show_events_carry_the_view_with_its_revision() {
+        let event = show_event(7, serde_json::json!({ "name": "Show" })).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(event.get()).unwrap();
+        assert_eq!(parsed, serde_json::json!({ "revision": 7, "view": { "name": "Show" } }));
+        let none = show_event(8, None::<()>).unwrap();
+        assert_eq!(none.get(), r#"{"revision":8,"view":null}"#, "no show: the view is null");
     }
 }

@@ -6,7 +6,7 @@
   import { t } from '../../lib/i18n/index.svelte';
   import { changedFields, settingsProblem, tabProblems, withEdits } from '../../lib/settings';
   import { provideSettingsView, SettingsView } from '../../lib/settingsView.svelte';
-  import { attempt, notify, ui } from '../../lib/store.svelte';
+  import { attemptChange, notify, ui } from '../../lib/store.svelte';
   import EditDialog from '../EditDialog.svelte';
   import DeviceTab from './DeviceTab.svelte';
   import MediaTab from './MediaTab.svelte';
@@ -52,12 +52,13 @@
       notify({ level: 'error', message: problem });
       return false;
     }
-    const applied = await attempt(
+    const applied = await attemptChange(
       api.setSettings(withEdits($state.snapshot(ui.view!.settings), $state.snapshot(draft))),
     );
     if (!applied) return false;
-    // The backend's version is the new baseline (and draft), so nothing counts as changed.
-    initial = applied.settings;
+    // The backend's version is the new baseline (and draft), so nothing counts as changed. Copies: the view is the
+    // store's, never changed in place.
+    initial = structuredClone(applied.settings);
     draft = structuredClone(applied.settings);
     return true;
   }
@@ -65,7 +66,7 @@
   // For MIDI learn: opens the input chosen in the draft, applying nothing else.
   async function openMidiPort(): Promise<boolean> {
     const port = draft.midi_port;
-    const applied = await attempt(api.setSettings({ ...$state.snapshot(ui.view!.settings), midi_port: port }));
+    const applied = await attemptChange(api.setSettings({ ...$state.snapshot(ui.view!.settings), midi_port: port }));
     if (!applied) return false;
     initial.midi_port = port;
     if (applied.midi.port) return true;

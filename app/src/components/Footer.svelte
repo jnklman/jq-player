@@ -42,7 +42,8 @@
   }
 
   async function openMediaFolder() {
-    if (await attempt(api.openMediaDir())) mediaMenuOpen = false;
+    // The command answers with null: only `undefined` means it failed.
+    if ((await attempt(api.openMediaDir())) !== undefined) mediaMenuOpen = false;
   }
 </script>
 

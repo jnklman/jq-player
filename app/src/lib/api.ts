@@ -1,8 +1,11 @@
 // Contract between UI and backend. The backend (Rust, app/src-tauri) owns
 // all show state; the UI renders what it receives and sends commands.
 //
-// - Commands: the functions below (Tauri `invoke`).
-// - Events:   `show` (ShowView, after every change), `state` (RuntimeState,
+// - Commands: the functions below (Tauri `invoke`). Commands that change the
+//             show answer with the `Revision` of the view they caused, which
+//             comes as a `show` event (it is sent only once, to every window);
+//             wait for it with `whenShown` (lib/store.svelte.ts).
+// - Events:   `show` (ShowEvent, after every change), `state` (RuntimeState,
 //             ~30×/s while a show is open), `notice` (Notice),
 //             `close_requested` (CloseCheck, the window's × was clicked),
 //             `language_changed` (LanguageInfo),
@@ -857,6 +860,20 @@ export type TimingIssue =
 
 export type TimingWarning = TimingIssue & { message: string };
 
+/**
+ * Number of a show view, counted up by the backend for every view it sends (from 1, across shows, until the program
+ * ends); a higher one is newer. A command's reply and its `show` event can arrive in either order.
+ */
+export type Revision = number;
+
+/** The `show` event and `getShow`'s answer. `getShow` builds the view when asked and reports the revision of the
+ * last `show` event; of a view and an event with the same revision either will do, an older one is stale. */
+export interface ShowEvent {
+  revision: Revision;
+  /** null: no show open. */
+  view: ShowView | null;
+}
+
 export interface ShowView {
   path: string;
   name: string;
@@ -1237,21 +1254,21 @@ export interface LanguageInfo {
 export const api = {
   /** The language setting and the language in use; works without a show (start screen). */
   getLanguage: () => invoke<LanguageInfo>('get_language'),
-  openShow: (path: string) => invoke<ShowView>('open_show', { path }),
+  openShow: (path: string) => invoke<Revision>('open_show', { path }),
   /** Which cues `set_level_limits` with these limits would change; changes nothing. */
   checkLevelLimits: (limits: LevelLimits) => invoke<LevelChanges>('check_level_limits', { limits }),
   /** The last show to offer on the start screen (`open_last = "ask"`, or after a crash); only the first call gets it. */
   startupShow: () => invoke<string | null>('startup_show'),
   newShow: (dir: string, name: string, createFolder: boolean) =>
-    invoke<ShowView>('new_show', { dir, name, createFolder }),
-  saveShow: () => invoke<ShowView>('save_show'),
+    invoke<Revision>('new_show', { dir, name, createFolder }),
+  saveShow: () => invoke<Revision>('save_show'),
   /** Also sends the current `state` event first; listen to it before calling (on start, after a reload). */
-  getShow: () => invoke<ShowView | null>('get_show'),
+  getShow: () => invoke<ShowEvent>('get_show'),
   /** Fire-and-forget; GO never waits for a reply. */
   action: (action: Action) => invoke<void>('action', { action }),
   /** Fire-and-forget: starts, stops or resets a stopwatch of the show (by id). */
   stopwatch: (id: string, action: StopwatchAction) => invoke<void>('stopwatch', { id, action }),
-  edit: (op: EditOp) => invoke<ShowView>('edit', { op }),
+  edit: (op: EditOp) => invoke<Revision>('edit', { op }),
   /**
    * Fire-and-forget, for every step of a slider: running cues follow `cue`
    * (volume, pan), but show and undo history stay. End the edit with
@@ -1267,9 +1284,9 @@ export const api = {
    */
   previewAt: (cue: CueId, at: number, until?: number) => invoke<void>('preview_at', { cue, at, until: until ?? null }),
   /** Fails in show mode. */
-  setKeepAwake: (enabled: boolean) => invoke<ShowView>('set_keep_awake', { enabled }),
+  setKeepAwake: (enabled: boolean) => invoke<Revision>('set_keep_awake', { enabled }),
   /** Learns the next MIDI control for `target`; null cancels. Needs an open port; a cue only in edit mode. */
-  midiLearn: (target: LearnTarget | null) => invoke<ShowView>('midi_learn', { target }),
+  midiLearn: (target: LearnTarget | null) => invoke<Revision>('midi_learn', { target }),
   /** Unshifted text of the character keys on the current keyboard layout, by `KeyboardEvent.code` (missing keys:
    * unknown). For webviews without `navigator.keyboard`. */
   keyLabels: () => invoke<Record<string, string>>('key_labels'),
@@ -1308,35 +1325,35 @@ export const api = {
    */
   cleanMedia: (files: string[]) => invoke<CleanedMedia>('clean_media', { files }),
   /** Restores the crash autosave as one undo step (`true`) or deletes it. */
-  recoverAutosave: (apply: boolean) => invoke<ShowView>('recover_autosave', { apply }),
+  recoverAutosave: (apply: boolean) => invoke<Revision>('recover_autosave', { apply }),
   /**
    * Saves the show as `<dir>/<name>/<name>.jqshow` and goes on there; the old show stays as last
    * saved. `copy` copies the media files the show uses (undo history and clipboard included) into
    * the new folder's own media folder, `link` points the new show at the current media folder.
    * Fails in show mode, while cues run or files are being copied in, and if the folder exists.
    */
-  saveShowAs: (dir: string, name: string, media: SaveAsMedia) => invoke<ShowView>('save_show_as', { dir, name, media }),
+  saveShowAs: (dir: string, name: string, media: SaveAsMedia) => invoke<Revision>('save_show_as', { dir, name, media }),
   /** Renames the show folder; fails in show mode and while cues run. */
-  renameShow: (name: string) => invoke<ShowView>('rename_show', { name }),
-  setShowMode: (enabled: boolean) => invoke<ShowView>('set_show_mode', { enabled }),
+  renameShow: (name: string) => invoke<Revision>('rename_show', { name }),
+  setShowMode: (enabled: boolean) => invoke<Revision>('set_show_mode', { enabled }),
   /**
    * Saves and applies all settings. A changed host/device/channel count
    * (or a failed device) is reopened; that fails while cues are running.
    */
-  setSettings: (settings: LocalSettings) => invoke<ShowView>('set_settings', { settings }),
+  setSettings: (settings: LocalSettings) => invoke<Revision>('set_settings', { settings }),
   /** Remembers the audio picker's folder; changes no other setting, so it also works while cues run. */
-  setAudioDir: (dir: string | null) => invoke<ShowView>('set_audio_dir', { dir }),
+  setAudioDir: (dir: string | null) => invoke<Revision>('set_audio_dir', { dir }),
   /** Changes the show's media folder; refused while cues run or file actions are underway. */
-  setMediaDir: (dir: string) => invoke<ShowView>('set_media_dir', { dir }),
+  setMediaDir: (dir: string) => invoke<Revision>('set_media_dir', { dir }),
   /** Stores the panel layout; changes no other setting, so it also works while cues run. */
-  setLayout: (layout: unknown) => invoke<ShowView>('set_layout', { layout }),
+  setLayout: (layout: unknown) => invoke<Revision>('set_layout', { layout }),
   /** Stores the cue list's selection mode; changes no other setting. */
-  setSelectionMode: (mode: SelectionMode) => invoke<ShowView>('set_selection_mode', { mode }),
+  setSelectionMode: (mode: SelectionMode) => invoke<Revision>('set_selection_mode', { mode }),
   /**
    * Looks at the media files again, for changes the file watcher missed; missing files are searched anew. Changes
    * found come in as `show` events and warnings.
    */
-  rescanMedia: () => invoke<ShowView>('rescan_media'),
+  rescanMedia: () => invoke<Revision>('rescan_media'),
   /** Opens the existing media folder in the system file manager. */
   openMediaDir: () => invoke<void>('open_media_dir'),
   /**
@@ -1372,8 +1389,9 @@ export const events = {
   /** The language setting changed (`setSettings`); sent to all windows. */
   onLanguageChanged: (handler: (info: LanguageInfo) => void): Promise<UnlistenFn> =>
     listen<LanguageInfo>('language_changed', (e) => handler(e.payload)),
-  onShow: (handler: (view: ShowView | null) => void): Promise<UnlistenFn> =>
-    listen<ShowView | null>('show', (e) => handler(e.payload)),
+  /** To every window after every change; see `ShowEvent`. */
+  onShow: (handler: (event: ShowEvent) => void): Promise<UnlistenFn> =>
+    listen<ShowEvent>('show', (e) => handler(e.payload)),
   /** Sent only when the state changed (up to 20 times a second), and with `getShow`. */
   onState: (handler: (state: RuntimeState) => void): Promise<UnlistenFn> =>
     listen<RuntimeState>('state', (e) => handler(e.payload)),

@@ -15,12 +15,15 @@ import {
   type ImportClash,
   type Notice,
   type OnClash,
+  type Revision,
   type RuntimeState,
   type SelectionMode,
+  type ShowEvent,
   type ShowView,
 } from './api';
 import { revealRow } from './cueScroll';
 import { setLanguage, t } from './i18n/index.svelte';
+import { Revisions } from './revision';
 
 export type Mode = 'edit' | 'show';
 
@@ -114,6 +117,36 @@ export const ui = $state({
   justSaved: false,
   notices: [] as ShownNotice[],
 });
+
+// The revision of `ui.view` (see `Revision`).
+const revisions = new Revisions();
+/** Longest wait for the `show` event of a command's change (it is sent before the reply, so it is normally there
+ * already or comes within milliseconds); past it the caller goes on with the view it has. */
+const SHOWN_TIMEOUT = 2000;
+
+/** Shows a view from the backend unless a newer one is shown already (a late `getShow` answer). */
+function showView({ revision, view: next }: ShowEvent) {
+  if (!revisions.accept(revision)) return;
+  ui.view = next;
+  pruneSelection();
+}
+
+/**
+ * Resolves with the view once this window shows the change a command answered with `revision` (or a later one), so
+ * what follows (selecting an added cue, reading the applied settings) sees it.
+ */
+export async function whenShown(revision: Revision): Promise<ShowView | null> {
+  await revisions.reached(revision, SHOWN_TIMEOUT);
+  return ui.view;
+}
+
+/** Like `attempt` for a command that changes the show: resolves with the view showing the change (`undefined` if
+ * the command failed). */
+export async function attemptChange(promise: Promise<Revision>): Promise<ShowView | undefined> {
+  const revision = await attempt(promise);
+  if (revision === undefined) return undefined;
+  return (await whenShown(revision)) ?? undefined;
+}
 
 let noticeId = 0;
 
@@ -218,17 +251,15 @@ export async function initLanguage() {
 
 /** Follows the backend's events; notices and the close question only in the main window (`main`). */
 export async function init(main: boolean) {
-  await events.onShow((view) => {
-    ui.view = view;
-    pruneSelection();
-  });
+  await events.onShow(showView);
   // Replaced whole: `runtime` is raw state, a change inside it would go unnoticed.
   await events.onState((state) => {
     ui.runtime = state;
   });
   if (main) await listenAsMain();
   // Answers after a show the backend opens at start (same queue).
-  ui.view = (await attempt(api.getShow())) ?? null;
+  const shown = await attempt(api.getShow());
+  if (shown) showView(shown);
   ui.started = true;
 }
 
