@@ -89,11 +89,16 @@ export function createShow(): Promise<void> {
       defaultPath: dir ? await join(dir, t('shows.new_name')) : t('shows.new_name'),
     });
     if (!path) return;
-    const placement = await ask<'folder' | 'here' | 'cancel'>(t('shows.new_title'), t('shows.new_where'), [
-      { value: 'cancel', label: t('common.cancel') },
-      { value: 'here', label: t('shows.new_here') },
-      { value: 'folder', label: t('shows.new_folder'), focus: true },
-    ]);
+    const placement = await ask<'folder' | 'here' | 'cancel'>(
+      t('shows.new_title'),
+      t('shows.new_where'),
+      [
+        { value: 'cancel', label: t('common.cancel') },
+        { value: 'here', label: t('shows.new_here') },
+        { value: 'folder', label: t('shows.new_folder'), focus: true },
+      ],
+      'cancel',
+    );
     if (placement !== 'cancel') {
       await replaceShow(async () =>
         whenShown(await api.newShow(await dirname(path), await showName(path), placement === 'folder')),
@@ -118,11 +123,16 @@ export function saveShowAs(): Promise<void> {
       defaultPath: dir ? await join(dir, suggested) : suggested,
     });
     if (!path) return;
-    const media = await ask<SaveAsMedia | 'cancel'>(t('shows.media_title'), t('shows.media_text'), [
-      { value: 'cancel', label: t('common.cancel') },
-      { value: 'link', label: t('shows.media_link') },
-      { value: 'copy', label: t('shows.media_copy'), focus: true },
-    ]);
+    const media = await ask<SaveAsMedia | 'cancel'>(
+      t('shows.media_title'),
+      t('shows.media_text'),
+      [
+        { value: 'cancel', label: t('common.cancel') },
+        { value: 'link', label: t('shows.media_link') },
+        { value: 'copy', label: t('shows.media_copy'), focus: true },
+      ],
+      'cancel',
+    );
     if (media === 'cancel') return;
     const name = await showName(path);
     ui.savingAs = true;

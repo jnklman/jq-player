@@ -50,6 +50,8 @@ export interface Question {
   title: string;
   text: string;
   choices: Choice<string>[];
+  /** Answered by Esc when it closes dialogs (`escapeCloses`); without one, Esc never answers. */
+  escape?: string;
   answer: (value: string) => void;
 }
 
@@ -176,10 +178,27 @@ export async function attempt<T>(promise: Promise<T>): Promise<T | undefined> {
 /**
  * How dialogs, menus, lists and popovers take Esc: with `settings.escape = "close_first"` they close, else they
  * ignore it and Esc stays a panic. The ui components (`dialog-content`, `*-menu-content`, `popover-content`,
- * `select-content`) set it by default; questions (`alert-dialog-content`) always ignore it: they need an answer.
+ * `select-content`) set it by default; questions (`alert-dialog-content`) ignore it: they need an answer, unless they name one
+ * for Esc (`Question.escape`).
  */
 export function dialogEscape(): 'close' | 'ignore' {
   return escapeCloses() ? 'close' : 'ignore';
+}
+
+/**
+ * Props for a question's `alert-dialog-content` that let Esc give `answer` (its "Cancel") with "close_first";
+ * without an answer, or with Esc as a panic, Esc is ignored. `data-escape` tells `shortcuts.ts` not to panic.
+ */
+export function escapeAnswers(answer?: () => void) {
+  const answers = answer !== undefined && escapeCloses();
+  return {
+    'data-escape': answers ? '' : undefined,
+    escapeKeydownBehavior: answers ? ('close' as const) : ('ignore' as const),
+    onEscapeKeydown: (e: KeyboardEvent) => {
+      e.preventDefault();
+      if (answers) answer();
+    },
+  };
 }
 
 /** Esc closes the open dialog or menu (instead of panicking): only with "close_first". */
@@ -190,15 +209,16 @@ export function escapeCloses(): boolean {
 /**
  * Asks in an in-app dialog; resolves with the value of the chosen button.
  * The first choice should be the one that changes nothing: a newer question
- * answers an open one with it.
+ * answers an open one with it. `escape` is the answer Esc gives with "close_first".
  */
-export function ask<T extends string>(title: string, text: string, choices: Choice<T>[]): Promise<T> {
+export function ask<T extends string>(title: string, text: string, choices: Choice<T>[], escape?: T): Promise<T> {
   ui.question?.answer(ui.question.choices[0].value);
   return new Promise((resolve) => {
     ui.question = {
       title,
       text,
       choices,
+      escape,
       answer: (value) => {
         ui.question = null;
         resolve(value as T);
@@ -209,14 +229,20 @@ export function ask<T extends string>(title: string, text: string, choices: Choi
 
 /**
  * Asked when a dialog with unsaved changes closes other than by "Cancel" (×, Esc, a click outside).
- * Without `canApply` (e.g. invalid input) only staying or discarding is offered.
+ * Without `canApply` (e.g. invalid input) only staying or discarding is offered. Esc (with "close_first")
+ * discards, like the dialog's "Cancel": pressed twice, it closes the dialog.
  */
 export function askUnsaved(canApply = true): Promise<'stay' | 'discard' | 'apply'> {
-  return ask<'stay' | 'discard' | 'apply'>(t('unsaved.title'), t('unsaved.text'), [
-    { label: t('unsaved.stay'), value: 'stay', focus: true },
-    { label: t('unsaved.discard'), value: 'discard' },
-    ...(canApply ? [{ label: t('unsaved.apply'), value: 'apply' as const }] : []),
-  ]);
+  return ask<'stay' | 'discard' | 'apply'>(
+    t('unsaved.title'),
+    t('unsaved.text'),
+    [
+      { label: t('unsaved.stay'), value: 'stay', focus: true },
+      { label: t('unsaved.discard'), value: 'discard' },
+      ...(canApply ? [{ label: t('unsaved.apply'), value: 'apply' as const }] : []),
+    ],
+    'stay',
+  );
 }
 
 /** Asks what to do with each file whose name is taken; `null` if cancelled. */

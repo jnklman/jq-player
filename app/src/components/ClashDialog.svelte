@@ -6,7 +6,7 @@
 
   import type { ImportClash, OnClash } from '../lib/api';
   import { labels, t } from '../lib/i18n/index.svelte';
-  import type { ClashQuestion } from '../lib/store.svelte';
+  import { type ClashQuestion, escapeAnswers } from '../lib/store.svelte';
   import { hint } from '../lib/ui';
   import SimpleSelect from './SimpleSelect.svelte';
 
@@ -43,6 +43,7 @@
 <AlertDialog.Root open>
   <AlertDialog.Content
     class="max-w-160"
+    {...escapeAnswers(() => question.answer(null))}
     onOpenAutoFocus={(e) => {
       e.preventDefault();
       accept?.focus();

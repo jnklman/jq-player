@@ -83,7 +83,9 @@ function modalOpen(): boolean {
 /** A dialog, menu or list is open that Esc closes (questions never close with Esc). */
 function overlayOpen(): boolean {
   const slots = ['dialog', 'dropdown-menu', 'context-menu', 'popover', 'select'];
-  return document.querySelector(slotSelector(slots.map((slot) => `${slot}-content`))) !== null;
+  // A question answering Esc (`Question.escape`) is marked with `data-escape`.
+  const overlays = `${slotSelector(slots.map((slot) => `${slot}-content`))}, [data-slot="alert-dialog-content"][data-escape]`;
+  return document.querySelector(overlays) !== null;
 }
 
 /** Takes the focus from a clicked control (see `pointerFocus`); focus moved with Tab stays. */

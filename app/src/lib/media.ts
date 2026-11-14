@@ -117,6 +117,7 @@ export async function pickAudio(
       { label: t('media.dont_copy'), value: 'link' },
       { label: t('media.copy'), value: 'copy', focus: true },
     ],
+    'cancel',
   );
   if (answer === 'cancel') return null;
   if (answer === 'link') return { paths: picked, copy_outside: false };
@@ -151,7 +152,7 @@ export async function cleanMediaFolder() {
   if (!files) return;
   const ok = [{ label: t('common.ok'), value: 'ok', focus: true }];
   if (files.length === 0) {
-    await ask(t('media.clean_title'), t('media.clean_all_used'), ok);
+    await ask(t('media.clean_title'), t('media.clean_all_used'), ok, 'ok');
     return;
   }
   const bytes = files.reduce((sum, file) => sum + file.bytes, 0);
@@ -164,11 +165,12 @@ export async function cleanMediaFolder() {
       { label: t('common.cancel'), value: 'cancel', focus: true },
       { label: t('common.delete'), value: 'delete', danger: true },
     ],
+    'cancel',
   );
   if (answer !== 'delete') return;
   const result = await attempt(api.cleanMedia(files.map((file) => file.file)));
   if (!result) return;
   const deleted = t('media.clean_deleted', { count: result.deleted });
   const failed = result.failed.length ? `\n\n${t('media.clean_failed')}\n${result.failed.join('\n')}` : '';
-  await ask(t('media.clean_done'), deleted + failed, ok);
+  await ask(t('media.clean_done'), deleted + failed, ok, 'ok');
 }

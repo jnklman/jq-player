@@ -285,11 +285,16 @@ export async function replaceSoundFile(cue: Cue) {
   const name = (path.split(/[\\/]/).at(-1) ?? '').replace(/\.[^.]*$/, '');
   let retitle = isPlaceholder(cue) && (cue.title === '' || translations('cue.placeholder_title').includes(cue.title));
   if (!retitle && name !== cue.title) {
-    const answer = await ask(t('commands.retitle_title'), t('commands.retitle_text', { title: cue.title, name }), [
-      { label: t('common.cancel'), value: 'cancel' },
-      { label: t('commands.keep_title'), value: 'keep', focus: true },
-      { label: t('commands.take_name'), value: 'retitle' },
-    ]);
+    const answer = await ask(
+      t('commands.retitle_title'),
+      t('commands.retitle_text', { title: cue.title, name }),
+      [
+        { label: t('common.cancel'), value: 'cancel' },
+        { label: t('commands.keep_title'), value: 'keep', focus: true },
+        { label: t('commands.take_name'), value: 'retitle' },
+      ],
+      'cancel',
+    );
     if (answer === 'cancel') return;
     retitle = answer === 'retitle';
   }
@@ -333,10 +338,15 @@ export async function setLevelLimits(next: LevelLimits): Promise<boolean> {
     changes.silenced.length && t('commands.limits_silenced', { cues: names(changes.silenced) }),
   ].filter((line) => typeof line === 'string');
   if (lines.length) {
-    const answer = await ask(t('commands.limits_title'), `${lines.join('\n')}\n\n${t('commands.limits_undoable')}`, [
-      { label: t('common.cancel'), value: 'cancel', focus: true },
-      { label: t('commands.limits_apply'), value: 'apply' },
-    ]);
+    const answer = await ask(
+      t('commands.limits_title'),
+      `${lines.join('\n')}\n\n${t('commands.limits_undoable')}`,
+      [
+        { label: t('common.cancel'), value: 'cancel', focus: true },
+        { label: t('commands.limits_apply'), value: 'apply' },
+      ],
+      'cancel',
+    );
     if (answer !== 'apply') return false;
   }
   return !!(await edit({ op: 'set_level_limits', limits: next }));

@@ -25,10 +25,15 @@
   // crashed the app on the last start); it does so only once.
   attempt(api.startupShow()).then(async (path) => {
     if (!path) return;
-    const choice = await ask(t('welcome.open_last'), path, [
-      { label: t('welcome.open'), value: 'open', focus: true },
-      { label: t('welcome.not_now'), value: 'skip' },
-    ]);
+    const choice = await ask(
+      t('welcome.open_last'),
+      path,
+      [
+        { label: t('welcome.open'), value: 'open', focus: true },
+        { label: t('welcome.not_now'), value: 'skip' },
+      ],
+      'skip',
+    );
     if (choice === 'open') openShowFile(path);
   });
 </script>
