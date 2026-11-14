@@ -104,7 +104,7 @@
     </span>
   {/snippet}
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="grid min-h-0 flex-1 grid-cols-[13rem_minmax(0,1fr)] max-sm:grid-cols-1" {onkeydown}>
+  <div class="grid min-h-0 flex-1 grid-cols-[14rem_minmax(0,1fr)] max-sm:grid-cols-1" {onkeydown}>
     <SettingsNav {changed} {problems} bind:search />
     <ScrollArea bind:viewportRef={scroller} viewportClass="scroll-pt-3">
       <DeviceTab bind:draft {setup} />
