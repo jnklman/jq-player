@@ -6,6 +6,7 @@
   import FloppyDisk from '~icons/ph/floppy-disk-bold';
   import FolderOpen from '~icons/ph/folder-open-bold';
   import Info from '~icons/ph/info-bold';
+  import Lock from '~icons/ph/lock-bold';
   import Power from '~icons/ph/power-bold';
   import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
   import { Tooltip } from '$lib/components/ui/tooltip';
@@ -13,7 +14,9 @@
   import appIcon from '../../assets/app-icon.svg';
   import { t } from '../lib/i18n/index.svelte';
   import { createShow, openShow, saveShowAs } from '../lib/shows';
-  import { saveShow, ui } from '../lib/store.svelte';
+  import { mode, saveShow, ui } from '../lib/store.svelte';
+
+  const locked = $derived(mode() === 'show');
 
   // Menu behind the app name in the header: everything about switching shows.
   // Settings of the open show live in the show menu next to it.
@@ -56,8 +59,8 @@
       {t('common.save')}
       <DropdownMenu.Shortcut>{t('key.ctrl')} + S</DropdownMenu.Shortcut>
     </DropdownMenu.Item>
-    <DropdownMenu.Item disabled={ui.openingShow} onSelect={saveShowAs}>
-      <FloppyDiskBack />
+    <DropdownMenu.Item disabled={locked || ui.openingShow} onSelect={saveShowAs}>
+      {#if !locked}<FloppyDiskBack />{:else}<Lock />{/if}
       {ui.savingAs ? t('appmenu.saving') : t('appmenu.save_as')}
       <DropdownMenu.Shortcut>{t('key.ctrl')} + {t('key.shift')} + S</DropdownMenu.Shortcut>
     </DropdownMenu.Item>

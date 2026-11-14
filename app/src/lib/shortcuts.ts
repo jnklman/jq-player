@@ -203,6 +203,9 @@ export function onKeydown(e: KeyboardEvent) {
     if (e.repeat) return;
     void commitTyping().then(() => {
       if (!e.shiftKey) saveShow();
+
+      // "Save as" is disabled in show mode, return early
+      if (mode() === 'show' || !e.shiftKey) return;
       else if (isMainWindow) saveShowAs();
       else runInMain('save_show_as');
     });
