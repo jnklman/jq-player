@@ -148,6 +148,7 @@ action.pan_left = Pan links
 action.pan_right = Pan rechts
 action.rate_up = Rate +
 action.rate_down = Rate −
+action.focus_goto = „Gehe zu“ fokussieren
 
 # Shortcuts (jq-core keys)
 keys.key_missing = {action}: Taste fehlt

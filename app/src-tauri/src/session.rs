@@ -1737,7 +1737,7 @@ impl Session {
             return Err(t!("session.no_midi_input"));
         }
         match target {
-            Some(LearnTarget::Action { action }) if action.on_selected() => {
+            Some(LearnTarget::Action { action }) if action.keys_only() => {
                 return Err(t!("session.keyboard_only", action = action.name()));
             }
             Some(LearnTarget::Cue { cue }) => {

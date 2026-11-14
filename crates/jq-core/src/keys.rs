@@ -10,8 +10,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::runner::Action;
 
-/// Actions that can be bound to keys and (those not on the selected cue)
-/// to MIDI.
+/// Actions that can be bound to keys and (those the runner carries out
+/// without the UI) to MIDI.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ControlAction {
@@ -42,15 +42,20 @@ pub enum ControlAction {
     PanRight,
     RateUp,
     RateDown,
+    // Of the UI alone (keys only):
+    /// Focuses the "Go to" field of the cue list toolbar.
+    FocusGoto,
 }
 
 impl ControlAction {
-    /// Works on the selected cue, which only the UI knows: keys only.
-    pub fn on_selected(self) -> bool {
+    /// Works on the selected cue, which only the UI knows, or on the UI
+    /// itself: keys only.
+    pub fn keys_only(self) -> bool {
         self.action(None).is_none()
     }
 
-    /// The runner's action; `None` if it needs a cue and `selected` is none.
+    /// The runner's action; `None` if it needs a cue and `selected` is none,
+    /// or if it is the UI's own.
     pub fn action(self, selected: Option<CueId>) -> Option<Action> {
         use ControlAction as C;
         Some(match self {
@@ -64,6 +69,7 @@ impl ControlAction {
             C::PlayheadNext => Action::PlayheadNext,
             C::PlayheadPrev => Action::PlayheadPrev,
             C::StopPreview => Action::StopPreview,
+            C::FocusGoto => return None,
             on_cue => {
                 let cue = selected?;
                 match on_cue {
@@ -119,6 +125,7 @@ impl ControlAction {
             C::PanRight => t!("action.pan_right"),
             C::RateUp => t!("action.rate_up"),
             C::RateDown => t!("action.rate_down"),
+            C::FocusGoto => t!("action.focus_goto"),
         }
     }
 }
@@ -146,6 +153,7 @@ pub fn default_keys() -> Vec<KeyBinding> {
         bind("Pause", "Pause", ControlAction::TogglePauseAll),
         bind("KeyK", "k", ControlAction::TogglePauseCue),
         bind("KeyP", "p", ControlAction::Preview),
+        KeyBinding { chord: Chord::new("KeyG", "g").ctrl(), action: ControlAction::FocusGoto },
     ]
 }
 
@@ -250,8 +258,10 @@ mod tests {
 
     #[test]
     fn selected_cue_actions_need_a_cue() {
-        assert!(ControlAction::Preview.on_selected());
-        assert!(!ControlAction::Go.on_selected());
+        assert!(ControlAction::Preview.keys_only());
+        assert!(!ControlAction::Go.keys_only());
+        assert!(ControlAction::FocusGoto.keys_only(), "the UI's own");
+        assert_eq!(ControlAction::FocusGoto.action(Some(CueId::new())), None);
         assert_eq!(ControlAction::Preview.action(None), None);
         let id = CueId::new();
         assert_eq!(ControlAction::RateUp.action(Some(id)), Some(Action::RateUp(id)));

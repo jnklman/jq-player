@@ -725,7 +725,8 @@ export interface Chord {
 
 /**
  * Global actions for keys and MIDI. The ones from `preview` on work on the selected cue: keys only (the UI sends the
- * matching `Action` with the selection); `midiLearn` refuses them.
+ * matching `Action` with the selection); `midiLearn` refuses them. `focus_goto` is the UI's own (keys only, too): it
+ * focuses the "Go to" field and sends nothing.
  */
 export type ControlAction =
   | 'go'
@@ -753,7 +754,8 @@ export type ControlAction =
   | 'pan_left'
   | 'pan_right'
   | 'rate_up'
-  | 'rate_down';
+  | 'rate_down'
+  | 'focus_goto';
 
 export interface KeyBinding {
   chord: Chord;

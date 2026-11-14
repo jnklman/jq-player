@@ -3,7 +3,7 @@
 // KeyboardScope.svelte only wires the window events to the handlers here.
 
 import { type Action, api, type CueId } from './api';
-import { copyCues, cutCues, deleteCues, pasteCues, redo, selectEveryCue, undo } from './commands';
+import { copyCues, cutCues, deleteCues, focusGoto, pasteCues, redo, selectEveryCue, undo } from './commands';
 import { commitTyping } from './commit';
 import { t } from './i18n/index.svelte';
 import { chordOf, isPanicKey, keyCapture, learnKeyLabel, ON_SELECTED, REPEATING, sameChord } from './keys.svelte';
@@ -262,6 +262,15 @@ export function onKeydown(e: KeyboardEvent) {
       if (!e.repeat) api.action({ action: 'panic' });
       // An open menu or list follows the setting like a dialog (see `dialogEscape`).
       releasePointerFocus();
+      return;
+    }
+    if (action === 'focus_goto') {
+      // Not into the toolbar behind a dialog; a window without the field leaves the key alone.
+      if (inDialog || !focusGoto()) return;
+      // Keeps the key from being typed into the field it just focused.
+      e.preventDefault();
+      e.stopPropagation();
+      // The focus is the field's now: not released below.
       return;
     }
     if (ON_SELECTED.includes(action)) {

@@ -205,6 +205,16 @@ export const ACTION_GROUPS: {
     },
     actions: ['volume_up', 'volume_down', 'pan_left', 'pan_right', 'rate_up', 'rate_down'],
   },
+  {
+    id: 'list',
+    get title() {
+      return t('actions.group.list');
+    },
+    get scope() {
+      return t('actions.scope.keys_only');
+    },
+    actions: ['focus_goto'],
+  },
 ];
 
 /** What keeps the settings from being applied (as a message in the current language); null if nothing does. An

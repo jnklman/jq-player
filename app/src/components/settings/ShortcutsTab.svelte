@@ -7,7 +7,7 @@
 
   import { api, type Chord, type ControlAction, type KeyBinding, type LocalSettings } from '../../lib/api';
   import { t } from '../../lib/i18n/index.svelte';
-  import { keyText, ON_SELECTED, PANIC_KEY } from '../../lib/keys.svelte';
+  import { KEYS_ONLY, keyText, PANIC_KEY } from '../../lib/keys.svelte';
   import {
     ACTION_GROUPS,
     actionName,
@@ -192,7 +192,7 @@
               keywords="{t('shortcuts.keywords')} {action === 'panic' ? 'Escape' : ''} {group.keywords ?? ''}"
               fixedKey={action === 'panic' ? PANIC_KEY : undefined}
               keys={keysOf(draft.keys, action)}
-              midi={ON_SELECTED.includes(action) ? null : midiOf(action)}
+              midi={KEYS_ONLY.includes(action) ? null : midiOf(action)}
               {learning}
               canLearn={!!draft.midi_port}
               learnTip={t('shortcuts.learn_tip')}

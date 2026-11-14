@@ -115,6 +115,15 @@ export function selectEveryCue() {
   selectAll(cues().map((cue) => cue.id));
 }
 
+/** Puts the focus into the "Go to" field of the cue list toolbar, its text selected; false if this window has none. */
+export function focusGoto(): boolean {
+  const field = document.querySelector<HTMLInputElement>('[data-goto-field]');
+  if (!field) return false;
+  field.focus();
+  field.select();
+  return true;
+}
+
 /** Selects the scene marker and its cues, up to the next marker or the end of the list. */
 export function selectScene(id: CueId) {
   const list = cues();
