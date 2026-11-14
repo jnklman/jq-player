@@ -32,6 +32,16 @@ export function sortable(
     // indices SortableJS reports still count them.
     let hidden: HTMLElement[] = [];
     let isGroup = false;
+    // The window lost focus mid-drag (e.g. Alt+Tab): the webview sends no pointerup, so the drag
+    // would stay stuck under the last pointer position. SortableJS has no cancel, so a synthetic
+    // release ends it and `onEnd` puts the element back instead of reporting a move.
+    let cancelled = false;
+    const cancel = () => {
+      cancelled = true;
+      // SortableJS listens for pointerup where pointer events are used (not in its typings), else mouseup.
+      const pointer = (instance.options as { supportPointer?: boolean }).supportPointer;
+      document.dispatchEvent(new PointerEvent(pointer ? 'pointerup' : 'mouseup'));
+    };
     const instance = Sortable.create(node, {
       animation: 150,
       // Draw the drag ourselves instead of using native HTML5 drag and drop:
@@ -45,6 +55,7 @@ export function sortable(
       onStart: ({ item }) => {
         next = item.nextSibling;
         grabbing(true);
+        window.addEventListener('blur', cancel);
         const moving = group?.(item);
         isGroup = !!moving;
         if (!moving) return;
@@ -56,17 +67,24 @@ export function sortable(
       },
       onEnd: ({ item, from, oldIndex, newIndex }) => {
         grabbing(false);
+        window.removeEventListener('blur', cancel);
         for (const element of hidden) element.hidden = false;
         hidden = [];
         delete item.dataset.dragCount;
         const wasGroup = isGroup;
         isGroup = false;
+        if (cancelled) {
+          cancelled = false;
+          from.insertBefore(item, next);
+          return;
+        }
         if (oldIndex == null || newIndex == null || (oldIndex === newIndex && !wasGroup)) return;
         from.insertBefore(item, next);
         onMove(item, newIndex);
       },
     });
     return () => {
+      window.removeEventListener('blur', cancel);
       for (const element of hidden) element.hidden = false;
       instance.destroy();
       grabbing(false);
