@@ -9,7 +9,7 @@
   import { t } from '../lib/i18n/index.svelte';
   import type { MissingMediaFile } from '../lib/media';
   import { missingMediaFiles, pickAudio } from '../lib/media';
-  import { dialogEscape, mode, ui } from '../lib/store.svelte';
+  import { mode, ui } from '../lib/store.svelte';
 
   let { onclose }: { onclose: () => void } = $props();
   let busyKey = $state<string | null>(null);
@@ -40,7 +40,7 @@
     }
   }
 >
-  <Dialog.Content class="max-w-150" escapeKeydownBehavior={dialogEscape()}>
+  <Dialog.Content class="max-w-150">
     <Dialog.Header>
       <Dialog.Title>{t('relink.title')}</Dialog.Title>
       <Dialog.Close class={buttonVariants({ variant: 'ghost', size: 'icon-sm' })} aria-label={t('common.close')}

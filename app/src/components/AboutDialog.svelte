@@ -12,7 +12,6 @@
   import appIcon from '../../assets/app-icon.svg';
   import { api, events, type UpdateInfo } from '../lib/api';
   import { t } from '../lib/i18n/index.svelte';
-  import { dialogEscape } from '../lib/store.svelte';
   import { hint } from '../lib/ui';
 
   let { onclose }: { onclose: () => void } = $props();
@@ -81,7 +80,7 @@
     }
   }
 >
-  <Dialog.Content class="h-168 max-w-160" escapeKeydownBehavior={dialogEscape()}>
+  <Dialog.Content class="h-168 max-w-160">
     <Dialog.Header>
       <Dialog.Title>{t('about.title')}</Dialog.Title>
       <Dialog.Close class={buttonVariants({ variant: 'ghost', size: 'icon-sm' })} aria-label={t('common.close')}>

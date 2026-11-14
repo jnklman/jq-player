@@ -30,6 +30,7 @@
       className,
     )}
     preventOverflowTextSelection={false}
+    escapeKeydownBehavior="ignore"
     {...restProps}
   />
 </AlertDialogPortal>

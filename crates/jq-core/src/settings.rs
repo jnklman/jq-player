@@ -41,7 +41,7 @@ pub struct LocalSettings {
     /// Fixed callback buffer of the audio device in frames; `None` = the
     /// host's default.
     pub buffer_frames: Option<u32>,
-    /// What Esc does while a dialog or menu is open.
+    /// What Esc does while a dialog, menu, list or popover is open.
     pub escape: EscapeMode,
     /// Fade time of a panic (Esc); 0 = stop at once. A second panic while
     /// the fade runs stops at once.
@@ -152,10 +152,10 @@ pub enum WheelMode {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EscapeMode {
-    /// Panic, and the dialog closes as well.
+    /// Panic; the dialog or menu stays open.
     #[default]
     StopAll,
-    /// Only closes the dialog; Esc panics when nothing is open.
+    /// Only closes the dialog or menu; Esc panics when nothing is open.
     CloseFirst,
 }
 

@@ -20,7 +20,7 @@
 </script>
 
 <AlertDialog.Root open>
-  <AlertDialog.Content escapeKeydownBehavior="ignore">
+  <AlertDialog.Content>
     <AlertDialog.Header>
       <AlertDialog.Title>{t('recovery.title')}</AlertDialog.Title>
     </AlertDialog.Header>

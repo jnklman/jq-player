@@ -37,7 +37,6 @@
 <AlertDialog.Root open>
   <!-- Enter must not leave by accident: the focus starts on "Abbrechen". -->
   <AlertDialog.Content
-    escapeKeydownBehavior="ignore"
     onOpenAutoFocus={(e) => {
       e.preventDefault();
       cancel?.focus();

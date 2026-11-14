@@ -8,7 +8,7 @@ import { t } from './i18n/index.svelte';
 import { chordOf, isPanicKey, keyCapture, learnKeyLabel, ON_SELECTED, REPEATING, sameChord } from './keys.svelte';
 import type { Format } from './richText';
 import { createShow, openShow, saveShowAs } from './shows';
-import { cues, mode, moveSelection, saveShow, selection, ui } from './store.svelte';
+import { cues, escapeCloses, mode, moveSelection, saveShow, selection, ui } from './store.svelte';
 import { isMainWindow, runInMain } from './windows.svelte';
 
 // Whether the focus was last placed with the mouse (a click) rather than
@@ -220,7 +220,8 @@ export function onKeydown(e: KeyboardEvent) {
     else openShow();
     return;
   }
-  const typing = isTyping(e.target);
+  // Esc is never kept by a field, list or menu: it panics or (with "close_first") closes what is open.
+  const typing = isTyping(e.target) && e.code !== 'Escape';
   const editing = mode() === 'edit';
   if (editing && typing) return;
   if (editing && letter && editShortcut(e, letter, inDialog)) return;
@@ -261,11 +262,11 @@ export function onKeydown(e: KeyboardEvent) {
   } else if (action) {
     if (action === 'panic') {
       // Left to the dialog, menu or list to close it.
-      if (e.code === 'Escape' && ui.view.settings.escape === 'close_first' && overlayOpen()) return;
+      if (e.code === 'Escape' && escapeCloses() && overlayOpen()) return;
       e.preventDefault();
       // A held key must not count as the second press, which stops at once.
       if (!e.repeat) api.action({ action: 'panic' });
-      // An open menu or list still closes (Esc).
+      // An open menu or list follows the setting like a dialog (see `dialogEscape`).
       releasePointerFocus();
       return;
     }

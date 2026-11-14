@@ -5,6 +5,7 @@
 
   import XIcon from '~icons/ph/x-bold';
   import { Button } from '$lib/components/ui/button/index.js';
+  import { dialogEscape } from '$lib/store.svelte.js';
   import { cn, type WithoutChildrenOrChild } from '$lib/utils.js';
 
   import DialogOverlay from './dialog-overlay.svelte';
@@ -34,6 +35,7 @@
       className,
     )}
     preventOverflowTextSelection={false}
+    escapeKeydownBehavior={dialogEscape()}
     {...restProps}
   >
     {@render children?.()}

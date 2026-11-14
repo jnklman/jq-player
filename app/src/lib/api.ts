@@ -689,7 +689,7 @@ export type WheelMode = 'scroll' | 'selection' | 'playhead';
  */
 export type WatchMode = 'events' | 'poll';
 
-/** Esc while a dialog, menu or list is open: panics as well (`stop_all`) or only closes it (`close_first`). */
+/** Esc while a dialog, menu or list is open: panics and leaves it open (`stop_all`) or only closes it (`close_first`). */
 export type EscapeMode = 'stop_all' | 'close_first';
 
 /**

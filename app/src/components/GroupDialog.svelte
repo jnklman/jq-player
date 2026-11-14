@@ -12,7 +12,7 @@
   import { addGroups, type AddItem, mainListOnly, typeLabel } from '../lib/control';
   import { t } from '../lib/i18n/index.svelte';
   import { isTextField } from '../lib/shortcuts';
-  import { cueById, dialogEscape, mode } from '../lib/store.svelte';
+  import { cueById, mode } from '../lib/store.svelte';
   import { empty, hint, panel } from '../lib/ui';
   import Inspector from './inspector/Inspector.svelte';
 
@@ -83,11 +83,7 @@
 <svelte:window {onkeydown} />
 
 <Dialog.Root open onOpenChange={(open) => !open && onclose()}>
-  <Dialog.Content
-    bind:ref={content}
-    class="h-[min(760px,calc(100%-2rem))] max-w-6xl"
-    escapeKeydownBehavior={dialogEscape()}
-  >
+  <Dialog.Content bind:ref={content} class="h-[min(760px,calc(100%-2rem))] max-w-6xl">
     <Dialog.Header>
       <Dialog.Title>
         {t('group.title', { number: group?.number ?? '' })} · {group?.title || t('group.untitled')}

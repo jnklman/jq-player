@@ -174,11 +174,17 @@ export async function attempt<T>(promise: Promise<T>): Promise<T | undefined> {
 }
 
 /**
- * How dialogs take Esc: with `settings.escape = "close_first"` they close, else they ignore it and Esc stays a
- * panic. Questions (alert dialogs) always ignore it: they need an answer.
+ * How dialogs, menus, lists and popovers take Esc: with `settings.escape = "close_first"` they close, else they
+ * ignore it and Esc stays a panic. The ui components (`dialog-content`, `*-menu-content`, `popover-content`,
+ * `select-content`) set it by default; questions (`alert-dialog-content`) always ignore it: they need an answer.
  */
 export function dialogEscape(): 'close' | 'ignore' {
-  return ui.view?.settings.escape === 'close_first' ? 'close' : 'ignore';
+  return escapeCloses() ? 'close' : 'ignore';
+}
+
+/** Esc closes the open dialog or menu (instead of panicking): only with "close_first". */
+export function escapeCloses(): boolean {
+  return ui.view?.settings.escape === 'close_first';
 }
 
 /**

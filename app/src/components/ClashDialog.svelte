@@ -43,7 +43,6 @@
 <AlertDialog.Root open>
   <AlertDialog.Content
     class="max-w-160"
-    escapeKeydownBehavior="ignore"
     onOpenAutoFocus={(e) => {
       e.preventDefault();
       accept?.focus();

@@ -32,7 +32,6 @@
 <!-- Esc stays STOP ALL and never answers; only the buttons do. -->
 <AlertDialog.Root open>
   <AlertDialog.Content
-    escapeKeydownBehavior="ignore"
     onOpenAutoFocus={(e) => {
       e.preventDefault();
       buttons[focused]?.focus();

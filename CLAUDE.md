@@ -28,6 +28,10 @@
   `cd app && npx shadcn-svelte@latest add <name>`). The shadcn tokens (`primary`, `muted-foreground`,
   `popover`, …) are mapped onto the app palette in `styles.css`; `accent`/`muted` are hover
   surfaces there, the app blue is called `primary`. Icons from Phosphor (`~icons/ph/…`), not lucide.
+  Many of these components are modified (classes, `preventOverflowTextSelection`, and the Esc behaviour:
+  `escapeKeydownBehavior={dialogEscape()}` in dialog, menu, popover and select contents, `"ignore"` in
+  alert dialogs). Never overwrite one (`add --overwrite`, re-adding) without diffing it first and carrying
+  the modifications over.
 - No `title` attribute: tooltips via `Tooltip` with `tip` (`app/src/lib/components/ui/tooltip/tooltip.svelte`; in button groups `ButtonGroup.Button` with `tip`), selection lists via
   `SimpleSelect`.
 - Panels of the main view (movable, resizable) are registered in
