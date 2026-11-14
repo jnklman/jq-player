@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { fileURLToPath } from 'node:url';
 
 import { svelte } from '@sveltejs/vite-plugin-svelte';
@@ -30,4 +31,6 @@ export default defineConfig({
     watch: { ignored: ['**/src-tauri/**'] },
   },
   build: { target: 'es2022', chunkSizeWarningLimit: 1000 },
+  // Tests run in English, whatever the system language is.
+  test: { setupFiles: ['src/lib/test-setup.ts'] },
 });
