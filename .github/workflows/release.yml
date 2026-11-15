@@ -1,5 +1,7 @@
 # Cuts a release in one click: sets the version everywhere (see
-# scripts/version.mjs), commits, tags and starts the Build workflow on the tag,
+# scripts/version.mjs), turns the "Unreleased" section of CHANGELOG.md into the
+# version's section (see scripts/changelog.mjs; refused while it is empty),
+# commits, tags and starts the Build workflow on the tag,
 # which builds the installers and publishes the GitHub release. Build skips
 # the tests if this content already passed them (usually in the merged pull
 # request); the version commit made here does not count as a change.
@@ -35,7 +37,9 @@ jobs:
         run: |
           node scripts/version.mjs "$VERSION"
           node scripts/version.mjs --check
-          echo "NEW_VERSION=$(node scripts/version.mjs --print)" >> "$GITHUB_ENV"
+          version=$(node scripts/version.mjs --print)
+          node scripts/changelog.mjs release "$version"
+          echo "NEW_VERSION=$version" >> "$GITHUB_ENV"
       - name: Commit, tag and start build
         env:
           GH_TOKEN: ${{ github.token }}

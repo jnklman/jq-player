@@ -9,6 +9,8 @@
 # - Pushing a version tag (`git tag v0.2.0 && git push origin v0.2.0`) builds
 #   and publishes a GitHub release with the installers. The tag must match the
 #   app version; tags with a "-" (v0.2.0-beta.1) become pre-releases.
+#   The release text is the version's section of CHANGELOG.md (for a
+#   pre-release: "Unreleased"), see scripts/changelog.mjs.
 #   The "Release" workflow does the whole thing (version bump, commit, tag).
 # - "Run workflow" in the Actions tab builds a test version; the installers
 #   are attached to the run as artifacts and expire after a few days.
@@ -58,11 +60,15 @@ jobs:
             echo "::error::Tag $GITHUB_REF_NAME does not match app version $version"
             exit 1
           fi
+      - name: Release notes in CHANGELOG.md
+        if: github.ref_type == 'tag'
+        run: node scripts/changelog.mjs notes "$GITHUB_REF_NAME"
       # Looks for the marker the Tests workflow leaves behind (see tests.yml),
-      # for this commit's tree or, if this commit only sets the version (the
-      # Release workflow's commit), for its parent's tree. "Only sets the
-      # version" is checked by redoing it: the parent plus
-      # `version.mjs <this version>` must give exactly this tree.
+      # for this commit's tree or, if this commit only sets the version and
+      # updates the changelog (the Release workflow's commit), for its
+      # parent's tree. That is checked by redoing it: the parent plus
+      # `version.mjs <this version>` plus this CHANGELOG.md must give exactly
+      # this tree.
       # Markers from pull requests out of forks do not count.
       - name: Tested before?
         id: tested
@@ -74,7 +80,8 @@ jobs:
           if git rev-parse -q --verify 'HEAD^' > /dev/null; then
             version=$(node scripts/version.mjs --print)
             git checkout -q --detach 'HEAD^'
-            if node scripts/version.mjs "$version" > /dev/null && git add -A &&
+            if node scripts/version.mjs "$version" > /dev/null &&
+              git checkout -q "$GITHUB_SHA" -- CHANGELOG.md && git add -A &&
               [ "$(git write-tree)" = "$tree" ]; then
               trees+=("$(git rev-parse 'HEAD^{tree}')")
             fi
@@ -203,6 +210,7 @@ jobs:
         run: |
           # The app's updater reads this file from the latest release.
           node scripts/updater-manifest.mjs dist "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME" > latest.json
+          node scripts/changelog.mjs notes "$GITHUB_REF_NAME" > notes.md
           # Artifacts keep their bundle subfolders (nsis/, deb/, appimage/).
           mapfile -t files < <(find dist -type f ! -name '*.sig')
           files+=(latest.json)
@@ -210,4 +218,4 @@ jobs:
           [[ "$GITHUB_REF_NAME" == *-* ]] && flags+=(--prerelease)
           gh release create "$GITHUB_REF_NAME" "${files[@]}" \
             --repo "$GITHUB_REPOSITORY" --title "jQ Player ${GITHUB_REF_NAME#v}" \
-            --generate-notes --verify-tag "${flags[@]}"
+            --notes-file notes.md --verify-tag "${flags[@]}"

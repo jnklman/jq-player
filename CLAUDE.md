@@ -51,6 +51,12 @@
   and triggers the build, which creates the GitHub release with NSIS, MSI, deb and AppImage files;
   the installers come in English and German).
 
+- **Changelog:** `CHANGELOG.md` (English only, shown on GitHub, not in the app). Every change users
+  notice gets a line under `## Unreleased` (`### Added`/`### Changed`/`### Removed`/`### Fixed`) in the
+  same commit, written for users, not about the code. The Release workflow refuses an empty "Unreleased"
+  and turns it into the version's section, which becomes the GitHub release text
+  (`scripts/changelog.mjs`; a pre-release uses "Unreleased" as it is). CI checks the structure.
+
 - **Self-update:** `tauri-plugin-updater` (Rust side only, `app/src-tauri/src/updates.rs`; the UI is the
   button in the About dialog, never automatic). It reads `latest.json` from the latest GitHub release, which the
   Build workflow's release job generates (`scripts/updater-manifest.mjs`) from the `.sig` files that

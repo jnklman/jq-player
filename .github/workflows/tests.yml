@@ -46,6 +46,8 @@ jobs:
           cache-dependency-path: app/package-lock.json
       - name: Version numbers in sync
         run: node scripts/version.mjs --check
+      - name: CHANGELOG.md well-formed
+        run: node scripts/changelog.mjs --check
       - run: npm ci
         working-directory: app
       - run: cargo fmt --check
