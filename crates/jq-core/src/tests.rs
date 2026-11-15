@@ -2230,6 +2230,43 @@ fn streamed_cue_waits_for_its_start_instead_of_playing_silence() {
 }
 
 #[test]
+fn position_cues_to_come_keep_their_fixed_targets_loaded() {
+    let mut cue = sound("1", "stream.wav");
+    if let CueKind::Sound(s) = &mut cue.kind {
+        s.marks = vec![70.0, 120.0];
+    }
+    let id = cue.id;
+    let mut rig = Rig::new(vec![
+        cue,
+        position_cue("2", id, PositionTo::Absolute { secs: 100.0 }),
+        position_cue("3", id, PositionTo::Mark { index: 2 }),
+        // Moves with playback: not hinted.
+        position_cue("4", id, PositionTo::NextMark),
+    ]);
+    rig.act(Action::Go);
+    rig.run(50);
+    assert_eq!(rig.active(), ["1"]);
+    // The stream the cue plays (the file may have been read twice).
+    let hints = |rig: &Rig| -> Vec<usize> {
+        let streams = rig.loader.streams.lock().unwrap();
+        streams.iter().find(|d| d.has_voices()).expect("playing").hints()
+    };
+    let mut armed = hints(&rig);
+    armed.sort_unstable();
+    assert_eq!(armed, [100_000, 120_000]);
+    rig.act(Action::Go);
+    rig.run(500);
+    assert_eq!(hints(&rig), [120_000], "the jump done is not kept");
+    // Once the jumps are done, nothing is kept for them any more.
+    for _ in 0..2 {
+        rig.act(Action::Go);
+        rig.run(500);
+    }
+    assert_eq!(rig.playhead(), None);
+    assert!(hints(&rig).is_empty());
+}
+
+#[test]
 fn cue_after_a_following_group_is_armed() {
     let mut rig = Rig::new(vec![
         with_advance(

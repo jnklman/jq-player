@@ -184,6 +184,11 @@ impl BufferCache {
         self.ready.get(path).map(|(b, _)| b)
     }
 
+    /// The loaded buffers, with their paths.
+    pub fn buffers(&self) -> impl Iterator<Item = (&Path, &Arc<AudioBuffer>)> {
+        self.ready.iter().map(|(p, (b, _))| (p.as_path(), b))
+    }
+
     /// Streamed files that played silence (disk too slow), with the number of frames missed: one
     /// entry per stretch of silence, once it is over (or long).
     pub fn take_underruns(&mut self, now: Instant) -> Vec<(PathBuf, u64)> {

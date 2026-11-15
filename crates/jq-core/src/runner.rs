@@ -926,20 +926,18 @@ impl Runner {
         (secs.max(0.0) * self.engine.config().sample_rate as f64).round() as usize
     }
 
-    /// Streamed files of the next cues keep their start position loaded.
+    /// Streamed files keep loaded where the next cues start in them (and
+    /// where position cues to come jump to); a file no longer wanted there
+    /// (still playing, say) lets those parts go.
     fn hint_streams(&self) {
-        let preview = self.preview.as_ref().map(|p| (&p.path, p.start_frame));
-        for (path, starts) in &self.starts {
-            if let Some(stream) = self.cache.buffer(path).and_then(|b| b.stream()) {
-                let mut hints = starts.clone();
-                hints.extend(preview.filter(|(p, _)| *p == path).map(|(_, start)| start));
+        let preview = self.preview.as_ref().map(|p| (p.path.as_path(), p.start_frame));
+        for (path, buffer) in self.cache.buffers() {
+            let Some(stream) = buffer.stream() else { continue };
+            let mut hints = self.starts.get(path).cloned().unwrap_or_default();
+            hints.extend(preview.filter(|(p, _)| *p == path).map(|(_, start)| start));
+            if stream.hints() != hints {
                 stream.set_hints(hints);
             }
-        }
-        if let Some((path, start)) = preview.filter(|(p, _)| !self.starts.contains_key(*p))
-            && let Some(stream) = self.cache.buffer(path).and_then(|b| b.stream())
-        {
-            stream.set_hints(vec![start]);
         }
     }
 
@@ -2879,34 +2877,13 @@ impl Runner {
     /// its current item.
     fn apply_position(&mut self, hit: &Hit, to: PositionTo, crossfade: u32, now: Instant) {
         let rate = self.engine.config().sample_rate as f64;
-        let frames = |secs: f64| (secs.clamp(0.0, MAX_SECS) * rate).round() as usize;
         let mut seeks = Vec::new();
         let mut missing = Vec::new();
         for a in self.active.iter().filter(|a| hit.hits(a.cue, &a.output)) {
-            let marks: Vec<usize> = match self.show.cue(a.cue).map(|c| &c.kind) {
-                Some(CueKind::Sound(s)) if a.item.is_none() => {
-                    let mut marks: Vec<usize> = s.marks.iter().map(|&m| frames(m)).collect();
-                    marks.sort_unstable();
-                    marks
-                }
-                _ if matches!(to, PositionTo::Relative { .. }) => Vec::new(),
-                _ => continue,
-            };
-            let target = match to {
-                PositionTo::Absolute { secs } => Some(frames(secs)),
-                PositionTo::Relative { secs } if secs >= 0.0 => Some(a.frame + frames(secs)),
-                PositionTo::Relative { secs } => Some(a.frame.saturating_sub(frames(-secs))),
-                PositionTo::Mark { index } => marks.get(index.wrapping_sub(1)).copied(),
-                PositionTo::NextMark => marks.iter().copied().find(|&m| m > a.frame),
-                PositionTo::PreviousMark => {
-                    // Right after a mark, the one before it (like a player's "back").
-                    let before = a.frame.saturating_sub(frames(PREVIOUS_MARK_GRACE));
-                    marks.iter().copied().rev().find(|&m| m < before)
-                }
-            };
-            match target {
-                Some(t) => seeks.push((a.voice, t.clamp(a.start_frame, a.end_frame))),
-                None => missing.push(a.cue),
+            match position_target(&self.show, a, to, rate) {
+                Some(Some(t)) => seeks.push((a.voice, t)),
+                Some(None) => missing.push(a.cue),
+                None => {}
             }
         }
         for cue in missing {
@@ -3265,6 +3242,23 @@ impl Runner {
                 cues.extend(started);
             }
         }
+        // Where position cues to come move running cues: a far jump in a
+        // streamed file lands on a loaded chunk. Only fixed targets (a time,
+        // a numbered mark); the others move with playback.
+        for id in &cues {
+            let Some(CueKind::Position(c)) = show.cue(*id).map(|c| &c.kind) else { continue };
+            if !matches!(c.to, PositionTo::Absolute { .. } | PositionTo::Mark { .. }) {
+                continue;
+            }
+            let hit = self.hit(*id, &c.targets);
+            for a in self.active.iter().filter(|a| hit.hits(a.cue, &a.output)) {
+                if let Some(Some(target)) = position_target(show, a, c.to, rate)
+                    && let Some((path, _)) = file(a.cue, 0)
+                {
+                    wanted.push((path, target));
+                }
+            }
+        }
         // Shuffled playlists to come are drawn the order they start in.
         self.drawn.retain(|id, _| cues.contains(id));
         for &id in &cues {
@@ -3319,6 +3313,35 @@ impl Runner {
 /// play) counts as ready too.
 fn ready_at(buffer: &AudioBuffer, frame: usize) -> bool {
     frame >= buffer.frames() || buffer.is_ready_at(frame)
+}
+
+/// Where a position cue's `to` moves voice `a` (inside its start–end), at
+/// `rate` frames a second. `None`: the voice is not moved (a playlist moves
+/// only relative); `Some(None)`: the mark it names does not exist.
+fn position_target(show: &Show, a: &Active, to: PositionTo, rate: f64) -> Option<Option<usize>> {
+    let frames = |secs: f64| (secs.clamp(0.0, MAX_SECS) * rate).round() as usize;
+    let marks: Vec<usize> = match show.cue(a.cue).map(|c| &c.kind) {
+        Some(CueKind::Sound(s)) if a.item.is_none() => {
+            let mut marks: Vec<usize> = s.marks.iter().map(|&m| frames(m)).collect();
+            marks.sort_unstable();
+            marks
+        }
+        _ if matches!(to, PositionTo::Relative { .. }) => Vec::new(),
+        _ => return None,
+    };
+    let target = match to {
+        PositionTo::Absolute { secs } => Some(frames(secs)),
+        PositionTo::Relative { secs } if secs >= 0.0 => Some(a.frame + frames(secs)),
+        PositionTo::Relative { secs } => Some(a.frame.saturating_sub(frames(-secs))),
+        PositionTo::Mark { index } => marks.get(index.wrapping_sub(1)).copied(),
+        PositionTo::NextMark => marks.iter().copied().find(|&m| m > a.frame),
+        PositionTo::PreviousMark => {
+            // Right after a mark, the one before it (like a player's "back").
+            let before = a.frame.saturating_sub(frames(PREVIOUS_MARK_GRACE));
+            marks.iter().copied().rev().find(|&m| m < before)
+        }
+    };
+    Some(target.map(|t| t.clamp(a.start_frame, a.end_frame)))
 }
 
 /// The cue's vamps in frames (sorted, inside start–end, overlaps dropped),
