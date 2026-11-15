@@ -209,7 +209,9 @@ jobs:
           retention-days: ${{ github.ref_type == 'tag' && 1 || 5 }}
 
   release:
-    if: github.ref_type == 'tag'
+    # Without a status function, `if` implies success(), which also needs the
+    # skipped tests job (a dependency of bundle) to have succeeded.
+    if: ${{ !cancelled() && github.ref_type == 'tag' && needs.bundle.result == 'success' }}
     needs: bundle
     runs-on: ubuntu-24.04
     permissions:
