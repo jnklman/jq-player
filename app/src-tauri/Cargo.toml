@@ -36,6 +36,9 @@ jq-show = { path = "../../crates/jq-show" }
 # ASIO host on Windows, see crates/jq-audio/Cargo.toml.
 [features]
 asio = ["jq-audio/asio"]
+# Portable build: settings, caches and webview data in "jQ Player Data" next
+# to the executable instead of the user's folders (see src/paths.rs).
+portable = []
 
 [target.'cfg(windows)'.dependencies]
 # Message box before Tauri starts (already in the tree via tauri-plugin-dialog).

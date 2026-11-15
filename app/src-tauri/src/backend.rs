@@ -513,10 +513,9 @@ fn replace(
     *session = Some(opened);
 }
 
-/// The machine's settings file in the app's config folder (Linux:
-/// `~/.config/de.jqplayer.app`, Windows: `%APPDATA%\de.jqplayer.app`).
+/// The machine's settings file in the app's config folder (`paths`).
 pub fn settings_path(app: &AppHandle) -> PathBuf {
-    let dir = app.path().app_config_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let dir = crate::paths::config_dir(app).unwrap_or_else(|| PathBuf::from("."));
     dir.join(SETTINGS_FILE)
 }
 

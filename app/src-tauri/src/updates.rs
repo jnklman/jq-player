@@ -94,6 +94,10 @@ pub async fn install_update(
     backend: State<'_, Backend>,
     pending: State<'_, Pending>,
 ) -> Result<(), String> {
+    // The updater would run the installer, which installs instead of replacing this file.
+    if crate::paths::portable() {
+        return Err(t!("update.portable"));
+    }
     if pending.1.swap(true, Ordering::AcqRel) {
         return Err(t!("update.installing"));
     }

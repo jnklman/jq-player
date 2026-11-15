@@ -54,7 +54,7 @@
   Never change it by hand, use `node scripts/version.mjs <x.y.z|patch|minor|major>`: it updates
   `package.json`, `package-lock.json`, `tauri.conf.json` and `Cargo.lock` (`--check` verifies, CI
   does that). Release: start the "Release" workflow in GitHub Actions (it sets the version, commits, tags
-  and triggers the build, which creates the GitHub release with NSIS, MSI, deb and AppImage files;
+  and triggers the build, which creates the GitHub release with NSIS, MSI, portable .exe, deb and AppImage files;
   the installers come in English and German).
 
 - **Self-update:** `tauri-plugin-updater` (Rust side only, `app/src-tauri/src/updates.rs`; the UI is the
@@ -63,7 +63,9 @@
   `tauri.release.conf.json` (`createUpdaterArtifacts`, CI only) makes. Installing is refused in show mode, while
   cues run or with unsaved changes. The public key is in `tauri.conf.json`; the private key is the repository
   secret `TAURI_SIGNING_PRIVATE_KEY` (+ `_PASSWORD`). If the key is lost, installed copies can never update again.
-  Updates work for the NSIS installer (Windows) and the AppImage (Linux), not for MSI or deb.
+  Updates work for the NSIS installer (Windows) and the AppImage (Linux), not for MSI, deb or the
+  portable .exe (feature `portable`: config, cache and webview data in `jQ Player Data` next to the exe,
+  see `app/src-tauri/src/paths.rs`; `install_update` refuses).
 
 ## Commands
 

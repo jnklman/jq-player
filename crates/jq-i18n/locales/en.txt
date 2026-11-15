@@ -369,6 +369,7 @@ update.installing = The update is already being installed.
 update.unsaved = Save the show first: it has unsaved changes.
 update.none_pending = No update has been found yet.
 update.writes_pending = Not now: settings or the autosave are still being written (the disk does not respond).
+update.portable = This is the portable version: download the new one from the release page and replace the program file with it. The settings stay in the “jQ Player Data” folder next to it.
 backend.internal_error = Internal error in the show thread (see log)
 backend.autosave_not_deleted = Autosave not deleted: {error}
 writer.panicked = Internal error while writing a file (see log)

@@ -8,6 +8,7 @@ mod key_labels;
 mod language;
 mod media;
 mod panel_windows;
+pub mod paths;
 mod save_as;
 mod session;
 mod updates;
@@ -384,6 +385,18 @@ fn show_arg(args: impl IntoIterator<Item = String>, cwd: &Path) -> Option<PathBu
         .map(|path| cwd.join(path))
 }
 
+/// The main window's place and size; in the portable build in its folder.
+fn window_state() -> tauri::plugin::TauriPlugin<tauri::Wry> {
+    let mut builder = tauri_plugin_window_state::Builder::new()
+        .with_state_flags(WINDOW_STATE)
+        // Panel windows keep their place in the layout.
+        .with_filter(|label| label == panel_windows::MAIN);
+    if let Some(file) = paths::window_state_file() {
+        builder = builder.with_filename(file);
+    }
+    builder.build()
+}
+
 /// The program was started again: only one may run (two would fight over
 /// the audio and MIDI devices), so this one comes to the front and opens
 /// the show file passed along, if any.
@@ -443,13 +456,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(updates::Pending::default())
-        .plugin(
-            tauri_plugin_window_state::Builder::new()
-                .with_state_flags(WINDOW_STATE)
-                // Panel windows keep their place in the layout.
-                .with_filter(|label| label == panel_windows::MAIN)
-                .build(),
-        )
+        .plugin(window_state())
         .manage(panel_windows::PanelWindows::default())
         .on_window_event(|window, event| {
             panel_windows::on_window_event(window, event);
@@ -468,9 +475,9 @@ pub fn run() {
                 window.show()?;
             }
             // Before the show thread, which hands it to each session.
-            let peaks = Arc::new(match app.path().app_cache_dir() {
-                Ok(dir) => PeakCache::new(dir.join("peaks")),
-                Err(_) => PeakCache::disabled(),
+            let peaks = Arc::new(match paths::cache_dir(app.handle()) {
+                Some(dir) => PeakCache::new(dir.join("peaks")),
+                None => PeakCache::disabled(),
             });
             let cleaning = peaks.clone();
             std::thread::Builder::new().name("jq-peaks-clean".into()).spawn(move || cleaning.clean_up())?;
