@@ -4,7 +4,8 @@
 
 import { api, type FadeCurve, type SoundFields } from './api';
 import { fadeGains } from './cue';
-import { fmtNumber } from './i18n/index.svelte';
+import { fmtNumber, t } from './i18n/index.svelte';
+import { attempt, notify } from './store.svelte';
 
 /** The positions in a file: start, end, vamps and marks. */
 export type Positions = Pick<SoundFields, 'start' | 'end' | 'vamps' | 'marks'>;
@@ -65,6 +66,29 @@ export function toggleMark(marks: number[], pos: number, near: number): number[]
   const hit = marks.findIndex((mark) => Math.abs(mark - pos) <= near);
   const next = hit >= 0 ? marks.filter((_, i) => i !== hit) : [...marks, pos];
   return next.sort((left, right) => left - right);
+}
+
+/** Where a file is audible: from `api.audibleRange`. */
+export type Audible = { start: number; end: number | null };
+
+/**
+ * The start (or end) of `times` moved onto where the file becomes audible (or falls silent), to the millisecond
+ * outwards so nothing audible is cut; an end audible to the file's end is "to the end". Start and end never cross.
+ */
+export function trimTimes(times: Positions, edge: 'start' | 'end', audible: Audible, duration: number): Partial<Times> {
+  if (edge === 'start') {
+    const last = Math.min(times.end ?? duration, duration);
+    return { start: Math.max(0, Math.min(Math.floor(audible.start * 1000) / 1000, last - MIN_LENGTH)) };
+  }
+  if (audible.end == null) return { end: null };
+  return { end: Math.max(Math.ceil(audible.end * 1000) / 1000, times.start + MIN_LENGTH) };
+}
+
+/** Where `file` is audible; undefined (after a notice) if it is silent or cannot be read. */
+export async function audibleRange(mediaDir: string, file: string): Promise<Audible | undefined> {
+  const audible = await attempt(api.audibleRange(mediaDir, file));
+  if (audible === null) notify({ level: 'warning', message: t('wave.trim_silent') });
+  return audible ?? undefined;
 }
 
 /** A stretch of a fade: from and to (seconds) and the gain (0…1) by position 0…1 in it. */

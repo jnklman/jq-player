@@ -1,6 +1,8 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
 
+  import TrimEnd from '~icons/ph/arrow-line-left-bold';
+  import TrimStart from '~icons/ph/arrow-line-right-bold';
   import ZoomAll from '~icons/ph/arrows-out-line-horizontal-bold';
   import ZoomOut from '~icons/ph/magnifying-glass-minus-bold';
   import ZoomIn from '~icons/ph/magnifying-glass-plus-bold';
@@ -24,7 +26,7 @@
   import { rateLabel, speedOf } from '../../lib/speed';
   import { cueById, mode, ui } from '../../lib/store.svelte';
   import { hint } from '../../lib/ui';
-  import { copyTimes, type Times } from '../../lib/waveform';
+  import { audibleRange, copyTimes, type Times, trimTimes } from '../../lib/waveform';
   import EditDialog from '../EditDialog.svelte';
   import WaveformTimeline from './WaveformTimeline.svelte';
   import WaveformTimes from './WaveformTimes.svelte';
@@ -112,6 +114,15 @@
   /** Click position in the waveform; playing starts here. */
   let cursor = $state<number | null>(null);
   const end = $derived(Math.min(shown.end ?? duration, duration));
+
+  /** Moves the start or end onto the file's audible part (found from its peaks). */
+  let trimming = $state(false);
+  async function trim(edge: 'start' | 'end') {
+    if (!cue || !ui.view) return;
+    trimming = true;
+    const audible = await audibleRange(ui.view.media_dir, cue.file).finally(() => (trimming = false));
+    if (audible) commit(trimTimes(draft, edge, audible, duration));
+  }
 
   // --- Preview
 
@@ -207,6 +218,18 @@
           disabled={!previewSet || duration <= 0}
           onclick={() => api.previewAt(cueId, shown.start, end)}
           ><SpeakerHigh class="size-4" /> {t('wave.range')}</Tooltip
+        >
+        <Tooltip
+          tip={t('wave.trim_start_tip')}
+          class="{buttonVariants()} ml-3"
+          disabled={locked || trimming || duration <= 0}
+          onclick={() => trim('start')}><TrimStart class="size-3.5" /> {t('wave.trim_start')}</Tooltip
+        >
+        <Tooltip
+          tip={t('wave.trim_end_tip')}
+          class={buttonVariants()}
+          disabled={locked || trimming || duration <= 0}
+          onclick={() => trim('end')}><TrimEnd class="size-3.5" /> {t('wave.trim_end')}</Tooltip
         >
         <span class="ml-3 font-mono text-[13px] text-fg-2 tabular-nums">
           {#if playhead != null}<span class="text-go">▶ {fmtPosition(playhead)}</span>

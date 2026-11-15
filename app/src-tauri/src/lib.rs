@@ -235,6 +235,23 @@ async fn waveform_range(
     .map_err(|e| e.to_string())?
 }
 
+/// Where a media file is audible, for trimming silence off a cue; `None` if
+/// it is silent throughout. From the peaks, decoded first if not cached.
+#[tauri::command]
+async fn audible_range(
+    peaks: State<'_, Arc<PeakCache>>,
+    media_dir: PathBuf,
+    file: String,
+) -> Result<Option<jq_media::peaks::Audible>, String> {
+    let peaks = peaks.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = jq_show::paths::resolve(&media_dir, &file);
+        Ok(peaks.peaks(&path, &|| true).map_err(|e| e.to_string())?.audible())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Bytes the peak cache takes on disk.
 #[tauri::command]
 async fn peak_cache_size(peaks: State<'_, Arc<PeakCache>>) -> Result<u64, String> {
@@ -543,6 +560,7 @@ pub fn run() {
             midi_ports,
             waveform,
             waveform_range,
+            audible_range,
             peak_cache_size,
             clear_peak_cache,
             check_import,

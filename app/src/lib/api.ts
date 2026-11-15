@@ -1338,6 +1338,13 @@ export const api = {
    */
   waveformRange: (mediaDir: string, file: string, from: number, to: number, buckets: number) =>
     invoke<{ duration: number; peaks: number[] }>('waveform_range', { mediaDir, file, from, to, buckets }),
+  /**
+   * Where a media file is audible (peaks from −50 dBFS on, to 256 samples): `start` of the first sound, `end` of the
+   * last (null when it lasts to the end of the file); null for a file silent throughout. Decodes the file first if
+   * its peaks are not cached.
+   */
+  audibleRange: (mediaDir: string, file: string) =>
+    invoke<{ start: number; end: number | null } | null>('audible_range', { mediaDir, file }),
   /** Bytes the waveform peak cache takes on this machine (kept under 500 MB). */
   peakCacheSize: () => invoke<number>('peak_cache_size'),
   /** Deletes the cached peaks; returns the bytes left. Waveforms are decoded again when next shown. */
