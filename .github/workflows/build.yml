@@ -1,4 +1,4 @@
-# Tests and installers for Windows and Linux. Windows gets three installers:
+# Installers for Windows and Linux. Windows gets three installers:
 # the regular NSIS one downloads WebView2 if it is missing, "-offline-setup"
 # includes it, and an MSI (German, for managed deployment; skipped for
 # pre-release versions, which MSI cannot express), plus a portable program
@@ -11,9 +11,14 @@
 # - Pushing a version tag (`git tag v0.2.0 && git push origin v0.2.0`) builds
 #   and publishes a GitHub release with the installers. The tag must match the
 #   app version; tags with a "-" (v0.2.0-beta.1) become pre-releases.
+#   The release text is the version's section of CHANGELOG.md (for a
+#   pre-release: "Unreleased"), see scripts/changelog.mjs.
 #   The "Release" workflow does the whole thing (version bump, commit, tag).
 # - "Run workflow" in the Actions tab builds a test version; the installers
 #   are attached to the run as artifacts and expire after a few days.
+#
+# The tests (tests.yml) run first, unless the same content already passed
+# them, typically in the pull request that was merged before the release.
 #
 # The updater files are signed with the repository secrets
 # TAURI_SIGNING_PRIVATE_KEY (and TAURI_SIGNING_PRIVATE_KEY_PASSWORD, empty if
@@ -35,8 +40,15 @@ env:
 jobs:
   check:
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      tested: ${{ steps.tested.outputs.tested }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
       - uses: actions/setup-node@v7
         with:
           node-version: 24
@@ -50,32 +62,54 @@ jobs:
             echo "::error::Tag $GITHUB_REF_NAME does not match app version $version"
             exit 1
           fi
-      - name: System libraries (ALSA, JACK, PipeWire, WebKitGTK)
+      - name: Release notes in CHANGELOG.md
+        if: github.ref_type == 'tag'
+        run: node scripts/changelog.mjs notes "$GITHUB_REF_NAME"
+      # Looks for the marker the Tests workflow leaves behind (see tests.yml),
+      # for this commit's tree or, if this commit only sets the version and
+      # updates the changelog (the Release workflow's commit), for its
+      # parent's tree. That is checked by redoing it: the parent plus
+      # `version.mjs <this version>` plus this CHANGELOG.md must give exactly
+      # this tree.
+      # Markers from pull requests out of forks do not count.
+      - name: Tested before?
+        id: tested
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libasound2-dev libjack-jackd2-dev libpipewire-0.3-dev libwebkit2gtk-4.1-dev librsvg2-dev patchelf
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
-      - uses: Swatinem/rust-cache@v2
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: app/package-lock.json
-      - run: npm ci
-        working-directory: app
-      - run: cargo fmt --check
-      - run: cargo clippy --all-targets -- -D warnings
-      - run: cargo test
-      - run: npm run check && npm run lint && npm run format
-        working-directory: app
-      - name: Lizenzdateien aktuell
-        run: npm run licenses -- --check
-        working-directory: app
+          tree=$(git rev-parse 'HEAD^{tree}')
+          trees=("$tree")
+          if git rev-parse -q --verify 'HEAD^' > /dev/null; then
+            version=$(node scripts/version.mjs --print)
+            git checkout -q --detach 'HEAD^'
+            if node scripts/version.mjs "$version" > /dev/null &&
+              git checkout -q "$GITHUB_SHA" -- CHANGELOG.md && git add -A &&
+              [ "$(git write-tree)" = "$tree" ]; then
+              trees+=("$(git rev-parse 'HEAD^{tree}')")
+            fi
+            git checkout -q -f "$GITHUB_SHA"
+          fi
+          for t in "${trees[@]}"; do
+            count=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=tests-passed-$t" \
+              --jq '[.artifacts[] | select((.expired | not) and .workflow_run.head_repository_id == .workflow_run.repository_id)] | length')
+            if [ "$count" -gt 0 ]; then
+              echo "Tests passed before for tree $t, skipping them."
+              echo "tested=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done
+          echo "No earlier test run for this content, running the tests."
+          echo "tested=false" >> "$GITHUB_OUTPUT"
+
+  tests:
+    needs: check
+    if: needs.check.outputs.tested != 'true'
+    uses: ./.github/workflows/tests.yml
 
   bundle:
-    needs: check
+    needs: [check, tests]
+    # Runs when the tests passed or were skipped because they passed before.
+    if: ${{ !cancelled() && needs.check.result == 'success' && needs.tests.result != 'failure' }}
     strategy:
       fail-fast: false
       matrix:
@@ -192,6 +226,7 @@ jobs:
         run: |
           # The app's updater reads this file from the latest release.
           node scripts/updater-manifest.mjs dist "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME" > latest.json
+          node scripts/changelog.mjs notes "$GITHUB_REF_NAME" > notes.md
           # Artifacts keep their bundle subfolders (nsis/, portable/, deb/, appimage/).
           mapfile -t files < <(find dist -type f ! -name '*.sig')
           files+=(latest.json)
@@ -199,4 +234,4 @@ jobs:
           [[ "$GITHUB_REF_NAME" == *-* ]] && flags+=(--prerelease)
           gh release create "$GITHUB_REF_NAME" "${files[@]}" \
             --repo "$GITHUB_REPOSITORY" --title "jQ Player ${GITHUB_REF_NAME#v}" \
-            --generate-notes --verify-tag "${flags[@]}"
+            --notes-file notes.md --verify-tag "${flags[@]}"
