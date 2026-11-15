@@ -502,7 +502,7 @@ const de: Record<MessageKey, string> = {
   'notices.dismiss': 'Meldung schließen',
   'outputs.title': 'Outputs',
   'outputs.text':
-    'Logische Ausgänge der Show (z. B. Saal, Monitor, Foyer). Auf welchen Kanälen sie spielen, wird pro Rechner in den Einstellungen festgelegt.',
+    'Logische Ausgänge der Show (z.\u202fB. Saal, Monitor, Foyer). Auf welchen Kanälen sie spielen, wird pro Rechner in den Einstellungen festgelegt.',
   'outputs.name': 'Name',
   'outputs.main_stays': 'Der Haupt-Output bleibt',
   'outputs.remove': '{name} entfernen',
@@ -567,7 +567,7 @@ const de: Record<MessageKey, string> = {
   'stopwatches.name_numbered': 'Stoppuhr {number}',
   'stopwatches.invalid_tip': 'Jede Stoppuhr braucht einen Namen',
   'stopwatches.text':
-    'Z. B. Zeit seit Vorstellungsbeginn oder Länge der Pause. Ein Countdown zählt von seiner Zeit („15:00“, „1:30:00“ oder Minuten) herunter und nach Ablauf mit Minus weiter. Gesteuert über Stoppuhr-Cues, die Knöpfe im Kopfbereich oder OSC (/stopwatch/Name/start). Die Zeit läuft nur in dieser Sitzung; STOP ALL und Pause halten sie nicht an.',
+    'Z.\u202fB. Zeit seit Vorstellungsbeginn oder Länge der Pause. Ein Countdown zählt von seiner Zeit („15:00“, „1:30:00“ oder Minuten) herunter und nach Ablauf mit Minus weiter. Gesteuert über Stoppuhr-Cues, die Knöpfe im Kopfbereich oder OSC (/stopwatch/Name/start). Die Zeit läuft nur in dieser Sitzung; STOP ALL und Pause halten sie nicht an.',
   'stopwatches.kind': 'Art',
   'stopwatches.kind_of': 'Art von {name}',
   'stopwatches.from': 'Von',
@@ -888,7 +888,7 @@ const de: Record<MessageKey, string> = {
   'sound_main.vamp_hint': 'Wiederholt, bis ein Loop-verlassen-Cue oder erneutes Auslösen ihn freigibt.',
   'sound_main.marks': 'Marken',
   'sound_main.next_mark_tip': 'Beim Vorhören an der Wiedergabeposition, sonst 1 s nach der letzten Marke',
-  'sound_main.marks_hint': 'Für „Loop verlassen an nächster Marke“ und Position-Cues, z. B. Taktanfänge.',
+  'sound_main.marks_hint': 'Für „Loop verlassen an nächster Marke“ und Position-Cues, z.\u202fB. Taktanfänge.',
   'inspector.preview_playing': 'Preview läuft',
   'inspector.preview_loading': 'Preview lädt …',
   // Inspector tabs
@@ -982,7 +982,7 @@ const de: Record<MessageKey, string> = {
     'Aussetzer Stille Platte vorladen Stream Warnung underrun silence disk preload late warning',
   'device.underrun_warning': 'Warnung bei nicht rechtzeitig geladenen Dateien',
   'device.underruns_hint':
-    'Eine nicht rechtzeitig geladene Datei spielt Stille oder startet verspätet. Das passiert z.\u00a0B. bei einem langsamen Netzlaufwerk oder wenn ein späterer Cue per Hotkey gestartet wird. Bei aktivierter Warnung wird dies immer gemeldet, sonst nur, wenn ein per GO gestarteter Cue verspätet startet. Aussetzer des Audiogeräts werden immer gemeldet.',
+    'Eine nicht rechtzeitig geladene Datei spielt Stille oder startet verspätet. Das passiert z.\u202fB. bei einem langsamen Netzlaufwerk oder wenn ein späterer Cue per Hotkey gestartet wird. Bei aktivierter Warnung wird dies immer gemeldet, sonst nur, wenn ein per GO gestarteter Cue verspätet startet. Aussetzer des Audiogeräts werden immer gemeldet.',
   'media_tab.events': 'Benachrichtigung durch das System',
   'media_tab.poll': 'jede Sekunde abfragen',
   'media_tab.changes': 'Änderungen',
@@ -1036,7 +1036,7 @@ const de: Record<MessageKey, string> = {
   'routing.no_outputs': 'Die Show hat keine Outputs.',
   'routing.preview_keywords': 'Preview Kopfhörer Vorhören headphones',
   'routing.preview_output': 'Vorhören, Ausgang',
-  'routing.pair_on_device': 'Kanalpaar am Audiogerät (z. B. Kopfhörerbus)',
+  'routing.pair_on_device': 'Kanalpaar am Audiogerät (z.\u202fB. Kopfhörerbus)',
   'routing.own_device': 'eigenes Gerät',
   'routing.preview_device': 'Vorhören, Gerät',
   'routing.first_channel': 'Erster Kanal',

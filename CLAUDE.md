@@ -15,6 +15,8 @@
   and `count`); the language is global (`set_language`), never call it on the audio thread. UI: `t('key', {…})` from
   `app/src/lib/i18n` (reactive), texts in `en.ts` (authoritative, defines the keys) and `de.ts` (must have all of them);
   constants outside components hold keys or `labels()`/`options()`/getters, never finished texts.
+  Multi-word abbreviations ("z. B.") take a narrow no-break space (U+202F: `\u202f` in `.ts`, the
+  character itself in `.txt`).
   English is the fallback. The setting `LocalSettings.language` (`auto`/`en`/`de`) lives in the config file, not
   in localStorage. New language: add a catalog on each side, extend `Lang`/`LANGUAGES`. Code, comments and documentation
   are in English (German texts live only in the catalogs and the installer).
