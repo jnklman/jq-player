@@ -12,6 +12,8 @@ different in the app, not how the code changed). The Release workflow turns
 
 ## Unreleased
 
+## 0.2.0 – 2026-11-15
+
 ### Added
 
 - Portable Windows version (`-portable.exe`): one program file that keeps its settings and caches in a
