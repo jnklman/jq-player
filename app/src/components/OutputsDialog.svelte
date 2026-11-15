@@ -20,9 +20,13 @@
   const initial = JSON.stringify(ui.view!.show.outputs);
   let outputs = $state<Output[]>(JSON.parse(initial));
   const dirty = $derived(JSON.stringify(outputs) !== initial);
+  const valid = $derived(outputs.every((output) => output.name.trim() !== ''));
 
   function add() {
-    outputs.push({ id: crypto.randomUUID().slice(0, 8), name: `Output ${outputs.length + 1}` });
+    outputs.push({
+      id: crypto.randomUUID().slice(0, 8),
+      name: t('outputs.name_numbered', { number: outputs.length + 1 }),
+    });
   }
 </script>
 
@@ -30,6 +34,8 @@
   title={t('outputs.title')}
   class="max-w-110"
   {dirty}
+  {valid}
+  invalidTip={t('outputs.invalid_tip')}
   {locked}
   onapply={async () => !!(await edit({ op: 'set_outputs', outputs: $state.snapshot(outputs) }))}
   {onclose}

@@ -28,7 +28,7 @@ export function midiMessageOf(kind: MidiMessage['kind'], from?: MidiMessage): Mi
   }
 }
 
-/** e.g. "PC 5 · Kanal 1", "MSC GO 12.5". */
+/** e.g. "PC 5 · Channel 1" (raw program 0 … 127, channels from 1), "MSC GO 12.5". */
 export function midiSummary(message: MidiMessage): string {
   switch (message.kind) {
     case 'program_change':

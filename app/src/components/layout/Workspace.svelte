@@ -92,6 +92,9 @@
       handle.removeEventListener('pointermove', move);
       handle.removeEventListener('pointerup', up);
       handle.removeEventListener('pointercancel', cancel);
+      handle.removeEventListener('lostpointercapture', cancel);
+      window.removeEventListener('blur', cancel);
+      if (handle.hasPointerCapture(e.pointerId)) handle.releasePointerCapture(e.pointerId);
       const drop = commit ? drag?.drop : null;
       if (drop?.kind === 'panel') layout.move(panel, drop.target, drop.zone);
       else if (drop?.kind === 'edge') layout.dock(panel, drop.edge);
@@ -103,6 +106,11 @@
     handle.addEventListener('pointermove', move);
     handle.addEventListener('pointerup', up);
     handle.addEventListener('pointercancel', cancel);
+    // The capture is gone without a pointerup (e.g. the handle left the page): nothing is dropped.
+    handle.addEventListener('lostpointercapture', cancel);
+    // The window lost focus (e.g. Alt+Tab): the webview neither ends the capture nor sends a pointerup,
+    // so the drag would stay stuck under the last pointer position.
+    window.addEventListener('blur', cancel);
   }
 
   setArrange({ enabled: () => layout.editing, start });

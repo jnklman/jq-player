@@ -1,14 +1,17 @@
 <script lang="ts">
+  import { Checkbox } from '$lib/components/ui/checkbox';
   import { Input } from '$lib/components/ui/input';
+  import { Label } from '$lib/components/ui/label';
 
   import type { LocalSettings } from '../../lib/api';
   import type { AudioSetup } from '../../lib/audioSetup.svelte';
   import { t } from '../../lib/i18n/index.svelte';
+  import { liveNumber } from '../../lib/input';
   import { withMissing } from '../../lib/options';
   import { positiveOrNull } from '../../lib/settings';
   import { settingsView } from '../../lib/settingsView.svelte';
   import { ui } from '../../lib/store.svelte';
-  import { hint } from '../../lib/ui';
+  import { check, hint } from '../../lib/ui';
   import SimpleSelect from '../SimpleSelect.svelte';
   import SettingGroup from './SettingGroup.svelte';
   import SettingRow from './SettingRow.svelte';
@@ -93,7 +96,10 @@
           placeholder={t('device.default')}
           aria-label={t('device.channels')}
           value={draft.channels ?? ''}
-          oninput={(e) => (draft.channels = positiveOrNull(e.currentTarget.value))}
+          {...liveNumber(
+            () => draft.channels,
+            (text) => (draft.channels = positiveOrNull(text)),
+          )}
         />
         {#if setup.tooManyChannels}
           <span class="text-xs text-stop-soft">{t('device.only_channels', { count: setup.mainMax ?? 0 })}</span>
@@ -136,6 +142,13 @@
       <span class={hint}>
         {setup.hostSetsBuffer ? t('device.jack_buffer') : t('device.buffer_hint')}
       </span>
+    </SettingRow>
+    <SettingRow label={t('device.underruns')} keywords={t('device.underruns_keywords')}>
+      <Label class="{check} pt-1.5">
+        <Checkbox bind:checked={draft.underrun_warning} />
+        {t('device.underrun_warning')}
+      </Label>
+      <span class={hint}>{t('device.underruns_hint')}</span>
     </SettingRow>
   </SettingGroup>
 </SettingsPanel>

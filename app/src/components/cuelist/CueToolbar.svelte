@@ -34,10 +34,10 @@
     unlinkCues,
   } from '../../lib/commands';
   import { addGroups } from '../../lib/control';
-  import { cueLabel } from '../../lib/cue';
+  import { canLink, cueLabel } from '../../lib/cue';
   import { addIcons } from '../../lib/cueIcons';
   import { t } from '../../lib/i18n/index.svelte';
-  import { allCues, cues, mode, selection, ui } from '../../lib/store.svelte';
+  import { allCues, cueById, cues, mode, selection, ui } from '../../lib/store.svelte';
   import { hint } from '../../lib/ui';
   import GotoField from './GotoField.svelte';
   import SelectionModePicker from './SelectionModePicker.svelte';
@@ -48,7 +48,10 @@
   const view = $derived(ui.view!);
   const editing = $derived(mode() === 'edit');
   const selected = $derived(selection());
-  const selectedCues = $derived(allCues().filter((cue) => selected.includes(cue.id)));
+  const selectedCues = $derived.by(() => {
+    const ids = new Set(selected);
+    return allCues().filter((cue) => ids.has(cue.id));
+  });
   // Linking takes the settings of the cue in the inspector.
   const source = $derived(selectedCues.find((cue) => cue.id === ui.selected));
   const linkTarget = $derived(linkSource());
@@ -60,6 +63,14 @@
 
 {#snippet divider()}
   <Separator orientation="vertical" class="mx-1 h-5 bg-line-strong data-vertical:self-center" />
+{/snippet}
+
+<!-- Shared by both modes, so the field sits in the same place in each. -->
+{#snippet trailing()}
+  <div class="flex items-center gap-1.5">
+    <GotoField />
+    <SelectionModePicker />
+  </div>
 {/snippet}
 
 {#if editing}
@@ -176,7 +187,7 @@
             <DropdownMenu.Trigger
               {...tipProps}
               class={buttonVariants({ size: 'icon' })}
-              disabled={!ui.selected}
+              disabled={!ui.selected && !view.can_paste}
               aria-label={t('cuemenu.link')}
             >
               <LinkSimple />
@@ -187,7 +198,7 @@
           <DropdownMenu.Item disabled={!linkTarget} onSelect={() => linkTarget && linkCues(linkTarget.id)}>
             {t('cuemenu.link_selection', { cue: source ? cueLabel(source) : '–' })}
           </DropdownMenu.Item>
-          <DropdownMenu.Item disabled={source?.type === 'group'} onSelect={() => duplicateCue(ui.selected, true)}>
+          <DropdownMenu.Item disabled={!canLink(cueById(ui.selected))} onSelect={() => duplicateCue(ui.selected, true)}>
             {t('cuemenu.duplicate_linked')}
           </DropdownMenu.Item>
           <DropdownMenu.Item disabled={!view.can_paste} onSelect={() => pasteCues(true)}>
@@ -223,8 +234,7 @@
     >
 
     {@render divider()}
-    <GotoField />
-    <SelectionModePicker />
+    {@render trailing()}
   </div>
 {:else}
   <div class="flex items-center justify-end gap-3">
@@ -234,7 +244,6 @@
         {t('toolbar.in_scenes', { count: sceneCount })}
       {/if}
     </span>
-    <GotoField />
-    <SelectionModePicker />
+    {@render trailing()}
   </div>
 {/if}

@@ -4,7 +4,7 @@
 
   import { api } from '../lib/api';
   import { i18n, t } from '../lib/i18n/index.svelte';
-  import { attempt } from '../lib/store.svelte';
+  import { attemptChange } from '../lib/store.svelte';
 
   let { savedAt }: { savedAt: number } = $props();
 
@@ -13,13 +13,14 @@
 
   async function decide(apply: boolean) {
     busy = true;
-    await attempt(api.recoverAutosave(apply));
+    // Busy until the dialog's view (without `recovery`) is shown.
+    await attemptChange(api.recoverAutosave(apply));
     busy = false;
   }
 </script>
 
 <AlertDialog.Root open>
-  <AlertDialog.Content escapeKeydownBehavior="ignore">
+  <AlertDialog.Content>
     <AlertDialog.Header>
       <AlertDialog.Title>{t('recovery.title')}</AlertDialog.Title>
     </AlertDialog.Header>

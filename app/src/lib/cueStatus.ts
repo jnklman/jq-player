@@ -29,9 +29,13 @@ export interface CueStatus {
   paused?: boolean;
 }
 
-/** The status column of a cue: while it runs its times, else what it is set to. */
-export function cueStatus(cue: Cue): CueStatus {
-  return runningStatus(cue) ?? restingStatus(cue);
+/**
+ * The status column of a cue: while it runs its times, else what it is set to. `live: false` says the cue does not
+ * run (`isRunning`): then the status doesn't read the runtime state, so a cue list row that checks `isRunning` first
+ * isn't rebuilt on every state update (~30×/s) while it rests.
+ */
+export function cueStatus(cue: Cue, live = true): CueStatus {
+  return (live ? runningStatus(cue) : undefined) ?? restingStatus(cue, live);
 }
 
 function runningStatus(cue: Cue): CueStatus | undefined {
@@ -86,7 +90,7 @@ function runningStatus(cue: Cue): CueStatus | undefined {
   return undefined;
 }
 
-function restingStatus(cue: Cue): CueStatus {
+function restingStatus(cue: Cue, live: boolean): CueStatus {
   const view = ui.view;
   if (!view) return { text: '' };
   const info = view.cue_info[cue.id];
@@ -99,15 +103,17 @@ function restingStatus(cue: Cue): CueStatus {
         return { text: t('status.copying'), info: `${Math.round(progress * 100)} %`, progress, copying: true };
       }
       const speed = speedSummary(cue) || undefined;
-      if (cue.vamps.length > 0) return { text: '∞', info: speed ? `Vamp · ${speed}` : 'Vamp' };
-      if (cue.loop === 'forever') return { text: '∞', info: speed ? `Loop · ${speed}` : 'Loop' };
+      if (cue.vamps.length > 0 || cue.loop === 'forever') {
+        const label = loopLabel(cue);
+        return { text: '∞', info: speed ? `${label} · ${speed}` : label };
+      }
       return { text: info?.duration != null ? fmtTime(info.duration) : info?.probing ? '…' : '—', info: speed };
     }
     case 'wait':
       return { text: fmtSecs(cue.duration) };
     case 'group': {
       const mode = cue.mode === 'all' ? t('status.simultaneous') : t('status.sequential');
-      if (isRunning(cue)) return { text: t('status.running'), info: mode };
+      if (live && isRunning(cue)) return { text: t('status.running'), info: mode };
       return { text: t('status.cues', { count: cue.cues.length }), info: mode, bad: info?.missing };
     }
     case 'playlist': {
@@ -168,11 +174,17 @@ export function cueWarnings(cue: Cue): string[] {
   return warnings;
 }
 
-/** The chain arrow from `cue` to `next`, if it starts that one by itself; `waiting` while it is about to. */
-export function chainArrow(cue: Cue, next: Cue | undefined): { label: string; waiting: boolean } | null {
+/** The label of the chain arrow from `cue` to `next`, if it starts that one by itself; null without an arrow. */
+export function chainArrow(cue: Cue, next: Cue | undefined): string | null {
   if (!cue.advance.start_next || !next) return null;
-  const waiting = !!ui.runtime?.following.some((follow) => follow.after === cue.id && follow.cue === next.id);
-  return { label: advanceBadge(effectiveAt(cue)), waiting };
+  return advanceBadge(effectiveAt(cue));
+}
+
+/** Whether `next` waits to be started by `cue` (the chain arrow between them is lit). Apart from `chainArrow`, as
+ * only this changes with the runtime state. */
+export function chainWaiting(cue: Cue | undefined, next: Cue | undefined): boolean {
+  if (!cue || !next) return false;
+  return !!ui.runtime?.following.some((follow) => follow.after === cue.id && follow.cue === next.id);
 }
 
 /** Repeat: passes so far on the playhead cue ("2/3"), else how many ("×3"); null without repeat. */

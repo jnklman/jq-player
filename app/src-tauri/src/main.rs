@@ -2,6 +2,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
+    // First: it changes the environment, which is only safe on one thread.
+    jq_player_lib::paths::prepare();
     // Linux: WebKitGTK renders on the graphics card (DMA-BUF). Where that
     // shows a blank window (once seen with NVIDIA under Wayland), starting
     // with WEBKIT_DISABLE_DMABUF_RENDERER=1 falls back to the software path,

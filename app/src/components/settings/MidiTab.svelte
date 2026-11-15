@@ -3,6 +3,7 @@
 
   import { api, type LocalSettings } from '../../lib/api';
   import { t } from '../../lib/i18n/index.svelte';
+  import { liveNumber } from '../../lib/input';
   import { withMissing } from '../../lib/options';
   import { idOrNull } from '../../lib/settings';
   import { settingsView } from '../../lib/settingsView.svelte';
@@ -69,7 +70,10 @@
         placeholder={t('common.off')}
         aria-label={t('midi_tab.msc_id')}
         value={draft.msc_device ?? ''}
-        oninput={(e) => (draft.msc_device = idOrNull(e.currentTarget.value))}
+        {...liveNumber(
+          () => draft.msc_device,
+          (text) => (draft.msc_device = idOrNull(text)),
+        )}
       />
       <span class={hint}>{t('midi_tab.msc_hint')}</span>
     </SettingRow>

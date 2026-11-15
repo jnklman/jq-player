@@ -374,8 +374,12 @@ impl Prewarmer {
 
 impl Drop for Prewarmer {
     fn drop(&mut self) {
+        // Set under the queue's mutex: the worker checks the flag while holding
+        // it, so it either sees the flag or is already waiting for the notify.
+        let files = locked(&self.shared.files);
         self.shared.closed.store(true, Ordering::Relaxed);
         self.shared.wake.notify_all();
+        drop(files);
     }
 }
 

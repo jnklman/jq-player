@@ -332,6 +332,10 @@
     drag = null;
     handle = null;
     settleTimes(result, duration, 0.0005);
+    // A click on a handle moves nothing: no commit, no undo step.
+    const positions = (p: Times) =>
+      JSON.stringify([p.start, p.end, p.vamps, p.marks, p.fade_in, p.fade_out, p.end_fade]);
+    if (positions(result) === positions($state.snapshot(times))) return;
     oncommit(result);
   }
 

@@ -69,18 +69,24 @@ export function vampSpans(cue: Cue | undefined, info: CueInfo | undefined): { le
 /** "Loop 2/3", "Loop 4/∞", "Vamp 1 · 3/∞". */
 export function passLabel(pass: PassState): string {
   const of = `${pass.pass}/${pass.count ?? '∞'}`;
-  return pass.vamp != null ? `Vamp ${pass.vamp} · ${of}` : `Loop ${of}`;
+  return pass.vamp != null ? t('status.vamp_pass', { vamp: pass.vamp, pass: of }) : t('status.loop_pass', { pass: of });
 }
 
 /** "Vamp" for cues with vamps, "Loop" for a loop over the whole range. */
 export function loopLabel(cue: Cue | undefined): string {
-  return cue?.type === 'sound' && cue.vamps.length > 0 ? 'Vamp' : 'Loop';
+  return cue?.type === 'sound' && cue.vamps.length > 0 ? t('status.vamp') : t('status.loop');
 }
 
 /** The other cues linked with `cue`, in list order (`all` with groups' cues). */
 export function linkedCues(cue: Cue | undefined | null, all: Cue[]): Cue[] {
   if (!cue?.link) return [];
   return all.filter((other) => other.link === cue.link && other.id !== cue.id);
+}
+
+/** Whether the cue can be linked (as the backend's `can_link`): groups and scene markers cannot, so "Duplicate
+ * linked" would make a plain copy of them. */
+export function canLink(cue: Cue | null | undefined): boolean {
+  return !!cue && cue.type !== 'group' && cue.type !== 'scene';
 }
 
 /** A sound cue without a file yet. */

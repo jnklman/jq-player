@@ -1,8 +1,10 @@
 <script lang="ts">
+  import { tick } from 'svelte';
+
   import * as AlertDialog from '$lib/components/ui/alert-dialog';
   import { Button } from '$lib/components/ui/button';
 
-  import type { Question } from '../lib/store.svelte';
+  import { escapeAnswers, type Question } from '../lib/store.svelte';
 
   let { question }: { question: Question } = $props();
 
@@ -13,12 +15,24 @@
       question.choices.findIndex((choice) => choice.focus),
     ),
   );
+
+  // A new question can replace an open one in the same tick: the dialog stays mounted, so its first
+  // auto-focus is not repeated and the focus would stay on a button of the old question.
+  let first = true;
+  $effect(() => {
+    void question;
+    if (first) {
+      first = false;
+      return;
+    }
+    void tick().then(() => buttons[focused]?.focus());
+  });
 </script>
 
-<!-- Esc stays STOP ALL and never answers; only the buttons do. -->
+<!-- Esc stays STOP ALL and never answers, unless the question has an `escape` answer and Esc closes dialogs. -->
 <AlertDialog.Root open>
   <AlertDialog.Content
-    escapeKeydownBehavior="ignore"
+    {...escapeAnswers(question.escape === undefined ? undefined : () => question.answer(question.escape!))}
     onOpenAutoFocus={(e) => {
       e.preventDefault();
       buttons[focused]?.focus();

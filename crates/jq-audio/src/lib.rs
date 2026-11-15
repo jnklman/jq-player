@@ -21,6 +21,8 @@ mod realtime;
 
 /// Largest callback buffer the scratch space is sized for (frames).
 const MAX_CALLBACK_FRAMES: usize = 8192;
+/// Channels the engine runs with at least (outputs are stereo pairs).
+const MIN_ENGINE_CHANNELS: u16 = 2;
 /// Stream errors kept for display.
 const MAX_ERRORS: usize = 32;
 /// Callback buffer for ALSA and PulseAudio when none is set (frames, ~21 ms
@@ -166,6 +168,12 @@ enum Backend {
 #[derive(Default)]
 struct Shared {
     errors: Mutex<Vec<String>>,
+    /// Xruns reported by the stream since the last `take_errors`. The error
+    /// callback may run on the audio thread, so it only counts.
+    xruns: AtomicU32,
+    /// How many other errors may still be formatted before the next
+    /// `take_errors` (formatting allocates).
+    error_budget: AtomicU32,
     /// Why the device is lost, while it is.
     lost: Mutex<Option<String>>,
     /// Frames of the last callback; 0 before the first.
@@ -335,6 +343,17 @@ enum Link {
     },
 }
 
+/// Longest the null output may fall behind before it gives up catching up.
+const MAX_LAG: Duration = Duration::from_millis(100);
+
+/// The deadline after the block that was due at `next`. Short delays are
+/// made up for; after a stall (suspend/resume, a stopped process) the clock
+/// restarts at `now`, so cues do not race through the time that was lost.
+fn pace(next: Instant, now: Instant, block: Duration) -> Instant {
+    let next = next + block;
+    if now.saturating_duration_since(next) > MAX_LAG { now + block } else { next }
+}
+
 /// Runs the mixer at real-time pace into nowhere.
 struct NullThread {
     stop: Arc<AtomicBool>,
@@ -354,7 +373,7 @@ impl NullThread {
                 let mut next = Instant::now();
                 while !flag.load(Ordering::Relaxed) {
                     lent.process(&mut buf);
-                    next += block;
+                    next = pace(next, Instant::now(), block);
                     std::thread::sleep(next.saturating_duration_since(Instant::now()));
                 }
             })
@@ -467,7 +486,13 @@ impl AudioOutput {
 
     /// Stream errors (xruns, device lost) since the last call.
     pub fn take_errors(&self) -> Vec<String> {
-        self.shared.errors.lock().map(|mut e| std::mem::take(&mut *e)).unwrap_or_default()
+        let mut errors = self.shared.errors.lock().map(|mut e| std::mem::take(&mut *e)).unwrap_or_default();
+        self.shared.error_budget.store(0, Ordering::Relaxed);
+        let xruns = self.shared.xruns.swap(0, Ordering::Relaxed);
+        if xruns > 0 {
+            errors.push(t!("audio.xruns", count = xruns));
+        }
+        errors
     }
 }
 
@@ -484,18 +509,18 @@ fn supervise(
         let config = &prepared.config;
         let (controller, mixer) = jq_engine::engine(EngineConfig {
             max_voices,
-            ..EngineConfig::measured(config.sample_rate, config.channels as usize)
+            ..EngineConfig::measured(config.sample_rate, prepared.info.channels as usize)
         });
         let home = Home::default();
         let up = start(&prepared, Lent { mixer: Some(mixer), home: home.clone() }, &shared)?;
-        Ok((prepared.info, controller, home, up))
+        Ok((prepared.info, config.channels, controller, home, up))
     });
-    let (info, home, up) = match opened {
-        Ok((info, controller, home, up)) => {
+    let (info, stream_channels, home, up) = match opened {
+        Ok((info, stream_channels, controller, home, up)) => {
             if ready.send(Ok((info.clone(), controller))).is_err() {
                 return;
             }
-            (info, home, up)
+            (info, stream_channels, home, up)
         }
         Err(e) => {
             let _ = ready.send(Err(e));
@@ -505,7 +530,7 @@ fn supervise(
     // The engine keeps its sample rate and channels, so the stream must too.
     let pinned = OutputSpec {
         host: Some(info.host.clone()),
-        channels: Some(info.channels),
+        channels: Some(stream_channels),
         sample_rate: Some(info.sample_rate),
         ..spec
     };
@@ -576,9 +601,6 @@ fn prepare(spec: &OutputSpec) -> Result<Prepared, AudioError> {
         return Err(AudioError::UnsupportedFormat(format!("{format:?}")));
     }
     let max_channels = capacity(&host, &device);
-    if spec.channels.is_some_and(|c| c < 2) {
-        return Err(AudioError::Channels);
-    }
     let config = StreamConfig {
         channels: spec.channels.unwrap_or_else(|| {
             stream_channels(&host, &device, default.channels(), spec.min_channels, max_channels)
@@ -599,6 +621,8 @@ fn prepare(spec: &OutputSpec) -> Result<Prepared, AudioError> {
     if config.channels == 0 {
         return Err(AudioError::Channels);
     }
+    // The engine needs a stereo pair at least; a mono device gets the mix of both.
+    let engine_channels = config.channels.max(MIN_ENGINE_CHANNELS);
     let listing = device_info(&device, max_channels);
     let (name, detail) = describe(&device);
     let info = OutputInfo {
@@ -606,7 +630,7 @@ fn prepare(spec: &OutputSpec) -> Result<Prepared, AudioError> {
         device: name,
         device_detail: detail,
         sample_rate: config.sample_rate,
-        channels: config.channels,
+        channels: engine_channels,
         max_channels,
         sample_format: format!("{format:?}"),
         buffer_frames: match config.buffer_size {
@@ -787,7 +811,10 @@ where
     T: SizedSample + FromSample<f32>,
 {
     let channels = config.channels as usize;
-    let mut scratch = vec![0.0f32; MAX_CALLBACK_FRAMES * channels];
+    // The mixer's channels; more than the stream's only for a mono device,
+    // which gets the mean of the first pair.
+    let engine_channels = channels.max(MIN_ENGINE_CHANNELS as usize);
+    let mut scratch = vec![0.0f32; MAX_CALLBACK_FRAMES * engine_channels];
     let beat = pulse.clone();
     let frames = shared.clone();
     // The callback thread joins MMCSS in its first callback (one system call
@@ -801,23 +828,42 @@ where
             }
             beat.beats.fetch_add(1, Ordering::Relaxed);
             frames.callback_frames.store((data.len() / channels) as u32, Ordering::Relaxed);
-            for out in data.chunks_mut(scratch.len()) {
-                let buf = &mut scratch[..out.len()];
-                lent.process(buf);
-                for (o, s) in out.iter_mut().zip(buf.iter()) {
-                    *o = T::from_sample(*s);
+            if engine_channels == channels {
+                for out in data.chunks_mut(scratch.len()) {
+                    let buf = &mut scratch[..out.len()];
+                    lent.process(buf);
+                    for (o, s) in out.iter_mut().zip(buf.iter()) {
+                        *o = T::from_sample(*s);
+                    }
+                }
+            } else {
+                for out in data.chunks_mut(MAX_CALLBACK_FRAMES) {
+                    let buf = &mut scratch[..out.len() * engine_channels];
+                    lent.process(buf);
+                    for (o, frame) in out.iter_mut().zip(buf.chunks_exact(engine_channels)) {
+                        *o = T::from_sample((frame[0] + frame[1]) * 0.5);
+                    }
                 }
             }
         },
         // Never block here: if the list is busy, the error is dropped.
+        // Some hosts call this on the audio thread: xruns (the storm case)
+        // are only counted, the rare other errors are formatted within a
+        // small budget that `take_errors` refills.
         move |err: cpal::Error| {
-            let code = failure_code(err.kind());
+            let kind = err.kind();
+            let code = failure_code(kind);
             if code != 0 {
                 pulse.failure.store(code, Ordering::Relaxed);
             }
-            if let Ok(mut e) = shared.errors.try_lock()
-                && e.len() < MAX_ERRORS
-            {
+            if matches!(kind, cpal::ErrorKind::Xrun) {
+                shared.xruns.fetch_add(1, Ordering::Relaxed);
+                return;
+            }
+            if shared.error_budget.fetch_add(1, Ordering::Relaxed) >= MAX_ERRORS as u32 {
+                return;
+            }
+            if let Ok(mut e) = shared.errors.try_lock() {
                 e.push(err.to_string());
             }
         },
@@ -911,6 +957,18 @@ mod tests {
             drop(NullThread::start(lent, 48_000, 2));
             assert!(home.lock().unwrap().is_some());
         }
+    }
+
+    #[test]
+    fn null_output_pace_resyncs_after_a_stall() {
+        let block = Duration::from_millis(10);
+        let t0 = Instant::now();
+        // On time and slightly late: the deadline just advances.
+        assert_eq!(pace(t0, t0, block), t0 + block);
+        assert_eq!(pace(t0, t0 + MAX_LAG / 2, block), t0 + block);
+        // After a long stall the clock restarts instead of catching up.
+        let now = t0 + Duration::from_secs(30);
+        assert_eq!(pace(t0, now, block), now + block);
     }
 
     #[test]

@@ -30,7 +30,8 @@ pub fn new_numbers(
     {
         return numbers;
     }
-    let max = list.iter().filter_map(value).map(|(v, _)| v.floor() as u64).max().unwrap_or(0);
+    let max =
+        list.iter().filter_map(value).map(|(v, _)| v.floor() as u64).max().unwrap_or(0).min(u64::MAX / 2);
     (max + 1..).map(|n| format!("{prefix}{n}")).filter(|n| !taken.contains(n.as_str())).take(count).collect()
 }
 

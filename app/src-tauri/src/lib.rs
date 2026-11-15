@@ -8,9 +8,11 @@ mod key_labels;
 mod language;
 mod media;
 mod panel_windows;
+pub mod paths;
 mod save_as;
 mod session;
 mod updates;
+mod writer;
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Sender};
@@ -23,7 +25,7 @@ use jq_core::{Action, LocalSettings, PeakCache, SelectionMode, Startup};
 use jq_show::{Cue, CueId, StopwatchAction};
 use serde::Serialize;
 use session::EditOp;
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, RunEvent, State};
 use tauri_plugin_window_state::StateFlags;
 
 /// Window state kept between runs. Decorations and visibility come from
@@ -40,6 +42,11 @@ const STARTUP_GRACE: Duration = Duration::from_secs(5);
 
 /// Requests that take longer than this are reported as failed.
 const REPLY_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Longest wait on exit for settings and autosave writes still queued; the
+/// window's close asks the operator before (see `close`), this is the last
+/// resort for other ways out.
+const EXIT_FLUSH_TIMEOUT: Duration = Duration::from_secs(5);
 
 struct Backend(Mutex<Sender<Request>>);
 
@@ -72,6 +79,23 @@ impl Backend {
 #[tauri::command]
 async fn open_show(backend: State<'_, Backend>, path: PathBuf) -> Result<serde_json::Value, String> {
     backend.ask(|r| Request::Open(path, r)).await
+}
+
+/// A show that could not be opened at startup is said so, and offered on
+/// the start screen (if it has not asked yet), where opening it again shows
+/// why. Without this the operator would only see the start screen.
+fn startup_open_failed(
+    app: &AppHandle,
+    path: PathBuf,
+    opened: mpsc::Receiver<Result<serde_json::Value, String>>,
+) {
+    let Ok(Err(e)) = opened.recv() else { return };
+    let notice =
+        jq_core::Notice::Error(jq_i18n::t!("app.startup_open_failed", path = path.display(), error = e));
+    if let Ok(mut offer) = app.state::<StartupOffer>().0.lock() {
+        offer.get_or_insert(path);
+    }
+    let _ = app.emit_to(panel_windows::MAIN, backend::EVENT_NOTICE, notice);
 }
 
 /// The last show the start screen offers to open; only the first call gets
@@ -212,6 +236,23 @@ async fn waveform_range(
     .map_err(|e| e.to_string())?
 }
 
+/// Where a media file is audible, for trimming silence off a cue; `None` if
+/// it is silent throughout. From the peaks, decoded first if not cached.
+#[tauri::command]
+async fn audible_range(
+    peaks: State<'_, Arc<PeakCache>>,
+    media_dir: PathBuf,
+    file: String,
+) -> Result<Option<jq_media::peaks::Audible>, String> {
+    let peaks = peaks.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = jq_show::paths::resolve(&media_dir, &file);
+        Ok(peaks.peaks(&path, &|| true).map_err(|e| e.to_string())?.audible())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Bytes the peak cache takes on disk.
 #[tauri::command]
 async fn peak_cache_size(peaks: State<'_, Arc<PeakCache>>) -> Result<u64, String> {
@@ -344,6 +385,18 @@ fn show_arg(args: impl IntoIterator<Item = String>, cwd: &Path) -> Option<PathBu
         .map(|path| cwd.join(path))
 }
 
+/// The main window's place and size; in the portable build in its folder.
+fn window_state() -> tauri::plugin::TauriPlugin<tauri::Wry> {
+    let mut builder = tauri_plugin_window_state::Builder::new()
+        .with_state_flags(WINDOW_STATE)
+        // Panel windows keep their place in the layout.
+        .with_filter(|label| label == panel_windows::MAIN);
+    if let Some(file) = paths::window_state_file() {
+        builder = builder.with_filename(file);
+    }
+    builder.build()
+}
+
 /// The program was started again: only one may run (two would fight over
 /// the audio and MIDI devices), so this one comes to the front and opens
 /// the show file passed along, if any.
@@ -403,13 +456,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(updates::Pending::default())
-        .plugin(
-            tauri_plugin_window_state::Builder::new()
-                .with_state_flags(WINDOW_STATE)
-                // Panel windows keep their place in the layout.
-                .with_filter(|label| label == panel_windows::MAIN)
-                .build(),
-        )
+        .plugin(window_state())
         .manage(panel_windows::PanelWindows::default())
         .on_window_event(|window, event| {
             panel_windows::on_window_event(window, event);
@@ -428,9 +475,9 @@ pub fn run() {
                 window.show()?;
             }
             // Before the show thread, which hands it to each session.
-            let peaks = Arc::new(match app.path().app_cache_dir() {
-                Ok(dir) => PeakCache::new(dir.join("peaks")),
-                Err(_) => PeakCache::disabled(),
+            let peaks = Arc::new(match paths::cache_dir(app.handle()) {
+                Some(dir) => PeakCache::new(dir.join("peaks")),
+                None => PeakCache::disabled(),
             });
             let cleaning = peaks.clone();
             std::thread::Builder::new().name("jq-peaks-clean".into()).spawn(move || cleaning.clean_up())?;
@@ -443,18 +490,32 @@ pub fn run() {
             if jq_core::LocalSettings::load_general(&settings_file).unwrap_or_default().check_updates {
                 updates::check_at_startup(app.handle().clone());
             }
-            let tx = backend::spawn(app.handle().clone());
+            // Before the show thread, which queues its settings and autosave writes there.
+            let (writer, writes) = writer::Writer::spawn();
+            app.manage(writer.clone());
+            let tx = backend::spawn(app.handle().clone(), writes);
             // A show path on the command line (e.g. a show file opened in the file
             // manager) is opened right away: no show is open yet to ask about.
             let cwd = std::env::current_dir().unwrap_or_default();
             let cli = show_arg(std::env::args().skip(1), &cwd);
             let settings = backend::settings_path(app.handle());
+            // Through the writer, like every other write of the settings file, so
+            // they cannot interleave. Read before anything is queued.
+            let set_pending = |pending: bool| {
+                let path = settings.clone();
+                let key = writer::Key::new(path.clone(), "startup");
+                writer.submit(Some(key), move || {
+                    // As before, a failure here is not worth a notice.
+                    let _ = Startup::set_pending(&path, pending);
+                    Ok(())
+                });
+            };
             let mut offer = None;
             let open = match Startup::read(&settings, cli.is_some()) {
                 Startup::Open(path) => {
                     // Cleared once the show has run for a while; still set on the
                     // next start, it is only offered then.
-                    let _ = Startup::set_pending(&settings, true);
+                    set_pending(true);
                     let survived = tx.clone();
                     std::thread::Builder::new().name("jq-startup".into()).spawn(move || {
                         std::thread::sleep(STARTUP_GRACE);
@@ -464,19 +525,23 @@ pub fn run() {
                 }
                 Startup::Ask(path) => {
                     offer = Some(path);
-                    let _ = Startup::set_pending(&settings, false);
+                    set_pending(false);
                     None
                 }
                 Startup::Nothing => {
-                    let _ = Startup::set_pending(&settings, false);
+                    set_pending(false);
                     cli
                 }
             };
-            if let Some(path) = open {
-                let (reply, _ignored) = mpsc::channel();
-                let _ = tx.send(Request::Open(path, reply));
-            }
             app.manage(StartupOffer(Mutex::new(offer)));
+            if let Some(path) = open {
+                let (reply, opened) = mpsc::channel();
+                let _ = tx.send(Request::Open(path.clone(), reply));
+                let app = app.handle().clone();
+                std::thread::Builder::new()
+                    .name("jq-startup-open".into())
+                    .spawn(move || startup_open_failed(&app, path, opened))?;
+            }
             app.manage(Backend(Mutex::new(tx)));
             Ok(())
         })
@@ -502,6 +567,7 @@ pub fn run() {
             midi_ports,
             waveform,
             waveform_range,
+            audible_range,
             peak_cache_size,
             clear_peak_cache,
             check_import,
@@ -522,12 +588,22 @@ pub fn run() {
             panel_windows::focus_main,
             panel_windows::window_support,
             close::close_ack,
+            close::fields_committed,
             close::confirm_close,
             updates::check_update,
             updates::install_update
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|app, event| {
+            // Whatever way the program ends, the queued writes go to disk first.
+            if let RunEvent::Exit = event
+                && let Some(writer) = app.try_state::<writer::Writer>()
+                && !writer.flush(EXIT_FLUSH_TIMEOUT)
+            {
+                eprintln!("writes still pending on exit");
+            }
+        });
 }
 
 #[cfg(test)]

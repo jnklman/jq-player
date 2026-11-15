@@ -10,7 +10,7 @@
   import { type CueEdit, patchFor, shared } from '../../lib/cueEdit';
   import { t } from '../../lib/i18n/index.svelte';
   import { type InspectorNotice, inspectorTabs, inspectorView, noticesOf, shownTab } from '../../lib/inspector.svelte';
-  import { allCues, attempt, isTopLevel, ui } from '../../lib/store.svelte';
+  import { allCues, attempt, cueById, isTopLevel, ui } from '../../lib/store.svelte';
   import { bar } from '../../lib/ui';
   import { setLinked } from './context';
   import CueHeader from './CueHeader.svelte';
@@ -37,17 +37,23 @@
   });
   const multi = untrack(() => given.length > 1);
 
+  // What a slider drag has changed so far (sent with `live`, not in the show until the drag ends). A show event
+  // during the drag (another change, a media check) keeps it, so the thumb does not jump back and the drag's end
+  // does not commit the old value.
+  let dragged: Partial<Cue> = {};
+
   // Local copy of the one cue that the fields edit; every change is sent as one update.
   let draft = $state<Cue | null>(untrack(() => (multi ? null : ($state.snapshot(given[0]) as Cue))));
   $effect(() => {
-    if (!multi) draft = $state.snapshot(current[0]) as Cue;
+    if (!multi) draft = Object.assign($state.snapshot(current[0]) as Cue, dragged);
   });
 
   // Bumped when the backend refuses a change to several cues, so their fields show the show again.
   let refused = $state(0);
 
   async function commit() {
-    if (!draft) return;
+    // The cue may be gone when a field commits as the body goes (see `Inspector`).
+    if (!draft || !cueById(draft.id)) return;
     // A refused change (e.g. a taken hotkey) puts the fields back.
     if (!(await attempt(api.edit({ op: 'update_cue', cue: $state.snapshot(draft) as Cue })))) {
       draft = $state.snapshot(current[0]) as Cue;
@@ -76,10 +82,16 @@
     set(patch, live = false) {
       if (multi) return void commitAll(current, patch);
       if (!draft) return;
-      Object.assign(draft, patchFor(patch, draft));
+      const values = patchFor(patch, draft);
+      Object.assign(draft, values);
       // While a slider is dragged running cues follow without an undo step; the drag ends with `set({})`.
-      if (live) void attempt(api.liveCue($state.snapshot(draft) as Cue));
-      else void commit();
+      if (live) {
+        Object.assign(dragged, values);
+        void attempt(api.liveCue($state.snapshot(draft) as Cue));
+      } else {
+        dragged = {};
+        void commit();
+      }
     },
   };
 

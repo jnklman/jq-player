@@ -15,12 +15,15 @@ import {
   type ImportClash,
   type Notice,
   type OnClash,
+  type Revision,
   type RuntimeState,
   type SelectionMode,
+  type ShowEvent,
   type ShowView,
 } from './api';
 import { revealRow } from './cueScroll';
 import { setLanguage, t } from './i18n/index.svelte';
+import { Revisions } from './revision';
 
 export type Mode = 'edit' | 'show';
 
@@ -47,6 +50,8 @@ export interface Question {
   title: string;
   text: string;
   choices: Choice<string>[];
+  /** Answered by Esc when it closes dialogs (`escapeCloses`); without one, Esc never answers. */
+  escape?: string;
   answer: (value: string) => void;
 }
 
@@ -115,6 +120,36 @@ export const ui = $state({
   notices: [] as ShownNotice[],
 });
 
+// The revision of `ui.view` (see `Revision`).
+const revisions = new Revisions();
+/** Longest wait for the `show` event of a command's change (it is sent before the reply, so it is normally there
+ * already or comes within milliseconds); past it the caller goes on with the view it has. */
+const SHOWN_TIMEOUT = 2000;
+
+/** Shows a view from the backend unless a newer one is shown already (a late `getShow` answer). */
+function showView({ revision, view: next }: ShowEvent) {
+  if (!revisions.accept(revision)) return;
+  ui.view = next;
+  pruneSelection();
+}
+
+/**
+ * Resolves with the view once this window shows the change a command answered with `revision` (or a later one), so
+ * what follows (selecting an added cue, reading the applied settings) sees it.
+ */
+export async function whenShown(revision: Revision): Promise<ShowView | null> {
+  await revisions.reached(revision, SHOWN_TIMEOUT);
+  return ui.view;
+}
+
+/** Like `attempt` for a command that changes the show: resolves with the view showing the change (`undefined` if
+ * the command failed). */
+export async function attemptChange(promise: Promise<Revision>): Promise<ShowView | undefined> {
+  const revision = await attempt(promise);
+  if (revision === undefined) return undefined;
+  return (await whenShown(revision)) ?? undefined;
+}
+
 let noticeId = 0;
 
 export function notify(notice: Notice) {
@@ -141,25 +176,49 @@ export async function attempt<T>(promise: Promise<T>): Promise<T | undefined> {
 }
 
 /**
- * How dialogs take Esc: with `settings.escape = "close_first"` they close, else they ignore it and Esc stays a
- * panic. Questions (alert dialogs) always ignore it: they need an answer.
+ * How dialogs, menus, lists and popovers take Esc: with `settings.escape = "close_first"` they close, else they
+ * ignore it and Esc stays a panic. The ui components (`dialog-content`, `*-menu-content`, `popover-content`,
+ * `select-content`) set it by default; questions (`alert-dialog-content`) ignore it: they need an answer, unless they name one
+ * for Esc (`Question.escape`).
  */
 export function dialogEscape(): 'close' | 'ignore' {
-  return ui.view?.settings.escape === 'close_first' ? 'close' : 'ignore';
+  return escapeCloses() ? 'close' : 'ignore';
+}
+
+/**
+ * Props for a question's `alert-dialog-content` that let Esc give `answer` (its "Cancel") with "close_first";
+ * without an answer, or with Esc as a panic, Esc is ignored. `data-escape` tells `shortcuts.ts` not to panic.
+ */
+export function escapeAnswers(answer?: () => void) {
+  const answers = answer !== undefined && escapeCloses();
+  return {
+    'data-escape': answers ? '' : undefined,
+    escapeKeydownBehavior: answers ? ('close' as const) : ('ignore' as const),
+    onEscapeKeydown: (e: KeyboardEvent) => {
+      e.preventDefault();
+      if (answers) answer();
+    },
+  };
+}
+
+/** Esc closes the open dialog or menu (instead of panicking): only with "close_first". */
+export function escapeCloses(): boolean {
+  return ui.view?.settings.escape === 'close_first';
 }
 
 /**
  * Asks in an in-app dialog; resolves with the value of the chosen button.
  * The first choice should be the one that changes nothing: a newer question
- * answers an open one with it.
+ * answers an open one with it. `escape` is the answer Esc gives with "close_first".
  */
-export function ask<T extends string>(title: string, text: string, choices: Choice<T>[]): Promise<T> {
+export function ask<T extends string>(title: string, text: string, choices: Choice<T>[], escape?: T): Promise<T> {
   ui.question?.answer(ui.question.choices[0].value);
   return new Promise((resolve) => {
     ui.question = {
       title,
       text,
       choices,
+      escape,
       answer: (value) => {
         ui.question = null;
         resolve(value as T);
@@ -170,14 +229,20 @@ export function ask<T extends string>(title: string, text: string, choices: Choi
 
 /**
  * Asked when a dialog with unsaved changes closes other than by "Cancel" (×, Esc, a click outside).
- * Without `canApply` (e.g. invalid input) only staying or discarding is offered.
+ * Without `canApply` (e.g. invalid input) only staying or discarding is offered. Esc (with "close_first")
+ * discards, like the dialog's "Cancel": pressed twice, it closes the dialog.
  */
 export function askUnsaved(canApply = true): Promise<'stay' | 'discard' | 'apply'> {
-  return ask<'stay' | 'discard' | 'apply'>(t('unsaved.title'), t('unsaved.text'), [
-    { label: t('unsaved.stay'), value: 'stay', focus: true },
-    { label: t('unsaved.discard'), value: 'discard' },
-    ...(canApply ? [{ label: t('unsaved.apply'), value: 'apply' as const }] : []),
-  ]);
+  return ask<'stay' | 'discard' | 'apply'>(
+    t('unsaved.title'),
+    t('unsaved.text'),
+    [
+      { label: t('unsaved.stay'), value: 'stay', focus: true },
+      { label: t('unsaved.discard'), value: 'discard' },
+      ...(canApply ? [{ label: t('unsaved.apply'), value: 'apply' as const }] : []),
+    ],
+    'stay',
+  );
 }
 
 /** Asks what to do with each file whose name is taken; `null` if cancelled. */
@@ -218,17 +283,15 @@ export async function initLanguage() {
 
 /** Follows the backend's events; notices and the close question only in the main window (`main`). */
 export async function init(main: boolean) {
-  await events.onShow((view) => {
-    ui.view = view;
-    pruneSelection();
-  });
+  await events.onShow(showView);
   // Replaced whole: `runtime` is raw state, a change inside it would go unnoticed.
   await events.onState((state) => {
     ui.runtime = state;
   });
   if (main) await listenAsMain();
   // Answers after a show the backend opens at start (same queue).
-  ui.view = (await attempt(api.getShow())) ?? null;
+  const shown = await attempt(api.getShow());
+  if (shown) showView(shown);
   ui.started = true;
 }
 
@@ -414,9 +477,12 @@ export async function revealCue(id: CueId, behavior: ScrollBehavior = 'auto') {
 
 /** The selected cues of the main list, in list order; cues gone meanwhile are left out. */
 export function selection(): CueId[] {
+  // A set: after "select all" on a large show, `includes` on the (proxied) array per cue took noticeably long.
+  // eslint-disable-next-line svelte/prefer-svelte-reactivity -- a local lookup, never changed
+  const picked = new Set(ui.selected ? [ui.selected, ...ui.marked] : ui.marked);
   return cues()
     .map((cue) => cue.id)
-    .filter((id) => id === ui.selected || ui.marked.includes(id));
+    .filter((id) => picked.has(id));
 }
 
 /** Every cue (groups' cues included) and a lookup by id, rebuilt only when the show changes. */

@@ -52,10 +52,19 @@
     if (!mediaDir) return;
     data = null;
     error = null;
+    // A result for a file that has since been replaced is dropped.
+    let stale = false;
     overviewPeaks(mediaDir, file, version).then(
-      (peaks) => (data = peaks),
-      (e) => (error = String(e)),
+      (peaks) => {
+        if (!stale) data = peaks;
+      },
+      (e) => {
+        if (!stale) error = String(e);
+      },
     );
+    return () => {
+      stale = true;
+    };
   });
 
   // One vertical stroke per peak, mirrored around the middle.
@@ -125,6 +134,9 @@
     const positions = { start, end, vamps, marks };
     dragging = null;
     settleTimes(positions, duration, 0.005);
+    // A plain click on a handle moves nothing: no update, no undo step.
+    const before: Positions = { start: cue.start, end: cue.end, vamps: cue.vamps, marks: cue.marks };
+    if (JSON.stringify(positions) === JSON.stringify(before)) return;
     onchange(positions);
   }
 
@@ -233,7 +245,7 @@
   {#if !locked && data}
     <div class="flex items-center justify-between gap-2">
       <span class="text-[11px] text-muted-foreground">
-        Start, Ende und Vamp-Grenzen ziehen · Doppelklick setzt oder entfernt eine Marke
+        {t('wave.hint')}
       </span>
       {#if onexpand}
         <Tooltip tip={t('wave.expand_tip')} class="{buttonVariants({ size: 'xs' })} shrink-0" onclick={onexpand}

@@ -328,7 +328,12 @@ fn create(app: &AppHandle, spec: &PanelWindow, support: WindowSupport) -> tauri:
     let window = builder.build()?;
     #[cfg(windows)]
     crate::window_border(&window, crate::BORDER_LINE);
-    window.show()?;
+    // Not counted as open on failure: a hidden window left behind would
+    // block its label, so the panel could never be opened again.
+    if let Err(e) = window.show() {
+        let _ = window.destroy();
+        return Err(e);
+    }
     Ok(())
 }
 
@@ -364,10 +369,17 @@ pub fn on_window_event(window: &Window, event: &WindowEvent) {
         WindowEvent::Focused(focused) => focus_changed(window, Some(*focused)),
         WindowEvent::Destroyed => focus_changed(window, None),
         WindowEvent::Moved(_) | WindowEvent::Resized(_) => report_moved(window),
-        WindowEvent::CloseRequested { .. } => {
-            if let Some(panel) = panel_of(window.label()) {
-                let _ = window.emit_to(MAIN, EVENT_CLOSED, Closed { panel: panel.into() });
-            }
+        WindowEvent::CloseRequested { api, .. } => {
+            let Some(panel) = panel_of(window.label()) else { return };
+            let panel: String = panel.into();
+            // What is typed in its field reaches the show first; waiting must not block the event loop.
+            api.prevent_close();
+            let window = window.clone();
+            std::thread::spawn(move || {
+                crate::close::commit_fields(window.app_handle(), &[window.label().to_string()]);
+                let _ = window.emit_to(MAIN, EVENT_CLOSED, Closed { panel });
+                let _ = window.destroy();
+            });
         }
         _ => {}
     }

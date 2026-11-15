@@ -29,7 +29,12 @@
       max={limit !== null ? limit - 1 : undefined}
       aria-label={label}
       value={first}
-      oninput={(e) => set(positiveOrNull(e.currentTarget.value) ?? 1)}
+      oninput={(e) => {
+        // An emptied field waits for the next digit instead of writing 1 back.
+        const channel = positiveOrNull(e.currentTarget.value);
+        if (channel !== null) set(channel);
+      }}
+      onblur={(e) => (e.currentTarget.value = String(first))}
     />
     <span class={['text-xs', fits(first, limit) ? 'text-muted-foreground' : 'text-stop-soft']}>
       {t('routing.pair', { first, second: first + 1 })}{fits(first, limit)

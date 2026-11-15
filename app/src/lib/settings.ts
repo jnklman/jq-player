@@ -93,7 +93,7 @@ export const tabTitle = (tab: SettingsTab) =>
 
 /** The draft fields each tab edits (the waveform cache applies at once and is not among them). */
 const TAB_FIELDS: Record<SettingsTab, (keyof LocalSettings)[]> = {
-  device: ['host', 'device', 'channels', 'buffer_frames'],
+  device: ['host', 'device', 'channels', 'buffer_frames', 'underrun_warning'],
   routing: ['outputs', 'preview_device', 'preview_channel'],
   show: ['fade_all', 'panic_fade', 'go_lockout', 'end_warning'],
   keys: ['keys', 'jump_back', 'jump_forward', 'jump_end', 'volume_step', 'pan_step', 'rate_step'],
@@ -205,6 +205,16 @@ export const ACTION_GROUPS: {
     },
     actions: ['volume_up', 'volume_down', 'pan_left', 'pan_right', 'rate_up', 'rate_down'],
   },
+  {
+    id: 'list',
+    get title() {
+      return t('actions.group.list');
+    },
+    get scope() {
+      return t('actions.scope.keys_only');
+    },
+    actions: ['focus_goto'],
+  },
 ];
 
 /** What keeps the settings from being applied (as a message in the current language); null if nothing does. An
@@ -257,9 +267,12 @@ export function bindKey(
     return { keys, error: t('keys.fixed', { key: keyText(chord) }), displaced: [] };
   }
   const before = keys.find((binding) => chord && binding.action !== action && sameChord(binding.chord, chord));
-  const own = keysOf(keys, action);
-  if (chord) own[index] = chord;
-  else own.splice(index, 1);
+  let own = keysOf(keys, action);
+  if (chord) {
+    own[index] = chord;
+    // The chord the action already has in another slot would be a duplicate.
+    own = own.filter((key, i) => i === index || !sameChord(key, chord));
+  } else own.splice(index, 1);
   const others = keys.filter((binding) => binding.action !== action && !(chord && sameChord(binding.chord, chord)));
   const next = [...others, ...own.map((key) => ({ chord: key, action }))];
   return {
@@ -317,12 +330,13 @@ export function displacedText(
 
 /** A whole number above 0 from a field; empty (or anything else) = null, e.g. "device default". */
 export function positiveOrNull(value: string): number | null {
+  if (!/^\s*\d+\s*$/.test(value)) return null;
   const number = parseInt(value, 10);
-  return Number.isFinite(number) && number > 0 ? number : null;
+  return number > 0 ? number : null;
 }
 
 /** A whole number from 0 from a field; empty = null (e.g. MSC off, as 0 is a device id). */
 export function idOrNull(value: string): number | null {
-  const number = parseInt(value, 10);
-  return Number.isFinite(number) && number >= 0 ? number : null;
+  if (!/^\s*\d+\s*$/.test(value)) return null;
+  return parseInt(value, 10);
 }

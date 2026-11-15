@@ -384,10 +384,15 @@ struct Active {
     end_frame: usize,
     loop_mode: LoopMode,
     loops: Vec<LoopRegion>,
-    /// Loops that repeat until devamped (vamps, or an endless loop).
+    /// Loops that repeat until devamped (vamps, or an endless loop). A
+    /// counted loop is not one: it can be left early only while it has
+    /// passes left (see [`Active::counted_left`]).
     open_loops: usize,
     /// Devamps sent to this voice so far.
     devamped: usize,
+    /// The counted loop over the range was left early: it ends after the
+    /// pass it is on, which is now its last.
+    cut_short: bool,
     started: Option<Instant>,
     /// The file's part at the start is still being read (see
     /// [`VoiceParams::wait_frames`]); cleared once it plays.
@@ -446,6 +451,32 @@ struct Active {
     paused_at: Option<Instant>,
     /// Fading out as one of the others of an exclusive cue.
     excluded: bool,
+}
+
+impl Active {
+    /// The pass through the loop over the range, from 1.
+    fn range_pass(&self) -> u32 {
+        self.pass.map_or(1, |p| p.pass)
+    }
+
+    /// The counted loop over the range (vamps leave none) still has passes
+    /// to come after the one it is on, so an exit can end it early.
+    fn counted_left(&self) -> bool {
+        !self.vamps
+            && !self.cut_short
+            && !self.loops.is_empty()
+            && matches!(self.loop_mode, LoopMode::Times(n) if self.range_pass() < n)
+    }
+
+    /// Passes through the loop over the range still to come after this one.
+    fn passes_left(&self) -> u32 {
+        match self.loop_mode {
+            LoopMode::Times(n) if !self.vamps && !self.cut_short => {
+                n.max(1).saturating_sub(self.range_pass())
+            }
+            _ => 0,
+        }
+    }
 }
 
 /// A playlist item playing.
@@ -538,11 +569,16 @@ struct Timer {
     go: u64,
     /// Time left while paused.
     paused: Option<Duration>,
+    /// The go-to/start nesting it was set in, if it was due at once: it
+    /// fires in the same tick, so a loop of cues with no time between them
+    /// runs over the timers instead of recursion and is broken off the same
+    /// way (see [`GOTO_DEPTH`]).
+    depth: u32,
 }
 
 impl Timer {
     fn new(at: Instant, cue: CueId, kind: TimerKind, owner: CueId, go: u64) -> Self {
-        Self { at, cue, kind, owner, go, paused: None }
+        Self { at, cue, kind, owner, go, paused: None, depth: 0 }
     }
 }
 
@@ -798,6 +834,22 @@ impl Runner {
         }
     }
 
+    /// Hands what outlives the audio device to `next`, a runner on the
+    /// reopened output for the same show: the stopwatch times (a countdown
+    /// keeps running), the GO count of Repeat, the GO lockout and the last
+    /// panic, the orders drawn for shuffled playlists to come and the files
+    /// being imported. Only while idle: running cues are not handed over.
+    pub fn carry_over(&mut self, next: &mut Runner) {
+        next.stopwatches = std::mem::take(&mut self.stopwatches);
+        next.stopwatches.retain(|id, _| next.show.stopwatches.iter().any(|w| &w.id == id));
+        next.repeat_done = if next.playhead == self.playhead { self.repeat_done } else { 0 };
+        (next.last_go, next.go_rejected, next.panic_until) =
+            (self.last_go, self.go_rejected, self.panic_until);
+        next.drawn = std::mem::take(&mut self.drawn);
+        next.importing = std::mem::take(&mut self.importing);
+        next.arm();
+    }
+
     pub fn settings(&self) -> &LocalSettings {
         &self.settings
     }
@@ -874,20 +926,18 @@ impl Runner {
         (secs.max(0.0) * self.engine.config().sample_rate as f64).round() as usize
     }
 
-    /// Streamed files of the next cues keep their start position loaded.
+    /// Streamed files keep loaded where the next cues start in them (and
+    /// where position cues to come jump to); a file no longer wanted there
+    /// (still playing, say) lets those parts go.
     fn hint_streams(&self) {
-        let preview = self.preview.as_ref().map(|p| (&p.path, p.start_frame));
-        for (path, starts) in &self.starts {
-            if let Some(stream) = self.cache.buffer(path).and_then(|b| b.stream()) {
-                let mut hints = starts.clone();
-                hints.extend(preview.filter(|(p, _)| *p == path).map(|(_, start)| start));
+        let preview = self.preview.as_ref().map(|p| (p.path.as_path(), p.start_frame));
+        for (path, buffer) in self.cache.buffers() {
+            let Some(stream) = buffer.stream() else { continue };
+            let mut hints = self.starts.get(path).cloned().unwrap_or_default();
+            hints.extend(preview.filter(|(p, _)| *p == path).map(|(_, start)| start));
+            if stream.hints() != hints {
                 stream.set_hints(hints);
             }
-        }
-        if let Some((path, start)) = preview.filter(|(p, _)| !self.starts.contains_key(*p))
-            && let Some(stream) = self.cache.buffer(path).and_then(|b| b.stream())
-        {
-            stream.set_hints(vec![start]);
         }
     }
 
@@ -1229,7 +1279,12 @@ impl Runner {
             // A file that failed to load may move arming on to the next item.
             self.arm();
         }
-        for (path, frames) in self.cache.take_underruns(now) {
+        // Taken even when not reported, so they do not pile up.
+        let mut underruns = self.cache.take_underruns(now);
+        if !self.settings.underrun_warning {
+            underruns.clear();
+        }
+        for (path, frames) in underruns {
             let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
             let ms = frames * 1000 / self.engine.config().sample_rate.max(1) as u64;
             self.notices.push(Notice::Warning(t!("runner.underrun", name = name, ms = ms)));
@@ -1238,9 +1293,17 @@ impl Runner {
         for event in events {
             match event {
                 Event::Started(v) => {
+                    let rate = self.engine.config().sample_rate as f64;
                     if let Some(a) = self.active.iter_mut().find(|a| a.voice == v) {
-                        // Paused before it played, it starts when the pause began.
-                        a.started = Some(a.paused_at.unwrap_or(now));
+                        // Paused before it played, it starts when the pause
+                        // began. Started from a position, the part before it
+                        // counts as played, as after a jump (see `seek_voices`),
+                        // so the time left and the follows are right.
+                        let at = a.paused_at.unwrap_or(now);
+                        let played = a.frame.saturating_sub(a.start_frame) as f64
+                            / rate
+                            / (a.rate_now as f64).max(0.01);
+                        a.started = Some(at.checked_sub(secs(played)).unwrap_or(at));
                     }
                     self.preview_event(&Event::Started(v), now);
                 }
@@ -1304,13 +1367,15 @@ impl Runner {
 
         while let Some(i) = self.timers.iter().position(|t| t.paused.is_none() && t.at <= now) {
             let t = self.timers.remove(i);
+            let outer = std::mem::replace(&mut self.goto_depth, t.depth);
             match t.kind {
                 TimerKind::Fire { direct, from } => self.fire(t.cue, now, t.go, direct, from),
                 TimerKind::Follow => self.trigger(t.cue, now, false, t.go),
                 TimerKind::Item { step, carry } => {
-                    self.start_items_from(t.cue, step, carry, t.go, None);
+                    self.next_items_from(t.cue, step, carry, t.go, None, now);
                 }
             }
+            self.goto_depth = outer;
         }
         // Orders of the playlists that have ended (or go on with no next item).
         let (active, timers) = (&self.active, &self.timers);
@@ -1412,7 +1477,8 @@ impl Runner {
     }
 
     /// Seconds (real time, at the rate of now) until a voice ends; `None`
-    /// while a vamp or endless loop is open.
+    /// while a vamp or endless loop is open. A counted loop counts all its
+    /// passes, or up to the end of the one it is on once it was left early.
     fn remaining(&self, a: &Active, now: Instant) -> Option<f64> {
         let rate = self.engine.config().sample_rate as f64;
         let speed = (a.rate_now as f64).max(0.01);
@@ -1423,14 +1489,11 @@ impl Runner {
         } else if a.open_loops > 0 {
             // Devamped: the rest of the file from the current position.
             Some(a.end_frame.saturating_sub(a.frame) as f64 / rate / speed)
-        } else if a.speed_moved {
-            // The rate changed on the way: from the position, the passes
-            // still to come, at the rate of now.
-            let passes_left = match a.loop_mode {
-                LoopMode::Times(n) => n.max(1).saturating_sub(a.pass.map_or(1, |p| p.pass)) as usize,
-                _ => 0,
-            };
-            let left = a.end_frame.saturating_sub(a.frame) + passes_left * range_frames;
+        } else if a.speed_moved || a.cut_short {
+            // The rate changed on the way, or a counted loop was left early
+            // (its passes no longer follow from the clock): from the
+            // position, the passes still to come, at the rate of now.
+            let left = a.end_frame.saturating_sub(a.frame) + a.passes_left() as usize * range_frames;
             let since = match (a.paused_at, a.frame_at) {
                 (None, Some(at)) => now.saturating_duration_since(at).as_secs_f64(),
                 _ => 0.0,
@@ -1535,7 +1598,12 @@ impl Runner {
                         let region = a.loops.get(p.index)?;
                         Some(PassState {
                             pass: p.pass,
-                            count: region.repeats.map(|r| r.saturating_add(1)),
+                            // Left early, the pass it is on is the last.
+                            count: if a.cut_short {
+                                Some(p.pass)
+                            } else {
+                                region.repeats.map(|r| r.saturating_add(1))
+                            },
                             vamp: a.vamps.then_some(p.index + 1),
                         })
                     }),
@@ -1723,10 +1791,18 @@ impl Runner {
         }
         if cue.pre_wait > 0.0 {
             let kind = TimerKind::Fire { direct, from };
-            self.timers.push(Timer::new(now + secs(cue.pre_wait), id, kind, id, go));
+            self.add_timer(now, Timer::new(now + secs(cue.pre_wait), id, kind, id, go));
         } else {
             self.fire(id, now, go, direct, from);
         }
+    }
+
+    /// Sets timer `t`; one due at once keeps the go-to/start nesting.
+    fn add_timer(&mut self, now: Instant, mut t: Timer) {
+        if t.at <= now {
+            t.depth = self.goto_depth;
+        }
+        self.timers.push(t);
     }
 
     /// The cue `cue` starts by itself, and when (see [`effective_at`]).
@@ -1828,7 +1904,11 @@ impl Runner {
                         }
                     }
                     Err(e) => {
-                        self.notices.push(Notice::Error(format!("Cue {}: {e}", label(&cue))));
+                        self.notices.push(Notice::Error(t!(
+                            "runner.cue_problem",
+                            cue = label(&cue),
+                            problem = e
+                        )));
                         // A broken cue must not break the chain.
                         ended = true;
                     }
@@ -1921,13 +2001,21 @@ impl Runner {
             }
             CueKind::Osc(o) => {
                 if let Err(e) = self.send_osc(o) {
-                    self.notices.push(Notice::Error(format!("Cue {}: {e}", label(&cue))));
+                    self.notices.push(Notice::Error(t!(
+                        "runner.cue_problem",
+                        cue = label(&cue),
+                        problem = e
+                    )));
                 }
                 ended = true;
             }
             CueKind::Midi(m) => {
                 if let Err(e) = self.send_midi(m) {
-                    self.notices.push(Notice::Error(format!("Cue {}: {e}", label(&cue))));
+                    self.notices.push(Notice::Error(t!(
+                        "runner.cue_problem",
+                        cue = label(&cue),
+                        problem = e
+                    )));
                 }
                 ended = true;
             }
@@ -1995,7 +2083,7 @@ impl Runner {
         match delay {
             // The cue is the timer's owner, so pausing it holds the time.
             Some(delay) => {
-                self.timers.push(Timer::new(now + secs(delay), next, TimerKind::Follow, cue.id, go))
+                self.add_timer(now, Timer::new(now + secs(delay), next, TimerKind::Follow, cue.id, go))
             }
             None => self.trigger(next, now, false, go),
         }
@@ -2017,7 +2105,7 @@ impl Runner {
             (_, Some((next, lead))) => (next, secs(lead)),
             _ => return,
         };
-        self.timers.push(Timer::new(now + duration.saturating_sub(lead), next, TimerKind::Follow, id, go));
+        self.add_timer(now, Timer::new(now + duration.saturating_sub(lead), next, TimerKind::Follow, id, go));
     }
 
     /// Moves the playhead to a go-to cue's target, or starts the target as
@@ -2156,8 +2244,9 @@ impl Runner {
         }
         let (buffer, loaded_now) =
             self.cache.get_now(&path).map_err(|e| t!("runner.file_not_loadable", error = e))?;
-        // Cues started directly (hotkey, OSC) cannot all be armed.
-        if loaded_now && !self.is_direct_go(go) {
+        // Cues started directly (hotkey, OSC) cannot all be armed, so for
+        // them this is only reported along with disk underruns.
+        if loaded_now && (!self.is_direct_go(go) || self.settings.underrun_warning) {
             self.notices.push(Notice::Warning(t!("runner.not_preloaded", cue = name)));
         }
 
@@ -2214,6 +2303,7 @@ impl Runner {
             loops: kept_loops,
             open_loops,
             devamped: passed,
+            cut_short: false,
             started: None,
             loading,
             frame: play_from,
@@ -2258,9 +2348,9 @@ impl Runner {
         }
         if p.gap > 0.0 {
             let at = now + secs(p.gap);
-            self.timers.push(Timer::new(at, id, TimerKind::Item { step, carry }, id, go));
+            self.add_timer(now, Timer::new(at, id, TimerKind::Item { step, carry }, id, go));
         } else {
-            self.start_items_from(id, step, carry, go, None);
+            self.next_items_from(id, step, carry, go, None, now);
         }
     }
 
@@ -2273,7 +2363,7 @@ impl Runner {
             && let TimerKind::Item { step, carry } = self.timers[i].kind
         {
             let t = self.timers.remove(i);
-            self.start_items_from(id, step, carry, t.go, t.paused.map(|_| now));
+            self.next_items_from(id, step, carry, t.go, t.paused.map(|_| now), now);
             return;
         }
         let Some(i) = self.active.iter().position(|a| {
@@ -2287,7 +2377,7 @@ impl Runner {
             self.send(|e| e.stop(a.voice));
             let Some(item) = a.item else { return };
             let carry = Carry { level: a.level, pan: a.pan_set, speed: a.speed_set };
-            self.start_items_from(id, item.step + 1, carry, a.go, Some(now));
+            self.next_items_from(id, item.step + 1, carry, a.go, Some(now), now);
             return;
         }
         let a = &mut self.active[i];
@@ -2345,6 +2435,28 @@ impl Runner {
     /// the show's limits; [`SILENCE_DB`] for silence.
     fn level_db(&self, volume_db: f64, normalize_db: f64) -> f64 {
         self.show.level_limits.level(volume_db, normalize_db).unwrap_or(SILENCE_DB)
+    }
+
+    /// Goes on with a playlist's items from step `from` on, as
+    /// [`Runner::start_items_from`]; if none can start, the playlist is over
+    /// and its next cue waiting for the end starts, which a later item
+    /// would have carried (a broken cue must not break the chain).
+    fn next_items_from(
+        &mut self,
+        id: CueId,
+        from: usize,
+        carry: Carry,
+        go: u64,
+        paused: Option<Instant>,
+        now: Instant,
+    ) {
+        if self.start_items_from(id, from, carry, go, paused) {
+            return;
+        }
+        let advance = self.show.cue(id).and_then(|cue| self.advance_of(cue));
+        if let Some((next, AdvanceAt::End | AdvanceAt::BeforeEnd { .. })) = advance {
+            self.trigger(next, now, false, go);
+        }
     }
 
     /// Starts the first playable item from step `from` on; a broken file is
@@ -2580,7 +2692,10 @@ impl Runner {
                 (
                     if stop { cancel_follow(a) } else { a.voice },
                     a.fade_out,
-                    a.trim_db,
+                    // A cue edited to silence has no trim to make up for (it
+                    // would take +100 dB): its fade target plays once its
+                    // volume is raised again, not that much over it.
+                    if a.trim_db == SILENCE_DB - a.base_db { 0.0 } else { a.trim_db },
                     a.normalize_db,
                     current,
                     a.paused_at.is_some(),
@@ -2768,34 +2883,13 @@ impl Runner {
     /// its current item.
     fn apply_position(&mut self, hit: &Hit, to: PositionTo, crossfade: u32, now: Instant) {
         let rate = self.engine.config().sample_rate as f64;
-        let frames = |secs: f64| (secs.clamp(0.0, MAX_SECS) * rate).round() as usize;
         let mut seeks = Vec::new();
         let mut missing = Vec::new();
         for a in self.active.iter().filter(|a| hit.hits(a.cue, &a.output)) {
-            let marks: Vec<usize> = match self.show.cue(a.cue).map(|c| &c.kind) {
-                Some(CueKind::Sound(s)) if a.item.is_none() => {
-                    let mut marks: Vec<usize> = s.marks.iter().map(|&m| frames(m)).collect();
-                    marks.sort_unstable();
-                    marks
-                }
-                _ if matches!(to, PositionTo::Relative { .. }) => Vec::new(),
-                _ => continue,
-            };
-            let target = match to {
-                PositionTo::Absolute { secs } => Some(frames(secs)),
-                PositionTo::Relative { secs } if secs >= 0.0 => Some(a.frame + frames(secs)),
-                PositionTo::Relative { secs } => Some(a.frame.saturating_sub(frames(-secs))),
-                PositionTo::Mark { index } => marks.get(index.wrapping_sub(1)).copied(),
-                PositionTo::NextMark => marks.iter().copied().find(|&m| m > a.frame),
-                PositionTo::PreviousMark => {
-                    // Right after a mark, the one before it (like a player's "back").
-                    let before = a.frame.saturating_sub(frames(PREVIOUS_MARK_GRACE));
-                    marks.iter().copied().rev().find(|&m| m < before)
-                }
-            };
-            match target {
-                Some(t) => seeks.push((a.voice, t.clamp(a.start_frame, a.end_frame))),
-                None => missing.push(a.cue),
+            match position_target(&self.show, a, to, rate) {
+                Some(Some(t)) => seeks.push((a.voice, t)),
+                Some(None) => missing.push(a.cue),
+                None => {}
             }
         }
         for cue in missing {
@@ -2818,7 +2912,8 @@ impl Runner {
     }
 
     /// Moves voices to frames; vamps jumped over count as devamped, and a
-    /// jump back before vamps left already holds there again.
+    /// jump back before vamps left already holds there again (as does a
+    /// counted loop left early).
     fn seek_voices(&mut self, seeks: &[(VoiceId, usize)], now: Instant, crossfade: u32) {
         let rate = self.engine.config().sample_rate as f64;
         let mut sends = Vec::new();
@@ -2837,6 +2932,9 @@ impl Runner {
             let back = target < a.frame;
             let passed = a.loops.iter().filter(|l| l.repeats.is_none() && l.end <= target).count();
             a.devamped = if back { passed } else { a.devamped.max(passed) };
+            // A counted loop left early holds again for the passes it had
+            // left (the engine keeps its pass).
+            a.cut_short &= !back;
             a.frame = target;
             sends.push((a.voice, target, back));
         }
@@ -2993,9 +3091,12 @@ impl Runner {
         }
     }
 
-    /// Leaves the next vamp (or all loops) of the running cues `ids`; none
-    /// running counts as success. Devamp cues and second triggers share it.
-    /// Returns the voices that leave a loop.
+    /// Leaves the innermost loop or vamp (or all of them) of the running
+    /// cues `ids`: the next vamp not yet released, an endless loop, or a
+    /// counted loop with passes left (it ends after the pass it is on; on
+    /// its last pass there is nothing to leave). None running counts as
+    /// success. Devamp cues and second triggers share it. Returns the
+    /// voices that leave a loop.
     fn exit_loops(&mut self, ids: &[CueId], exit: ExitLoop) -> Vec<VoiceId> {
         let (all, stop) = (exit.level == LoopLevel::All, exit.stop);
         let exit = match exit.mode {
@@ -3010,9 +3111,13 @@ impl Runner {
         let voices: Vec<VoiceId> = self
             .active
             .iter_mut()
-            .filter(|a| ids.contains(&a.cue) && a.devamped < a.open_loops)
+            .filter(|a| ids.contains(&a.cue) && (a.devamped < a.open_loops || a.counted_left()))
             .map(|a| {
-                a.devamped = if all { a.open_loops } else { a.devamped + 1 };
+                if a.devamped < a.open_loops {
+                    a.devamped = if all { a.open_loops } else { a.devamped + 1 };
+                } else {
+                    a.cut_short = true;
+                }
                 a.voice
             })
             .collect();
@@ -3143,6 +3248,23 @@ impl Runner {
                 cues.extend(started);
             }
         }
+        // Where position cues to come move running cues: a far jump in a
+        // streamed file lands on a loaded chunk. Only fixed targets (a time,
+        // a numbered mark); the others move with playback.
+        for id in &cues {
+            let Some(CueKind::Position(c)) = show.cue(*id).map(|c| &c.kind) else { continue };
+            if !matches!(c.to, PositionTo::Absolute { .. } | PositionTo::Mark { .. }) {
+                continue;
+            }
+            let hit = self.hit(*id, &c.targets);
+            for a in self.active.iter().filter(|a| hit.hits(a.cue, &a.output)) {
+                if let Some(Some(target)) = position_target(show, a, c.to, rate)
+                    && let Some((path, _)) = file(a.cue, 0)
+                {
+                    wanted.push((path, target));
+                }
+            }
+        }
         // Shuffled playlists to come are drawn the order they start in.
         self.drawn.retain(|id, _| cues.contains(id));
         for &id in &cues {
@@ -3197,6 +3319,35 @@ impl Runner {
 /// play) counts as ready too.
 fn ready_at(buffer: &AudioBuffer, frame: usize) -> bool {
     frame >= buffer.frames() || buffer.is_ready_at(frame)
+}
+
+/// Where a position cue's `to` moves voice `a` (inside its start–end), at
+/// `rate` frames a second. `None`: the voice is not moved (a playlist moves
+/// only relative); `Some(None)`: the mark it names does not exist.
+fn position_target(show: &Show, a: &Active, to: PositionTo, rate: f64) -> Option<Option<usize>> {
+    let frames = |secs: f64| (secs.clamp(0.0, MAX_SECS) * rate).round() as usize;
+    let marks: Vec<usize> = match show.cue(a.cue).map(|c| &c.kind) {
+        Some(CueKind::Sound(s)) if a.item.is_none() => {
+            let mut marks: Vec<usize> = s.marks.iter().map(|&m| frames(m)).collect();
+            marks.sort_unstable();
+            marks
+        }
+        _ if matches!(to, PositionTo::Relative { .. }) => Vec::new(),
+        _ => return None,
+    };
+    let target = match to {
+        PositionTo::Absolute { secs } => Some(frames(secs)),
+        PositionTo::Relative { secs } if secs >= 0.0 => Some(a.frame + frames(secs)),
+        PositionTo::Relative { secs } => Some(a.frame.saturating_sub(frames(-secs))),
+        PositionTo::Mark { index } => marks.get(index.wrapping_sub(1)).copied(),
+        PositionTo::NextMark => marks.iter().copied().find(|&m| m > a.frame),
+        PositionTo::PreviousMark => {
+            // Right after a mark, the one before it (like a player's "back").
+            let before = a.frame.saturating_sub(frames(PREVIOUS_MARK_GRACE));
+            marks.iter().copied().rev().find(|&m| m < before)
+        }
+    };
+    Some(target.map(|t| t.clamp(a.start_frame, a.end_frame)))
 }
 
 /// The cue's vamps in frames (sorted, inside start–end, overlaps dropped),

@@ -7,7 +7,7 @@
   import { Tooltip } from '$lib/components/ui/tooltip';
 
   import { t } from '../lib/i18n/index.svelte';
-  import { askUnsaved, dialogEscape } from '../lib/store.svelte';
+  import { askUnsaved } from '../lib/store.svelte';
 
   // A dialog that edits a draft and applies it as a whole: "Cancel"
   // discards it, the apply button sends it. Closing any other way (×, Esc,
@@ -27,6 +27,7 @@
     onclose,
     status,
     children,
+    ref = $bindable(null),
   }: {
     title: string | Snippet;
     /** Classes of the dialog box, e.g. its width. */
@@ -49,10 +50,11 @@
     /** Left in the footer, e.g. how much was changed. */
     status?: Snippet;
     children: Snippet;
+    /** The dialog box (e.g. for `claimUndo`). */
+    ref?: HTMLElement | null;
   } = $props();
 
   let saving = $state(false);
-  let content = $state<HTMLElement | null>(null);
 
   async function apply() {
     saving = true;
@@ -82,14 +84,13 @@
   }
 >
   <Dialog.Content
-    bind:ref={content}
+    bind:ref
     class={['outline-none', className]}
     tabindex={focusDialog ? -1 : undefined}
-    escapeKeydownBehavior={dialogEscape()}
     onOpenAutoFocus={(e) => {
       if (!focusDialog) return;
       e.preventDefault();
-      content?.focus();
+      ref?.focus();
     }}
   >
     <Dialog.Header>

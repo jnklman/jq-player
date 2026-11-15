@@ -15,7 +15,7 @@
   import { api } from '../lib/api';
   import { redo, setMode, undo } from '../lib/commands';
   import { clock, shortDevice } from '../lib/format';
-  import { t } from '../lib/i18n/index.svelte';
+  import { fmtNumber, t } from '../lib/i18n/index.svelte';
   import { attempt, type Mode, mode as currentMode, saveShow, ui } from '../lib/store.svelte';
   import { dragFill } from '../lib/ui';
   import AppMenu from './AppMenu.svelte';
@@ -141,8 +141,8 @@
         aria-label={t('header.mode')}
         bind:value={() => currentMode(), (mode) => mode && setMode(mode as Mode)}
       >
-        <ToggleGroup.Item value="edit">Edit</ToggleGroup.Item>
-        <ToggleGroup.Item value="show">Show</ToggleGroup.Item>
+        <ToggleGroup.Item value="edit">{t('header.edit')}</ToggleGroup.Item>
+        <ToggleGroup.Item value="show">{t('header.show')}</ToggleGroup.Item>
       </ToggleGroup.Root>
     {/if}
 
@@ -163,7 +163,9 @@
               class={['size-2 shrink-0 rounded-full', view.audio_error || view.audio_lost ? 'bg-stop-soft' : 'bg-go']}
             ></span>
             <span class="truncate">{shortDevice(view.audio.device)}</span>
-            <span class="shrink-0">· {view.audio.sample_rate / 1000} kHz · {view.audio.channels} {t('header.ch')}</span>
+            <span class="shrink-0"
+              >· {fmtNumber(view.audio.sample_rate / 1000)} kHz · {view.audio.channels} {t('header.ch')}</span
+            >
           </span>
         {/snippet}
       </Tooltip>

@@ -33,7 +33,7 @@
 {:else if type === 'playlist'}
   <PlaylistMain {edit} {info} />
 {:else if cues.every(hasAudio)}
-  <FieldGroup title="Fades"><FadeRows {edit} /></FieldGroup>
+  <FieldGroup title={t('playlist.fades')}><FadeRows {edit} /></FieldGroup>
 {:else if type === 'group'}
   <GroupFields {edit} />
 {:else if !edit.multi && isControl(first)}

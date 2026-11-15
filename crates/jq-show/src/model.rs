@@ -1266,7 +1266,9 @@ pub enum VolumeAction {
 }
 
 /// Leaves the current loop or vamp of running cues; with several vamps,
-/// each one releases the next. No target running counts as success.
+/// each one releases the next. A counted loop with passes left ends after
+/// the pass it is on (on its last pass there is nothing to leave). No
+/// target running counts as success.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ExitLoopCue {
     pub targets: Targets,

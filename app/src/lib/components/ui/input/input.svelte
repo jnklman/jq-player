@@ -3,6 +3,7 @@
 
   import CaretDown from '~icons/ph/caret-down-bold';
   import CaretUp from '~icons/ph/caret-up-bold';
+  import { t } from '$lib/i18n/index.svelte';
   import { cn, type WithElementRef } from '$lib/utils.js';
 
   type InputType = Exclude<HTMLInputTypeAttribute, 'file'>;
@@ -39,6 +40,13 @@
     input.dispatchEvent(new Event('input', { bubbles: true }));
     input.dispatchEvent(new Event('change', { bubbles: true }));
   }
+
+  // A number field without negative values takes no minus sign, so "1-2" cannot be typed.
+  const noMinus = $derived(restProps.min != null && restProps.min !== '' && Number(restProps.min) >= 0);
+  function keydown(e: KeyboardEvent & { currentTarget: EventTarget & HTMLInputElement }) {
+    if (noMinus && (e.key === '-' || e.key === '−')) e.preventDefault();
+    restProps.onkeydown?.(e);
+  }
 </script>
 
 {#if type === 'file'}
@@ -74,6 +82,7 @@
       type="number"
       bind:value
       {...restProps}
+      onkeydown={keydown}
     />
     <span class="grid shrink-0 place-items-center">
       {#if unit}
@@ -92,7 +101,7 @@
             <button
               type="button"
               tabindex={-1}
-              aria-label={direction > 0 ? 'Erhöhen' : 'Verringern'}
+              aria-label={direction > 0 ? t('input.increase') : t('input.decrease')}
               class="flex h-3.5 w-4 items-center justify-center rounded-sm text-muted-foreground hover:bg-accent hover:text-fg"
               onmousedown={(e) => e.preventDefault()}
               onclick={() => stepBy(direction)}

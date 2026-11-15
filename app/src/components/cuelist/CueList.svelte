@@ -11,7 +11,7 @@
   import { api, type Cue, type ShowView } from '../../lib/api';
   import { edit } from '../../lib/commands';
   import { LIST_HEADER_HEIGHT, rowScrollDelta } from '../../lib/cueScroll';
-  import { rowRunning } from '../../lib/cueStatus';
+  import { chainWaiting, rowRunning } from '../../lib/cueStatus';
   import { t } from '../../lib/i18n/index.svelte';
   import { sortable } from '../../lib/sortable';
   import { cues, mode, moveSelection, select, selection, selectionMode, ui } from '../../lib/store.svelte';
@@ -31,10 +31,29 @@
   const playhead = $derived(ui.runtime?.playhead);
   const head = $derived(playhead ? list.findIndex((cue) => cue.id === playhead) : list.length);
   const selected = $derived(selection());
+  const selectedIds = $derived(new Set(selected));
+
+  // For each row the nearest cue above and below that is not a scene marker, from the list alone (not the runtime
+  // state), so the rows' chain arrows don't search the list again on every state update.
+  const playable = $derived.by(() => {
+    const before: (Cue | undefined)[] = new Array(list.length);
+    const after: (Cue | undefined)[] = new Array(list.length);
+    let last: Cue | undefined;
+    for (let i = 0; i < list.length; i++) {
+      before[i] = last;
+      if (list[i].type !== 'scene') last = list[i];
+    }
+    last = undefined;
+    for (let i = list.length - 1; i >= 0; i--) {
+      after[i] = last;
+      if (list[i].type !== 'scene') last = list[i];
+    }
+    return { before, after };
+  });
 
   /** The cue a chain from row `i` runs on to: the next one past scene markers. */
   function nextPlayable(i: number): Cue | undefined {
-    return list.slice(i + 1).find((cue) => cue.type !== 'scene');
+    return playable.after[i];
   }
 
   function rowHeight(cue: Cue | undefined): number {
@@ -47,16 +66,17 @@
     return next >= 0 && next < head;
   }
 
+  // Shared answers of `chainThrough`: the same object while nothing changes, so the rows aren't updated on every
+  // state update.
+  const THROUGH = { waiting: false };
+  const THROUGH_WAITING = { waiting: true };
+
   /** Whether a chain runs past the scene marker in row `i`, and whether its next cue waits to start. */
   function chainThrough(i: number): { waiting: boolean } | null {
-    const before = list
-      .slice(0, i)
-      .reverse()
-      .find((cue) => cue.type !== 'scene');
-    const after = nextPlayable(i);
+    const before = playable.before[i];
+    const after = playable.after[i];
     if (!before?.advance.start_next || !after) return null;
-    const waiting = !!ui.runtime?.following.some((follow) => follow.after === before.id && follow.cue === after.id);
-    return { waiting };
+    return chainWaiting(before, after) ? THROUGH_WAITING : THROUGH;
   }
 
   // The list follows the playhead: whenever it moves (GO, arrow keys, OSC/MIDI,
@@ -78,13 +98,18 @@
 
   // The list follows the playhead: whenever it moves (GO, arrow keys, OSC/MIDI,
   // double-click) to a row that isn't fully visible including the next three rows
-  // (scene markers are lower than cues, the end row counts as one).
+  // (scene markers are lower than cues, the end row counts as one). Only when it moves: any other show update
+  // (an edit, undo, a saved setting) must not pull the list back while the operator works further down. The list is
+  // read only until the playhead's row has been found, in case the playhead arrives before its cue.
   const ROW_OFFSET = 3;
+  let followed: string | undefined;
   $effect(() => {
-    if (!playhead || !scroller) return;
+    if (!playhead) followed = undefined;
+    if (!playhead || !scroller || playhead === followed) return;
     const at = list.findIndex((cue) => cue.id === playhead);
     const playHeadRow = scroller.querySelector<HTMLElement>(`[data-cue="${playhead}"]`);
     if (at < 0 || !playHeadRow) return;
+    followed = playhead;
     let following = 0;
     for (let row = at + 1; row <= Math.min(at + ROW_OFFSET, list.length); row++) following += rowHeight(list[row]);
     const delta = rowScrollDelta(scroller, playHeadRow, following);
@@ -104,15 +129,17 @@
     const push = () => {
       // Where each marker would sit unstuck, from the row heights (sticky rows keep theirs).
       let y = container.getBoundingClientRect().top - element.getBoundingClientRect().top;
-      const scenes: { row: HTMLElement; top: number }[] = [];
+      // All reads first, then the writes: reading a height after setting a `top` would lay the list out again per marker.
+      const scenes: { row: HTMLElement; top: number; height: number }[] = [];
       for (const row of container.children) {
         if (!(row instanceof HTMLElement)) continue;
-        if (row.dataset.scene !== undefined) scenes.push({ row, top: y });
-        y += row.offsetHeight;
+        const height = row.offsetHeight;
+        if (row.dataset.scene !== undefined) scenes.push({ row, top: y, height });
+        y += height;
       }
-      scenes.forEach(({ row }, i) => {
+      scenes.forEach(({ row, height }, i) => {
         const next = scenes[i + 1]?.top ?? Infinity;
-        row.style.top = `${Math.min(LIST_HEADER_HEIGHT, next - row.offsetHeight)}px`;
+        row.style.top = `${Math.min(LIST_HEADER_HEIGHT, next - height)}px`;
       });
     };
     push();
@@ -147,7 +174,7 @@
   /** The cues a drag of `id` moves: the selected ones of the list, in list
    * order, if `id` is one of them; otherwise just `id`. */
   function dragged(id: string): string[] {
-    const group = selected.includes(id) ? list.filter((cue) => selected.includes(cue.id)) : [];
+    const group = selectedIds.has(id) ? list.filter((cue) => selectedIds.has(cue.id)) : [];
     return group.length > 1 ? group.map((cue) => cue.id) : [id];
   }
 
@@ -156,8 +183,9 @@
     const id = item.dataset.cue;
     const ids = id ? dragged(id) : [];
     if (ids.length < 2) return null;
+    const going = new Set(ids);
     const others = [...(item.parentElement?.children ?? [])].filter(
-      (row): row is HTMLElement => row instanceof HTMLElement && row !== item && ids.includes(row.dataset.cue ?? ''),
+      (row): row is HTMLElement => row instanceof HTMLElement && row !== item && going.has(row.dataset.cue ?? ''),
     );
     return { others, label: t('status.cues', { count: ids.length }) };
   }
@@ -168,10 +196,11 @@
     const id = item.dataset.cue;
     if (!id || !list.some((cue) => cue.id === id) || !ui.view) return;
     const ids = dragged(id);
+    const going = new Set(ids);
     const before = list.filter((cue) => cue.id !== id).slice(0, to);
-    const index = before.filter((cue) => !ids.includes(cue.id)).length;
-    const rest = list.filter((cue) => !ids.includes(cue.id));
-    rest.splice(index, 0, ...list.filter((cue) => ids.includes(cue.id)));
+    const index = before.filter((cue) => !going.has(cue.id)).length;
+    const rest = list.filter((cue) => !going.has(cue.id));
+    rest.splice(index, 0, ...list.filter((cue) => going.has(cue.id)));
     moved = { view: ui.view, cues: rest };
     if (!(await edit({ op: 'move', ids, to: index }))) moved = null;
   }
@@ -180,7 +209,7 @@
   // context menu acts on the cue under the pointer.
   function oncontextmenu(e: MouseEvent) {
     const id = (e.target as Element).closest<HTMLElement>('[data-cue]')?.dataset.cue;
-    if (id && !selected.includes(id)) select(id);
+    if (id && !selectedIds.has(id)) select(id);
   }
 </script>
 
@@ -229,7 +258,7 @@
                   {cue}
                   through={chainThrough(i)}
                   done={sceneDone(i)}
-                  selected={selected.includes(cue.id)}
+                  selected={selectedIds.has(cue.id)}
                   {editing}
                 />
               {:else}
@@ -240,7 +269,7 @@
                   incoming={list[i - 1]?.type === 'scene' ? chainThrough(i - 1) : null}
                   head={i === head}
                   done={i < head && !rowRunning(cue)}
-                  selected={selected.includes(cue.id)}
+                  selected={selectedIds.has(cue.id)}
                   {editing}
                 />
               {/if}

@@ -3,7 +3,7 @@
   import { Button } from '$lib/components/ui/button';
 
   import { t } from '../lib/i18n/index.svelte';
-  import { type Leaving, notify } from '../lib/store.svelte';
+  import { escapeAnswers, type Leaving, notify } from '../lib/store.svelte';
 
   let { leaving, onclose }: { leaving: Leaving; onclose: () => void } = $props();
 
@@ -37,7 +37,9 @@
 <AlertDialog.Root open>
   <!-- Enter must not leave by accident: the focus starts on "Abbrechen". -->
   <AlertDialog.Content
-    escapeKeydownBehavior="ignore"
+    {...escapeAnswers(() => {
+      if (!busy) onclose();
+    })}
     onOpenAutoFocus={(e) => {
       e.preventDefault();
       cancel?.focus();

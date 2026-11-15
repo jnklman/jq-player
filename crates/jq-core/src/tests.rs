@@ -464,6 +464,28 @@ fn loop_times_reports_remaining_over_all_passes() {
 }
 
 #[test]
+fn a_jump_back_on_the_last_pass_of_a_counted_loop_stays_on_it() {
+    let mut c = sound("1", "len1000.wav");
+    let id = c.id;
+    if let CueKind::Sound(s) = &mut c.kind {
+        s.loop_mode = LoopMode::Times(3);
+    }
+    let mut rig = Rig::new(vec![c]);
+    let mut settings = rig.runner.settings().clone();
+    settings.jump_back = 0.25;
+    rig.runner.set_settings(settings);
+    rig.act(Action::Go);
+    rig.run(2500);
+    rig.act(Action::JumpBack(id));
+    rig.run(100);
+    let a = active_state(&rig, "1").unwrap();
+    assert_eq!(a.pass.map(|p| p.pass), Some(3), "still the last pass");
+    assert!((a.remaining.unwrap() - 0.65).abs() < 0.05, "{:?}", a.remaining);
+    rig.run(700);
+    assert!(rig.active().is_empty(), "ends as shown, not three passes later");
+}
+
+#[test]
 fn vamp_pass_counts_up_without_an_end() {
     let mut c = sound("1", "len5000.wav");
     if let CueKind::Sound(s) = &mut c.kind {
@@ -670,6 +692,26 @@ fn fade_to_target_stays_absolute_after_volume_edit() {
     rig.act(Action::Go);
     rig.run(200);
     assert!((level_db(&rig) + 20.0).abs() < 0.01, "{}", level_db(&rig));
+}
+
+#[test]
+fn fade_to_on_a_cue_edited_to_silence_is_not_too_loud_later() {
+    let target = sound("1", "len5000.wav");
+    let mut f = fade("2", Targets::Cues(vec![target.id]), VolumeAction::FadeTo, Some(0.05));
+    if let CueKind::Volume(fc) = &mut f.kind {
+        fc.volume_db = Some(-10.0);
+    }
+    let mut rig = Rig::new(vec![target, f]);
+    rig.act(Action::Go);
+    rig.run(50);
+    edit_sound(&mut rig, "1", |s| s.volume_db = SILENCE_DB);
+    rig.run(50);
+    rig.act(Action::Go);
+    rig.run(100);
+    assert!(level_db(&rig) < -100.0, "still silent: {}", level_db(&rig));
+    edit_sound(&mut rig, "1", |s| s.volume_db = 0.0);
+    rig.run(50);
+    assert!((level_db(&rig) + 10.0).abs() < 0.01, "the fade target, not +24 dB: {}", level_db(&rig));
 }
 
 #[test]
@@ -987,6 +1029,142 @@ fn endless_loop_can_be_devamped() {
     rig.act(Action::Go);
     rig.run(300);
     assert!(rig.active().is_empty());
+}
+
+/// A sound cue of one second per pass that loops `times` times.
+fn counted(number: &str, times: u32) -> Cue {
+    let mut c = sound(number, "len1000.wav");
+    if let CueKind::Sound(s) = &mut c.kind {
+        s.loop_mode = LoopMode::Times(times);
+    }
+    c
+}
+
+#[test]
+fn exit_loop_ends_a_counted_loop_after_the_pass_it_is_on() {
+    let song = counted("1", 5);
+    let id = song.id;
+    let mut rig = Rig::new(vec![song, devamp("2", id, DevampMode::LoopEnd)]);
+    rig.act(Action::Go);
+    rig.run(1300);
+    let a = active_state(&rig, "1").unwrap();
+    assert_eq!(a.pass, Some(PassState { pass: 2, count: Some(5), vamp: None }));
+    assert!((a.remaining.unwrap() - 3.7).abs() < 0.03, "{:?}", a.remaining);
+    rig.act(Action::Go);
+    rig.run(100);
+    let a = active_state(&rig, "1").unwrap();
+    assert_eq!(a.pass, Some(PassState { pass: 2, count: Some(2), vamp: None }), "now the last pass");
+    assert!((a.remaining.unwrap() - 0.6).abs() < 0.03, "{:?}", a.remaining);
+    assert!((a.progress - 0.4).abs() < 0.02, "{}", a.progress);
+    rig.run(550);
+    assert_eq!(rig.active(), ["1"], "the pass plays to its end");
+    rig.run(100);
+    assert!(rig.active().is_empty(), "not three passes later");
+}
+
+#[test]
+fn a_counted_loop_left_early_follows_at_its_new_end() {
+    // Auto-follow at the end.
+    let song = with_advance(counted("1", 5), AdvanceAt::End);
+    let id = song.id;
+    let mut rig = Rig::new(vec![song, sound("2", "len500.wav")]);
+    rig.act(Action::Go);
+    rig.run(1300);
+    rig.act(Action::ExitLoopCue(id));
+    rig.run(100);
+    let follow = rig.runner.state(rig.now()).following;
+    assert_eq!(follow.len(), 1);
+    assert!((follow[0].remaining.unwrap() - 0.6).abs() < 0.03, "{follow:?}");
+    rig.run(550);
+    assert_eq!(rig.active(), ["1"]);
+    rig.run(100);
+    assert_eq!(rig.active(), ["2"]);
+
+    // Before the end: the near end comes on the pass that is now the last.
+    let song = with_advance(counted("1", 5), AdvanceAt::BeforeEnd { secs: 0.2 });
+    let id = song.id;
+    let mut rig = Rig::new(vec![song, sound("2", "len500.wav")]);
+    rig.act(Action::Go);
+    rig.run(1300);
+    rig.act(Action::ExitLoopCue(id));
+    rig.run(100);
+    let follow = rig.runner.state(rig.now()).following;
+    assert!((follow[0].remaining.unwrap() - 0.4).abs() < 0.03, "{follow:?}");
+    rig.run(350);
+    assert_eq!(rig.active(), ["1"]);
+    rig.run(100);
+    assert_eq!(sorted(rig.active()), ["1", "2"]);
+}
+
+#[test]
+fn the_loop_exit_of_a_counted_loop_waits_for_the_end_of_its_pass() {
+    let song = counted("1", 5);
+    let id = song.id;
+    let mut rig = Rig::new(vec![
+        song,
+        with_loop_exit(devamp("2", id, DevampMode::LoopEnd), None),
+        sound("3", "len500.wav"),
+    ]);
+    rig.act(Action::Go);
+    rig.run(1300);
+    rig.act(Action::Go);
+    rig.run(650);
+    assert_eq!(rig.active(), ["1"], "not at the devamp");
+    rig.run(100);
+    assert_eq!(rig.active(), ["3"], "at the end of the pass, when the cue ends");
+}
+
+#[test]
+fn exit_loop_on_the_last_pass_of_a_counted_loop_leaves_nothing() {
+    let song = counted("1", 3);
+    let id = song.id;
+    let mut rig = Rig::new(vec![
+        song,
+        with_loop_exit(devamp("2", id, DevampMode::Immediate), None),
+        sound("3", "len2000.wav"),
+    ]);
+    rig.act(Action::Go);
+    rig.run(2300);
+    rig.act(Action::Go);
+    rig.run(20);
+    assert_eq!(sorted(rig.active()), ["1", "3"], "nothing to leave: the chain goes on at once");
+    let a = active_state(&rig, "1").unwrap();
+    assert_eq!(a.pass, Some(PassState { pass: 3, count: Some(3), vamp: None }));
+    assert!((a.remaining.unwrap() - 0.68).abs() < 0.03, "{:?}", a.remaining);
+    rig.run(650);
+    assert_eq!(sorted(rig.active()), ["1", "3"], "the pass plays on");
+    rig.run(50);
+    assert_eq!(rig.active(), ["3"]);
+}
+
+#[test]
+fn a_jump_back_holds_a_counted_loop_left_early_again() {
+    let song = counted("1", 5);
+    let id = song.id;
+    let mut rig = Rig::new(vec![song]);
+    let mut settings = rig.runner.settings().clone();
+    (settings.jump_back, settings.jump_forward) = (0.5, 0.25);
+    rig.runner.set_settings(settings);
+    rig.act(Action::Go);
+    rig.run(1300);
+    rig.act(Action::ExitLoopCue(id));
+    rig.run(100);
+    // Forward the exit stays.
+    rig.act(Action::JumpForward(id));
+    rig.run(20);
+    let a = active_state(&rig, "1").unwrap();
+    assert_eq!(a.pass, Some(PassState { pass: 2, count: Some(2), vamp: None }));
+    assert!((a.remaining.unwrap() - 0.33).abs() < 0.03, "{:?}", a.remaining);
+    // Back the loop holds again, on the pass it is on.
+    rig.act(Action::JumpBack(id));
+    rig.run(20);
+    let a = active_state(&rig, "1").unwrap();
+    assert_eq!(a.pass, Some(PassState { pass: 2, count: Some(5), vamp: None }));
+    assert!((a.remaining.unwrap() - 3.81).abs() < 0.05, "{:?}", a.remaining);
+    rig.run(3760);
+    assert_eq!(rig.active(), ["1"], "the passes it had left");
+    rig.run(80);
+    assert!(rig.active().is_empty(), "ends as shown");
 }
 
 fn wait(number: &str, duration: f64) -> Cue {
@@ -1666,6 +1844,22 @@ fn broken_playlist_item_is_skipped() {
     assert!(notices.iter().any(|n| matches!(n, Notice::Error(m) if m.contains("item 1"))), "{notices:?}");
 }
 
+#[test]
+fn a_broken_last_playlist_item_keeps_the_chain() {
+    // Without a gap (at once) and with one (by its timer).
+    for gap in [0.0, 0.05] {
+        let mut rig = Rig::new(vec![
+            with_advance(playlist("1", &["len100.wav", "missing.wav"], gap, false), AdvanceAt::End),
+            sound("2", "len500.wav"),
+        ]);
+        rig.act(Action::Go);
+        rig.run(200);
+        assert_eq!(rig.active(), ["2"], "gap {gap}");
+        let notices = rig.runner.take_notices();
+        assert!(notices.iter().any(|n| matches!(n, Notice::Error(m) if m.contains("item 2"))), "{notices:?}");
+    }
+}
+
 fn shuffled(shuffle: Shuffle, repeat: bool) -> Cue {
     let mut list = playlist(
         "1",
@@ -1781,6 +1975,7 @@ fn streamed_cue_is_armed_only_where_loaded_and_reports_underruns() {
     }
     let (early_id, late_id) = (early.id, late.id);
     let mut rig = Rig::new(vec![early, late]);
+    rig.runner.set_settings(LocalSettings { underrun_warning: true, ..rig.runner.settings().clone() });
     rig.wait_armed(early_id);
     assert!(!rig.runner.is_armed(late_id), "start chunk not loaded");
     rig.act(Action::StartCue(late_id));
@@ -1802,6 +1997,32 @@ fn streamed_cue_is_armed_only_where_loaded_and_reports_underruns() {
     assert_eq!(silences(&mut rig), 1, "the rest once it is over");
     rig.run(1000);
     assert_eq!(silences(&mut rig), 0);
+}
+
+#[test]
+fn underruns_are_not_reported_by_default() {
+    let mut early = sound("1", "stream.wav");
+    let mut late = sound("2", "stream.wav");
+    if let (CueKind::Sound(a), CueKind::Sound(b)) = (&mut early.kind, &mut late.kind) {
+        a.start = 1.0;
+        b.start = 70.0;
+    }
+    let (early_id, late_id) = (early.id, late.id);
+    let mut rig = Rig::new(vec![early, late]);
+    assert!(!rig.runner.settings().underrun_warning);
+    rig.wait_armed(early_id);
+    rig.act(Action::StartCue(late_id));
+    rig.run(8000);
+    rig.act(Action::StopCue(late_id));
+    rig.run(2000);
+    let notices = rig.runner.take_notices();
+    assert!(!notices.iter().any(|n| matches!(n, Notice::Warning(m) if m.contains("silence"))), "{notices:?}");
+    // Turned on later, the silence from before is not reported.
+    rig.runner.set_settings(LocalSettings { underrun_warning: true, ..rig.runner.settings().clone() });
+    rig.run(1000);
+    assert!(
+        !rig.runner.take_notices().iter().any(|n| matches!(n, Notice::Warning(m) if m.contains("silence")))
+    );
 }
 
 fn group_cues(group: &Cue) -> &[Cue] {
@@ -1996,19 +2217,23 @@ fn whole_auto_follow_chain_is_armed() {
 }
 
 #[test]
-fn direct_start_of_an_unarmed_cue_does_not_warn() {
-    let mut cues: Vec<Cue> = (1..=4).map(|i| sound(&i.to_string(), &format!("len{}.wav", 200 + i))).collect();
-    let mut hotkey = sound("5", "len600.wav");
-    hotkey.hotkey = Some(Chord::new("KeyH", "h"));
-    let id = hotkey.id;
-    cues.push(hotkey);
-    let mut rig = Rig::new(cues);
-    rig.wait_armed(rig.runner.show().cues[2].id);
-    assert!(!rig.runner.is_armed(id), "beyond what is armed");
-    rig.act(Action::StartCue(id));
-    rig.run(100);
-    assert_eq!(rig.active(), ["5"]);
-    assert_eq!(rig.runner.take_notices(), []);
+fn direct_start_of_an_unarmed_cue_warns_only_with_the_underrun_warning() {
+    for warn in [false, true] {
+        let mut cues: Vec<Cue> =
+            (1..=4).map(|i| sound(&i.to_string(), &format!("len{}.wav", 200 + i))).collect();
+        let mut hotkey = sound("5", "len600.wav");
+        hotkey.hotkey = Some(Chord::new("KeyH", "h"));
+        let id = hotkey.id;
+        cues.push(hotkey);
+        let mut rig = Rig::new(cues);
+        rig.runner.set_settings(LocalSettings { underrun_warning: warn, ..rig.runner.settings().clone() });
+        rig.wait_armed(rig.runner.show().cues[2].id);
+        assert!(!rig.runner.is_armed(id), "beyond what is armed");
+        rig.act(Action::StartCue(id));
+        rig.run(100);
+        assert_eq!(rig.active(), ["5"]);
+        assert_eq!(not_armed_warnings(&mut rig).len(), usize::from(warn), "warning {warn}");
+    }
 }
 
 #[test]
@@ -2033,6 +2258,43 @@ fn streamed_cue_waits_for_its_start_instead_of_playing_silence() {
     assert!(!state.loading && state.elapsed > 0.2, "{state:?}");
     assert!(streams.iter().all(|d| d.underruns() == 0), "no silence played");
     assert!(!rig.runner.take_notices().iter().any(|n| format!("{n:?}").contains("Stille")));
+}
+
+#[test]
+fn position_cues_to_come_keep_their_fixed_targets_loaded() {
+    let mut cue = sound("1", "stream.wav");
+    if let CueKind::Sound(s) = &mut cue.kind {
+        s.marks = vec![70.0, 120.0];
+    }
+    let id = cue.id;
+    let mut rig = Rig::new(vec![
+        cue,
+        position_cue("2", id, PositionTo::Absolute { secs: 100.0 }),
+        position_cue("3", id, PositionTo::Mark { index: 2 }),
+        // Moves with playback: not hinted.
+        position_cue("4", id, PositionTo::NextMark),
+    ]);
+    rig.act(Action::Go);
+    rig.run(50);
+    assert_eq!(rig.active(), ["1"]);
+    // The stream the cue plays (the file may have been read twice).
+    let hints = |rig: &Rig| -> Vec<usize> {
+        let streams = rig.loader.streams.lock().unwrap();
+        streams.iter().find(|d| d.has_voices()).expect("playing").hints()
+    };
+    let mut armed = hints(&rig);
+    armed.sort_unstable();
+    assert_eq!(armed, [100_000, 120_000]);
+    rig.act(Action::Go);
+    rig.run(500);
+    assert_eq!(hints(&rig), [120_000], "the jump done is not kept");
+    // Once the jumps are done, nothing is kept for them any more.
+    for _ in 0..2 {
+        rig.act(Action::Go);
+        rig.run(500);
+    }
+    assert_eq!(rig.playhead(), None);
+    assert!(hints(&rig).is_empty());
 }
 
 #[test]
@@ -3136,6 +3398,32 @@ fn a_go_to_loop_without_a_pause_is_broken_off() {
     assert!(notices.iter().any(|n| matches!(n, Notice::Error(m) if m.contains("loop"))), "{notices:?}");
 }
 
+#[test]
+fn a_go_to_loop_over_a_zero_timer_is_broken_off() {
+    // The timer fires in the same tick it is set in, so the loop runs over
+    // the timers, not by recursion: it must still end, and GO go on working.
+    let instant_fade = fade("1", Targets::Cues(Vec::new()), VolumeAction::FadeTo, Some(0.0));
+    for first in [
+        with_advance(wait("1", 0.0), AdvanceAt::After { secs: 0.0 }),
+        with_advance(instant_fade, AdvanceAt::End),
+    ] {
+        let mut rig = Rig::new(vec![first, go_to("2", None, true), sound("3", "len300.wav")]);
+        let mut show = rig.runner.show().clone();
+        show.cues[1].kind = CueKind::GoTo(GoToCue { target: Some(show.cues[0].id), start: true });
+        rig.runner.set_show(show);
+        rig.act(Action::Go);
+        rig.run(20);
+        let notices = rig.runner.take_notices();
+        assert!(notices.iter().any(|n| matches!(n, Notice::Error(m) if m.contains("loop"))), "{notices:?}");
+        rig.run(20);
+        assert!(rig.runner.take_notices().is_empty(), "the loop is over");
+        rig.act(Action::SetPlayhead(rig.runner.show().cues[2].id));
+        rig.act(Action::Go);
+        rig.run(20);
+        assert_eq!(rig.active(), ["3"]);
+    }
+}
+
 fn repeat_state(rig: &Rig) -> Option<RepeatState> {
     rig.runner.state(rig.now()).repeat
 }
@@ -3545,6 +3833,22 @@ fn start_cue_plays_a_sound_from_its_position() {
     go_on(&mut rig, "2");
     rig.run(50);
     assert!((progress(&rig) - 0.41).abs() < 0.02, "{}", progress(&rig));
+}
+
+#[test]
+fn a_sound_started_from_a_position_counts_its_time_left_from_there() {
+    let target = with_advance(sound("1", "len5000.wav"), AdvanceAt::BeforeEnd { secs: 0.5 });
+    let id = target.id;
+    let mut rig =
+        Rig::new(vec![target, sound("2", "len5000.wav"), start_cue("3", Targets::Cues(vec![id]), Some(4.0))]);
+    go_on(&mut rig, "3");
+    rig.run(50);
+    let state = rig.runner.state(rig.now());
+    let left = state.active[0].remaining.unwrap();
+    assert!((left - 0.95).abs() < 0.02, "the rest after 4 s, not the whole file: {left}");
+    assert!((state.active[0].elapsed - 4.05).abs() < 0.02, "{}", state.active[0].elapsed);
+    let follow = state.following[0].remaining.unwrap();
+    assert!((follow - 0.45).abs() < 0.02, "{follow}");
 }
 
 #[test]

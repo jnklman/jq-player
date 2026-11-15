@@ -4,6 +4,7 @@
 
   import type { LocalSettings } from '../../lib/api';
   import { t } from '../../lib/i18n/index.svelte';
+  import { liveNumber } from '../../lib/input';
   import { positiveOrNull } from '../../lib/settings';
   import { ui } from '../../lib/store.svelte';
   import SettingGroup from './SettingGroup.svelte';
@@ -38,7 +39,10 @@
           placeholder={t('common.off')}
           aria-label={t('osc_tab.port_label')}
           value={draft.osc_listen ?? ''}
-          oninput={(e) => (draft.osc_listen = positiveOrNull(e.currentTarget.value))}
+          {...liveNumber(
+            () => draft.osc_listen,
+            (text) => (draft.osc_listen = positiveOrNull(text)),
+          )}
         />
         <span
           class={[

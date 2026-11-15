@@ -10,6 +10,19 @@ use crate::{MediaError, Waveform, peaks, stream};
 /// Frames (at the file's own rate) per stored peak.
 pub const BLOCK: usize = 256;
 
+/// Peak level below which a file counts as silent for trimming: −50 dBFS,
+/// above the noise floor of most recordings, below soft attacks and tails.
+pub const AUDIBLE: f32 = 0.003_162_3;
+
+/// Where the audible part of a file lies, in seconds.
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize)]
+pub struct Audible {
+    /// Start of the first block above [`AUDIBLE`].
+    pub start: f64,
+    /// End of the last one; `None` if that is the end of the file.
+    pub end: Option<f64>,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Peaks {
     /// The file's own sample rate.
@@ -64,6 +77,20 @@ impl Peaks {
         self.frames as f64 / self.rate as f64
     }
 
+    /// The audible part of the file (see [`AUDIBLE`]), to the block;
+    /// `None` if the file is silent throughout.
+    pub fn audible(&self) -> Option<Audible> {
+        let loud = |block: &[u16; 2]| level(*block) >= AUDIBLE;
+        let first = self.blocks.iter().position(loud)?;
+        let last = self.blocks.iter().rposition(loud)?;
+        let rate = self.rate as f64;
+        let end = ((last + 1) as u64 * BLOCK as u64).min(self.frames);
+        Some(Audible {
+            start: (first * BLOCK) as f64 / rate,
+            end: (end < self.frames).then(|| end as f64 / rate),
+        })
+    }
+
     /// The whole file as `buckets` peaks (fewer if it has fewer blocks).
     pub fn overview(&self, buckets: usize) -> Waveform {
         let levels: Vec<f32> = self.blocks.iter().map(|&block| level(block)).collect();
@@ -104,4 +131,31 @@ fn quantize(peak: f32) -> u16 {
 /// Both sides of a block, 0…1.
 fn level([left, right]: [u16; 2]) -> f32 {
     left.max(right) as f32 / u16::MAX as f32
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn peaks(levels: &[f32], frames: u64) -> Peaks {
+        let blocks = levels.iter().map(|&level| [quantize(level), quantize(level / 2.0)]).collect();
+        Peaks { rate: 25_600, frames, blocks }
+    }
+
+    #[test]
+    fn audible_skips_silence_and_noise_at_both_ends() {
+        let found = peaks(&[0.0, 0.001, 0.5, 0.0, 0.2, 0.002, 0.0], 7 * 256 - 10).audible();
+        assert_eq!(found, Some(Audible { start: 0.02, end: Some(0.05) }));
+    }
+
+    #[test]
+    fn audible_to_the_end_of_the_file_leaves_the_end_open() {
+        assert_eq!(peaks(&[0.1, 0.1], 400).audible(), Some(Audible { start: 0.0, end: None }));
+    }
+
+    #[test]
+    fn a_silent_file_has_no_audible_part() {
+        assert_eq!(peaks(&[0.0, 0.003], 512).audible(), None);
+        assert_eq!(peaks(&[], 0).audible(), None);
+    }
 }

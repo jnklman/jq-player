@@ -15,6 +15,8 @@
   and `count`); the language is global (`set_language`), never call it on the audio thread. UI: `t('key', {…})` from
   `app/src/lib/i18n` (reactive), texts in `en.ts` (authoritative, defines the keys) and `de.ts` (must have all of them);
   constants outside components hold keys or `labels()`/`options()`/getters, never finished texts.
+  Multi-word abbreviations ("z. B.") take a narrow no-break space (U+202F: `\u202f` in `.ts`, the
+  character itself in `.txt`).
   English is the fallback. The setting `LocalSettings.language` (`auto`/`en`/`de`) lives in the config file, not
   in localStorage. New language: add a catalog on each side, extend `Lang`/`LANGUAGES`. Code, comments and documentation
   are in English (German texts live only in the catalogs and the installer).
@@ -28,6 +30,10 @@
   `cd app && npx shadcn-svelte@latest add <name>`). The shadcn tokens (`primary`, `muted-foreground`,
   `popover`, …) are mapped onto the app palette in `styles.css`; `accent`/`muted` are hover
   surfaces there, the app blue is called `primary`. Icons from Phosphor (`~icons/ph/…`), not lucide.
+  Many of these components are modified (classes, `preventOverflowTextSelection`, and the Esc behaviour:
+  `escapeKeydownBehavior={dialogEscape()}` in dialog, menu, popover and select contents, `"ignore"` in
+  alert dialogs). Never overwrite one (`add --overwrite`, re-adding) without diffing it first and carrying
+  the modifications over.
 - No `title` attribute: tooltips via `Tooltip` with `tip` (`app/src/lib/components/ui/tooltip/tooltip.svelte`; in button groups `ButtonGroup.Button` with `tip`), selection lists via
   `SimpleSelect`.
 - Panels of the main view (movable, resizable) are registered in
@@ -48,8 +54,14 @@
   Never change it by hand, use `node scripts/version.mjs <x.y.z|patch|minor|major>`: it updates
   `package.json`, `package-lock.json`, `tauri.conf.json` and `Cargo.lock` (`--check` verifies, CI
   does that). Release: start the "Release" workflow in GitHub Actions (it sets the version, commits, tags
-  and triggers the build, which creates the GitHub release with NSIS, MSI, deb and AppImage files;
+  and triggers the build, which creates the GitHub release with NSIS, MSI, portable .exe, deb and AppImage files;
   the installers come in English and German).
+
+- **Changelog:** `CHANGELOG.md` (English only, shown on GitHub, not in the app). Every change users
+  notice gets a line under `## Unreleased` (`### Added`/`### Changed`/`### Removed`/`### Fixed`) in the
+  same commit, written for users, not about the code. The Release workflow refuses an empty "Unreleased"
+  and turns it into the version's section, which becomes the GitHub release text
+  (`scripts/changelog.mjs`; a pre-release uses "Unreleased" as it is). CI checks the structure.
 
 - **Self-update:** `tauri-plugin-updater` (Rust side only, `app/src-tauri/src/updates.rs`; the UI is the
   button in the About dialog, never automatic). It reads `latest.json` from the latest GitHub release, which the
@@ -57,7 +69,9 @@
   `tauri.release.conf.json` (`createUpdaterArtifacts`, CI only) makes. Installing is refused in show mode, while
   cues run or with unsaved changes. The public key is in `tauri.conf.json`; the private key is the repository
   secret `TAURI_SIGNING_PRIVATE_KEY` (+ `_PASSWORD`). If the key is lost, installed copies can never update again.
-  Updates work for the NSIS installer (Windows) and the AppImage (Linux), not for MSI or deb.
+  Updates work for the NSIS installer (Windows) and the AppImage (Linux), not for MSI, deb or the
+  portable .exe (feature `portable`: config, cache and webview data in `jQ Player Data` next to the exe,
+  see `app/src-tauri/src/paths.rs`; `install_update` refuses).
 
 ## Commands
 

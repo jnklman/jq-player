@@ -100,7 +100,7 @@ export function advanceBadge(at: AdvanceAt): string {
     case 'before_end':
       return `−${secs(at.secs)}`;
     case 'loop_exit':
-      return 'Vamp';
+      return t('advance.badge_vamp');
   }
 }
 

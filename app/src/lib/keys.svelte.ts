@@ -165,6 +165,12 @@ export const ON_SELECTED: ControlAction[] = [
   'rate_down',
 ];
 
+/** Global actions the UI carries out itself, sending no `Action` (keys only). */
+export const UI_ACTIONS: ControlAction[] = ['focus_goto'];
+
+/** Global actions that cannot be learned for MIDI. */
+export const KEYS_ONLY: ControlAction[] = [...ON_SELECTED, ...UI_ACTIONS];
+
 /** Step actions repeat while their key is held; everything else fires once per press. */
 export const REPEATING: ControlAction[] = ['volume_up', 'volume_down', 'pan_left', 'pan_right', 'rate_up', 'rate_down'];
 
@@ -196,4 +202,5 @@ export const ACTION_NAMES = labels<ControlAction>({
   pan_right: 'action.pan_right',
   rate_up: 'action.rate_up',
   rate_down: 'action.rate_down',
+  focus_goto: 'action.focus_goto',
 });

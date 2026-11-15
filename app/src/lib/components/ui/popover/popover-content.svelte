@@ -2,6 +2,7 @@
   import { Popover as PopoverPrimitive } from 'bits-ui';
   import type { ComponentProps } from 'svelte';
 
+  import { dialogEscape } from '$lib/store.svelte.js';
   import { cn, type WithoutChildrenOrChild } from '$lib/utils.js';
 
   import PopoverPortal from './popover-portal.svelte';
@@ -29,6 +30,7 @@
       className,
     )}
     preventOverflowTextSelection={false}
+    escapeKeydownBehavior={dialogEscape()}
     {...restProps}
   />
 </PopoverPortal>

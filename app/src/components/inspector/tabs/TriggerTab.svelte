@@ -6,13 +6,13 @@
   import { api, type Cue, type CueInfo, type SecondTrigger } from '../../../lib/api';
   import { cueLabel } from '../../../lib/cue';
   import type { CueEdit } from '../../../lib/cueEdit';
-  import { fmtMidi } from '../../../lib/format';
   import { t } from '../../../lib/i18n/index.svelte';
   import { playsMedia } from '../../../lib/inspector.svelte';
   import { secondTriggerOptions } from '../../../lib/options';
   import { attempt, cueById, isTopLevel, ui } from '../../../lib/store.svelte';
   import { hint } from '../../../lib/ui';
   import KeyCapture from '../../KeyCapture.svelte';
+  import MidiLabel from '../../MidiLabel.svelte';
   import SimpleSelect from '../../SimpleSelect.svelte';
   import { getLinked } from '../context';
   import ExitLoopFields from '../ExitLoopFields.svelte';
@@ -50,6 +50,18 @@
     });
   }
 
+  // Leaving the cue (another cue, another tab) ends a pending learn for it, so the next control does not bind to a
+  // cue no longer shown.
+  const learningFor = $derived(learning ? single?.id : undefined);
+  $effect(() => {
+    const id = learningFor;
+    if (!id) return;
+    return () => {
+      const pending = ui.view?.midi.learning;
+      if (pending?.kind === 'cue' && pending.cue === id) void attempt(api.midiLearn(null));
+    };
+  });
+
   function releaseHint(cue: Cue): string {
     const second = cue.second_trigger.action;
     if (second === 'stop') return t('trigger.release_stop');
@@ -80,7 +92,7 @@
           <span class="truncate text-xs text-primary motion-safe:animate-pulse">{t('trigger.press_controller')}</span>
           <Button variant="ghost" size="sm" onclick={() => attempt(api.midiLearn(null))}>{t('common.cancel')}</Button>
         {:else if single.midi_trigger}
-          <span class="truncate font-mono text-[11.5px] text-fg-2">{fmtMidi(single.midi_trigger)}</span>
+          <MidiLabel trigger={single.midi_trigger} />
           <Button
             variant="ghost"
             size="icon-xs"

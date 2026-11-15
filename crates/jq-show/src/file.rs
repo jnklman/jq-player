@@ -227,17 +227,27 @@ struct Header {
 }
 
 /// Writes a temporary file next to `path`, then renames it over `path`.
-/// The temporary name keeps the whole file name (`Show.jqshow.tmp`), so files
-/// differing only in their extension never share it.
+/// The temporary name keeps the whole file name and adds the process id and a
+/// counter (`Show.jqshow.1234.0.tmp`), so neither files differing only in
+/// their extension nor concurrent writers (two app instances, two threads)
+/// share it. The temporary file is removed if writing fails.
 pub fn write_atomic(path: &Path, data: &[u8]) -> std::io::Result<()> {
+    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let mut tmp = path.as_os_str().to_owned();
-    tmp.push(".tmp");
+    let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    tmp.push(format!(".{}.{n}.tmp", std::process::id()));
     let tmp = PathBuf::from(tmp);
-    let mut f = fs::File::create(&tmp)?;
-    f.write_all(data)?;
-    f.sync_all()?;
-    drop(f);
-    fs::rename(&tmp, path)
+    let result = (|| {
+        let mut f = fs::File::create(&tmp)?;
+        f.write_all(data)?;
+        f.sync_all()?;
+        drop(f);
+        fs::rename(&tmp, path)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&tmp);
+    }
+    result
 }
 
 #[cfg(test)]
@@ -246,6 +256,21 @@ mod tests {
     use crate::model::show_file_json;
     use crate::model::*;
     use crate::paths::tests::tempdir;
+
+    #[test]
+    fn write_atomic_leaves_no_temp_files_and_replaces() {
+        let dir = tempdir("atomic");
+        let path = dir.join("a.json");
+        write_atomic(&path, b"one").unwrap();
+        write_atomic(&path, b"two").unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"two");
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 1);
+        // Failure (target is a directory) removes the temp file.
+        let target = dir.join("d");
+        fs::create_dir(&target).unwrap();
+        assert!(write_atomic(&target, b"x").is_err());
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 2);
+    }
 
     #[test]
     fn changing_display_name_keeps_file_and_folder_paths() {

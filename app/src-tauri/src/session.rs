@@ -29,12 +29,16 @@ use serde::{Deserialize, Serialize};
 
 use crate::backend::{CloseCheck, Request};
 use crate::jobs::{self, Copier, Copy, Found, Prober};
+use crate::writer::{Key, Writer};
 
 const MAX_VOICES: usize = 64;
 /// One preview at a time, plus room for one that is still stopping.
 const PREVIEW_VOICES: usize = 2;
 /// Quiet time after the last edit before the autosave is written.
 const AUTOSAVE_DELAY: Duration = Duration::from_secs(1);
+/// Longest wait on opening a show for writes still queued (the previous
+/// show's settings and autosave) before the files are read anyway.
+const OPEN_FLUSH_TIMEOUT: Duration = Duration::from_secs(5);
 /// How often media files are checked for changes on disk when polling
 /// ([`jq_core::WatchMode::Poll`]).
 const WATCH_INTERVAL: Duration = Duration::from_secs(1);
@@ -334,11 +338,11 @@ pub struct ImportClash {
 /// copied in. Reads whole files to compare them, so it must not run on the
 /// show thread.
 pub fn check_import(media_dir: &Path, paths: &[PathBuf]) -> Result<ImportCheck, String> {
-    let media_canonical = media_dir.canonicalize().unwrap_or(media_dir.to_path_buf());
+    let media_canonical = real_path(media_dir).unwrap_or(media_dir.to_path_buf());
     let mut check = ImportCheck::default();
     let mut canonical = Vec::new();
     for path in paths {
-        let c = path.canonicalize().map_err(|e| format!("{}: {e}", path.display()))?;
+        let c = real_path(path).map_err(|e| format!("{}: {e}", path.display()))?;
         if paths::relativize(&media_canonical, &c).is_none() {
             check.outside.push(path.clone());
             canonical.push(c);
@@ -560,6 +564,8 @@ pub struct Session {
     settings: LocalSettings,
     /// The machine's settings file.
     settings_path: PathBuf,
+    /// Writes the settings file and the autosave off the show thread.
+    writer: Writer,
     /// Media files by stored path.
     media: HashMap<String, MediaFile>,
     /// Cues added with `normalize_on_import`, normalized as soon as their
@@ -622,9 +628,15 @@ impl Session {
         show_mode: bool,
         settings_path: PathBuf,
         peaks: Arc<PeakCache>,
+        writer: Writer,
         midi_tx: Sender<Request>,
         notices: &mut Vec<Notice>,
     ) -> Self {
+        // The settings file and the autosave are read back below: what is
+        // still queued for them (the previous show's) goes first.
+        if !writer.flush(OPEN_FLUSH_TIMEOUT) {
+            notices.push(Notice::Warning(t!("writer.pending")));
+        }
         let mut settings =
             LocalSettings::load(&settings_path, &file.show.id.to_string()).unwrap_or_else(|e| {
                 notices.push(Notice::Warning(t!("session.settings_ignored", error = e)));
@@ -660,6 +672,7 @@ impl Session {
             keep_alive,
             settings,
             settings_path,
+            writer,
             media: HashMap::new(),
             auto_normalize: HashSet::new(),
             measured: (false, Instant::now()),
@@ -803,12 +816,12 @@ impl Session {
         if self.recovery.is_some() {
             return Err(t!("session.decide_recovery"));
         }
-        let dir = dir.canonicalize().map_err(|e| t!("session.media_dir_unreachable", error = e))?;
+        let dir = real_path(&dir).map_err(|e| t!("session.media_dir_unreachable", error = e))?;
         if !dir.is_dir() {
             return Err(t!("session.not_a_folder", path = dir.display()));
         }
         let show_dir =
-            self.file.dir().canonicalize().map_err(|e| t!("session.show_dir_unreachable", error = e))?;
+            real_path(self.file.dir()).map_err(|e| t!("session.show_dir_unreachable", error = e))?;
         let media_root = paths::media_root(&show_dir, &dir)
             .ok_or_else(|| t!("session.media_dir_not_storable", path = dir.display()))?;
         if self.editor.show().media_root == media_root {
@@ -944,14 +957,22 @@ impl Session {
     }
 
     /// Normalizes the cues waiting for automatic normalization as far as
-    /// their files are measured. Returns true if the show changed.
+    /// their files are measured. The offsets come as if the cues had been
+    /// added with them: in the undo and redo history too, never as a step of
+    /// their own (that would clear redo, or an undo would bring the cue back
+    /// without them). Not in show mode: levels stay as they are during a
+    /// performance, the cues wait until it ends. Returns true if the show
+    /// changed.
     fn run_auto_normalize(&mut self) -> bool {
-        if self.auto_normalize.is_empty() {
+        if self.auto_normalize.is_empty() || self.settings.show_mode {
             return false;
         }
         let ids: Vec<CueId> = self.auto_normalize.iter().copied().collect();
         let revision = self.editor.revision();
-        self.normalize(&ids, true);
+        let (changes, _) = normalization(self.editor.show(), &ids, true, |f| self.file_offset(f));
+        if !changes.is_empty() {
+            self.editor.amend(|show| set_offsets(show, &changes, true));
+        }
         // Done once none of its files is still to be read or measured.
         let (media, show) = (&self.media, self.editor.show());
         self.auto_normalize.retain(|&id| {
@@ -1078,22 +1099,26 @@ impl Session {
     }
 
     /// The media folder and the stored paths the show may still need: as
-    /// edited and as saved (leaving without saving brings that back), on
-    /// the clipboard and in an undecided recovery. Copies under way are
-    /// hidden files and their cues exist already. Refused in show mode and
-    /// for a media folder holding the show file.
+    /// edited and as saved (leaving without saving brings that back), in
+    /// its undo and redo history (undo brings a deleted cue back), on the
+    /// clipboard and in an undecided recovery. Copies under way are hidden
+    /// files and their cues exist already. Refused in show mode and for a
+    /// media folder holding the show file.
     pub fn used_media(&self) -> Result<(PathBuf, Vec<String>), String> {
         if self.settings.show_mode {
             return Err(t!("session.show_mode_locked"));
         }
         let media = self.file.media_dir();
-        let real = |p: &Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+        let real = |p: &Path| real_path(p).unwrap_or_else(|_| p.to_path_buf());
         if real(self.file.dir()).starts_with(real(&media)) {
             return Err(t!("session.media_dir_has_show"));
         }
-        let shows = [Some(self.editor.show()), Some(&self.file.show), self.recovery.as_ref().map(|(s, _)| s)];
-        let cues = shows.into_iter().flatten().flat_map(|s| &s.cues).chain(&self.clipboard);
-        Ok((media, cues.flat_map(Cue::media_files).cloned().collect()))
+        let shows = self
+            .editor
+            .history()
+            .chain(std::iter::once(&self.file.show))
+            .chain(self.recovery.as_ref().map(|(s, _)| s));
+        Ok((media, media_in(shows, &self.clipboard)))
     }
 
     /// A search for missing files is under way.
@@ -1164,20 +1189,42 @@ impl Session {
         }
     }
 
+    /// Saves the show and waits until it is on disk. It runs on the writer
+    /// thread, after an autosave still queued, so that one cannot land after
+    /// the autosave is removed here.
     pub fn save(&mut self) -> Result<(), String> {
         self.file.show = self.editor.show().clone();
-        self.file.save().map_err(|e| e.to_string())?;
+        let (file, remove_autosave) = (self.file.clone(), self.recovery.is_none());
+        let (saved, removed) = self.writer.wait(move || {
+            let saved = file.save().map_err(|e| e.to_string());
+            let removed = match (&saved, remove_autosave) {
+                (Ok(()), true) => file.remove_autosave().map_err(|e| e.to_string()),
+                _ => Ok(()),
+            };
+            (saved, removed)
+        })?;
+        saved?;
         self.editor.mark_saved();
         self.autosaved = self.editor.revision();
-        if self.recovery.is_none() {
-            self.file.remove_autosave().map_err(|e| e.to_string())?;
-        }
-        Ok(())
+        removed
+    }
+
+    /// The show file without its show, for removing its autosave.
+    fn autosave_target(&self) -> (Option<Key>, ShowFile) {
+        let key = Key::new(self.file.autosave_path(), "autosave");
+        (Some(key), ShowFile { path: self.file.path.clone(), show: Show::default() })
+    }
+
+    /// Removes the autosave on the writer thread, after a write of it still
+    /// queued, and waits for the result.
+    fn remove_autosave(&self) -> Result<(), String> {
+        let (_, file) = self.autosave_target();
+        self.writer.wait(move || file.remove_autosave().map_err(|e| e.to_string()))?
     }
 
     /// Writes the autosave once edits have been quiet for a moment. Edits are
     /// locked in show mode, so this never writes during a performance.
-    pub fn autosave_tick(&mut self, now: Instant, notices: &mut Vec<Notice>) {
+    pub fn autosave_tick(&mut self, now: Instant) {
         let revision = self.editor.revision();
         if revision == self.autosaved || self.recovery.is_some() {
             return;
@@ -1190,14 +1237,17 @@ impl Session {
             return;
         }
         self.autosaved = revision;
-        let result = if self.editor.is_dirty() {
-            self.file.write_autosave(self.editor.show())
-        } else {
-            self.file.remove_autosave()
-        };
-        if let Err(e) = result {
-            notices.push(Notice::Warning(t!("session.autosave_failed", error = e)));
+        // Queued: the show thread never waits for the disk here. A failure
+        // comes back as a notice from the writer.
+        let (key, mut file) = self.autosave_target();
+        let write = self.editor.is_dirty();
+        if write {
+            file.show = self.editor.show().clone();
         }
+        self.writer.submit(key, move || {
+            let result = if write { file.write_autosave(&file.show) } else { file.remove_autosave() };
+            result.map_err(|e| t!("session.autosave_failed", error = e))
+        });
     }
 
     /// Restores (one undo step) or discards the autosave found on opening.
@@ -1211,7 +1261,7 @@ impl Session {
             self.update_lock(notices);
             self.enforce_show_mode_lock(notices);
         } else {
-            self.file.remove_autosave().map_err(|e| e.to_string())?;
+            self.remove_autosave()?;
         }
         Ok(())
     }
@@ -1222,12 +1272,13 @@ impl Session {
         if self.recovery.is_some() {
             return Ok(());
         }
-        self.file.remove_autosave().map_err(|e| e.to_string())
+        self.remove_autosave()
     }
 
-    /// Applies and saves machine settings. A changed audio device (or a
-    /// failed one) is opened again, which is refused while cues run.
-    /// The layout is left as it is: only `set_layout` changes it.
+    /// Applies and saves machine settings. A changed audio device is opened
+    /// again, which is refused while cues run; a failed or lost one is tried
+    /// again only while none run (see [`audio_reopen`]). The layout is left
+    /// as it is: only `set_layout` changes it.
     pub fn set_settings(
         &mut self,
         mut settings: LocalSettings,
@@ -1286,28 +1337,26 @@ impl Session {
         }
         self.check_channels(&settings)?;
         let show_mode_changed = settings.show_mode != self.settings.show_mode;
+        let reopen = audio_reopen(
+            settings.audio_differs(&self.settings) || self.output.needs_channels(settings.needed_channels()),
+            self.audio_error.is_some() || self.output.lost().is_some(),
+            self.runner.is_idle(),
+        )?;
         if settings.media_watch != self.settings.media_watch {
             self.watcher.set_mode(settings.media_watch);
         }
-        let reopen = self.audio_error.is_some()
-            || self.output.lost().is_some()
-            || settings.audio_differs(&self.settings)
-            || self.output.needs_channels(settings.needed_channels());
         let reconnect = self.midi_error.is_some() || settings.midi_port != self.settings.midi_port;
         let preview_changed = self.preview_error.is_some()
             || self.preview_output.as_ref().is_some_and(|o| o.lost().is_some())
             || (&settings.preview_device, settings.preview_channel)
                 != (&self.settings.preview_device, self.settings.preview_channel);
-        if reopen && !self.runner.is_idle() {
-            return Err(t!("session.audio_device_busy"));
-        }
         if settings.keep_awake != self.settings.keep_awake
             && let KeepAliveState::Failed(e) = self.keep_alive.set_enabled(settings.keep_awake)
         {
             notices.push(Notice::Warning(t!("session.keep_awake_failed", error = e)));
         }
         self.settings = settings;
-        self.save_settings(notices);
+        self.save_settings();
         if reopen {
             self.reopen_audio(notices);
         } else {
@@ -1330,6 +1379,10 @@ impl Session {
         }
         if show_mode_changed {
             self.update_lock(notices);
+            // Cues measured during the performance get their offsets now.
+            if self.run_auto_normalize() {
+                self.runner.set_show(self.editor.show().clone());
+            }
         }
         let channels = self.output.info().channels as usize;
         for (output, &first) in &self.settings.outputs {
@@ -1349,28 +1402,28 @@ impl Session {
     /// Remembers where the audio file picker was last used. Unlike
     /// `set_settings` it touches nothing else, so it works while cues run
     /// or the audio device has failed.
-    pub fn set_audio_dir(&mut self, dir: Option<PathBuf>, notices: &mut Vec<Notice>) {
+    pub fn set_audio_dir(&mut self, dir: Option<PathBuf>, _notices: &mut Vec<Notice>) {
         if self.settings.audio_dir != dir {
             self.settings.audio_dir = dir;
-            self.save_settings(notices);
+            self.save_settings();
         }
     }
 
     /// Stores the UI's panel layout; like `set_audio_dir` it touches nothing
     /// else.
-    pub fn set_layout(&mut self, layout: Option<serde_json::Value>, notices: &mut Vec<Notice>) {
+    pub fn set_layout(&mut self, layout: Option<serde_json::Value>, _notices: &mut Vec<Notice>) {
         if self.settings.layout != layout {
             self.settings.layout = layout;
-            self.save_settings(notices);
+            self.save_settings();
         }
     }
 
     /// Stores the cue list's selection mode; like `set_audio_dir` it
     /// touches nothing else.
-    pub fn set_selection_mode(&mut self, mode: SelectionMode, notices: &mut Vec<Notice>) {
+    pub fn set_selection_mode(&mut self, mode: SelectionMode, _notices: &mut Vec<Notice>) {
         if self.settings.selection_mode != mode {
             self.settings.selection_mode = mode;
-            self.save_settings(notices);
+            self.save_settings();
         }
     }
 
@@ -1383,17 +1436,24 @@ impl Session {
     }
 
     /// Notes this show as the one opened last (for opening it on startup).
-    pub fn remember_path(&mut self, notices: &mut Vec<Notice>) {
+    pub fn remember_path(&mut self, _notices: &mut Vec<Notice>) {
         if self.settings.last_show.as_ref() != Some(&self.file.path) {
             self.settings.last_show = Some(self.file.path.clone());
-            self.save_settings(notices);
+            self.save_settings();
         }
     }
 
-    fn save_settings(&self, notices: &mut Vec<Notice>) {
-        if let Err(e) = self.settings.save(&self.settings_path, &self.file.show.id.to_string()) {
-            notices.push(Notice::Warning(t!("session.settings_not_saved", error = e)));
-        }
+    /// Queues the settings for writing; the show thread never waits for the
+    /// disk here (layout, selection mode and the like change mid-show too).
+    /// Only the newest of several queued states is written; a failure comes
+    /// back as a notice from the writer.
+    fn save_settings(&self) {
+        let (settings, path, show) =
+            (self.settings.clone(), self.settings_path.clone(), self.file.show.id.to_string());
+        let key = Key::new(path.clone(), format!("settings {show}"));
+        self.writer.submit(Some(key), move || {
+            settings.save(&path, &show).map_err(|e| t!("session.settings_not_saved", error = e))
+        });
     }
 
     /// Changes the display name; refused in show mode.
@@ -1416,8 +1476,7 @@ impl Session {
     /// Refused where renaming is.
     pub fn save_as_plan(&self) -> Result<(PathBuf, Vec<String>), String> {
         self.check_save_as()?;
-        let cues = self.editor.history().flat_map(|s| &s.cues).chain(&self.clipboard);
-        Ok((self.file.media_dir(), cues.flat_map(Cue::media_files).cloned().collect()))
+        Ok((self.file.media_dir(), media_in(self.editor.history(), &self.clipboard)))
     }
 
     fn check_save_as(&self) -> Result<(), String> {
@@ -1439,11 +1498,25 @@ impl Session {
     /// Saves the show as `path` in a new show folder (made by
     /// [`ShowFile::create_folder`], media already copied if wanted) with the
     /// media folder `media_root`, and goes on there. The old show stays as
-    /// last saved; its autosave goes, its changes are in the new show. On
-    /// failure the new folder is removed again.
-    pub fn save_as(&mut self, path: PathBuf, media_root: String) -> Result<(), String> {
+    /// last saved; its autosave goes, its changes are in the new show.
+    /// `copied`: the files copied into its media folder, from
+    /// [`Session::save_as_plan`]; refused if the show has started using
+    /// another one meanwhile (the new folder would lack it). On failure the
+    /// new folder is removed again.
+    pub fn save_as(
+        &mut self,
+        path: PathBuf,
+        media_root: String,
+        copied: Option<&[String]>,
+    ) -> Result<(), String> {
         let folder = path.parent().map(Path::to_path_buf);
         let result = self.check_save_as().and_then(|()| {
+            if let Some(copied) = copied {
+                let copied: HashSet<&String> = copied.iter().collect();
+                if media_in(self.editor.history(), &self.clipboard).iter().any(|f| !copied.contains(f)) {
+                    return Err(t!("session.save_as_changed"));
+                }
+            }
             let name = path.file_stem().and_then(|name| name.to_str()).unwrap_or_default().to_owned();
             let show = Show { name, media_root: media_root.clone(), ..self.editor.show().clone() };
             let file = ShowFile { path, show };
@@ -1459,8 +1532,13 @@ impl Session {
                 return Err(e);
             }
         };
-        // Lost, the old autosave would only offer changes saved here.
-        let _ = self.file.remove_autosave();
+        // Lost, the old autosave would only offer changes saved here. Queued
+        // after a write of it that may still be waiting.
+        let (key, old) = self.autosave_target();
+        self.writer.submit(key, move || {
+            let _ = old.remove_autosave();
+            Ok(())
+        });
         self.file = file;
         let show_name = self.file.show.name.clone();
         self.editor.change_history(|s| {
@@ -1633,7 +1711,7 @@ impl Session {
             match target {
                 LearnTarget::Action { action } => {
                     midi::learn(&mut self.settings.midi, action, event.trigger);
-                    self.save_settings(notices);
+                    self.save_settings();
                     self.runner.set_settings(self.settings.clone());
                 }
                 LearnTarget::Cue { cue } => {
@@ -1659,7 +1737,7 @@ impl Session {
             return Err(t!("session.no_midi_input"));
         }
         match target {
-            Some(LearnTarget::Action { action }) if action.on_selected() => {
+            Some(LearnTarget::Action { action }) if action.keys_only() => {
                 return Err(t!("session.keyboard_only", action = action.name()));
             }
             Some(LearnTarget::Cue { cue }) => {
@@ -1677,7 +1755,9 @@ impl Session {
     }
 
     /// Opens the output from the current settings and starts a new runner
-    /// on it; the playhead stays on its cue. Only call while idle.
+    /// on it; the playhead stays on its cue, and what outlives the device
+    /// (stopwatches, GO lockout, …, see [`Runner::carry_over`]) goes with
+    /// it. Only call while idle.
     fn reopen_audio(&mut self, notices: &mut Vec<Notice>) {
         let playhead = self.runner.playhead_cue();
         // Release the old device first; some drivers allow only one stream.
@@ -1687,12 +1767,14 @@ impl Session {
         // The view sent now may precede the first callback; the next tick
         // publishes the size once it is known.
         self.frames_seen = None;
-        self.runner = self.new_runner(controller);
+        let mut runner = self.new_runner(controller);
+        if let Some(id) = playhead {
+            runner.handle(jq_core::Action::SetPlayhead(id), Instant::now());
+        }
+        self.runner.carry_over(&mut runner);
+        self.runner = runner;
         attach_osc_out(&mut self.runner, notices);
         self.connect_midi_out(notices);
-        if let Some(id) = playhead {
-            self.runner.handle(jq_core::Action::SetPlayhead(id), Instant::now());
-        }
     }
 
     fn new_runner(&self, controller: Controller) -> Runner {
@@ -2255,30 +2337,17 @@ impl Session {
     /// measurements; with `only_new`, only files without an offset. Returns
     /// the number of files left out because they are not measured yet.
     fn normalize(&mut self, ids: &[CueId], only_new: bool) -> usize {
-        let target = self.editor.show().loudness_target;
-        let media = &self.media;
-        let offset = |stored: &str| {
-            let loudness = media.get(stored)?.loudness?;
-            Some(loudness.offset(target, NORMALIZE_CEILING))
-        };
-        let (changes, waiting) = normalization(self.editor.show(), ids, only_new, offset);
+        let (changes, waiting) = normalization(self.editor.show(), ids, only_new, |f| self.file_offset(f));
         if !changes.is_empty() {
-            self.editor.change(|show| {
-                for (id, file, db) in &changes {
-                    match show.cue_mut(*id).map(|c| &mut c.kind) {
-                        Some(CueKind::Sound(s)) => s.normalize_db = Some(*db),
-                        Some(CueKind::Playlist(p)) => {
-                            for item in p.items.iter_mut().filter(|item| &item.file == file) {
-                                item.normalize_db = Some(*db);
-                            }
-                        }
-                        _ => {}
-                    }
-                    show.spread_link(*id);
-                }
-            });
+            self.editor.change(|show| set_offsets(show, &changes, only_new));
         }
         waiting
+    }
+
+    /// The offset normalizing a file needs (see [`normalization`]).
+    fn file_offset(&self, stored: &str) -> Option<Option<f64>> {
+        let loudness = self.media.get(stored)?.loudness?;
+        Some(loudness.offset(self.editor.show().loudness_target, NORMALIZE_CEILING))
     }
 
     /// Re-checks files, has the lengths of files not seen yet read (with
@@ -2325,8 +2394,8 @@ impl Session {
         notices: &mut Vec<Notice>,
     ) -> Result<Option<String>, String> {
         let media = self.file.media_dir();
-        let canonical = path.canonicalize().map_err(|e| format!("{}: {e}", path.display()))?;
-        let media_canonical = media.canonicalize().unwrap_or(media.clone());
+        let canonical = real_path(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let media_canonical = real_path(&media).unwrap_or(media.clone());
         if let Some(rel) = paths::relativize(&media_canonical, &canonical) {
             return Ok(Some(rel));
         }
@@ -2522,6 +2591,58 @@ impl Session {
     }
 }
 
+/// The stored paths the cues of `shows` and `clipboard` use, each once and
+/// sorted (the undo history holds many copies of the same show).
+fn media_in<'a>(shows: impl Iterator<Item = &'a Show>, clipboard: &[Cue]) -> Vec<String> {
+    let cues = shows.flat_map(|s| &s.cues).chain(clipboard);
+    let files: std::collections::BTreeSet<&String> = cues.flat_map(Cue::media_files).collect();
+    files.into_iter().cloned().collect()
+}
+
+/// `Path::canonicalize` without Windows' verbatim prefix (`\\?\C:\…`
+/// becomes `C:\…`, `\\?\UNC\server\share\…` becomes `\\server\share\…`), so
+/// paths stored in the show (a media folder or file outside it) stay
+/// readable and usable; std adds the prefix itself where a path needs it.
+pub(crate) fn real_path(path: &Path) -> std::io::Result<PathBuf> {
+    let real = path.canonicalize()?;
+    if cfg!(windows)
+        && let Some(plain) = real.to_str().and_then(without_verbatim)
+    {
+        return Ok(PathBuf::from(plain));
+    }
+    Ok(real)
+}
+
+/// A verbatim Windows path as a plain one, where that names the same file:
+/// a drive or UNC path without components the plain form treats differently
+/// (`.`/`..`, trailing dots or spaces, device names like `CON`).
+fn without_verbatim(path: &str) -> Option<String> {
+    let (plain, rest) = if let Some(rest) = path.strip_prefix(r"\\?\UNC\") {
+        (format!(r"\\{rest}"), rest)
+    } else {
+        let rest = path.strip_prefix(r"\\?\")?;
+        let drive = rest.as_bytes();
+        if !(drive.len() >= 3 && drive[0].is_ascii_alphabetic() && drive[1] == b':' && drive[2] == b'\\') {
+            return None;
+        }
+        (rest.to_owned(), &rest[3..])
+    };
+    const DEVICES: [&str; 4] = ["CON", "PRN", "AUX", "NUL"];
+    let plain_safe = |part: &str| {
+        let stem = part.split('.').next().unwrap_or_default().trim_end().to_ascii_uppercase();
+        let numbered = (stem.starts_with("COM") || stem.starts_with("LPT"))
+            && stem.len() == 4
+            && stem.as_bytes()[3].is_ascii_digit();
+        part != "."
+            && part != ".."
+            && !part.ends_with(['.', ' '])
+            && !part.contains('/')
+            && !DEVICES.contains(&stem.as_str())
+            && !numbered
+    };
+    rest.split('\\').filter(|p| !p.is_empty()).all(plain_safe).then_some(plain)
+}
+
 /// Output ids must be unique and not empty, names given. The main output
 /// (the default of new cues) stays, and an output still used by a cue
 /// cannot go.
@@ -2589,11 +2710,12 @@ fn start_from_problems(show: &Show, cue: &Cue, duration: impl Fn(&String) -> Opt
 }
 
 /// The cues a control cue's targets name: the chosen ones (also deleted
-/// ones), or the entry before it.
+/// ones), or the nearest one before it that it can act on, as playback
+/// picks it (a fade cue in between is passed over).
 fn chosen_targets(show: &Show, cue: &Cue) -> Vec<CueId> {
     match cue.kind.targets() {
         Some(Targets::Cues(ids)) => ids.clone(),
-        Some(Targets::Previous(_)) => show.previous_before(cue.id).into_iter().collect(),
+        Some(Targets::Previous(_)) => show.previous_control_target_before(cue.id).into_iter().collect(),
         _ => Vec::new(),
     }
 }
@@ -2622,7 +2744,7 @@ fn target_problems(show: &Show, cue: &Cue) -> Vec<String> {
                     problems.push(t!("problem.targets_deleted", gone = gone, total = ids.len()));
                 }
             }
-            Some(Targets::Previous(_)) if show.previous_before(cue.id).is_none() => {
+            Some(Targets::Previous(_)) if show.previous_control_target_before(cue.id).is_none() => {
                 problems.push(t!("problem.no_previous"));
             }
             Some(Targets::All(_) | Targets::Output { .. }) if starts => {
@@ -2794,6 +2916,18 @@ fn attach_osc_out(runner: &mut Runner, notices: &mut Vec<Notice>) {
     }
 }
 
+/// Whether applying settings opens the audio output again: always when the
+/// audio settings `changed` (refused while cues run, `idle` false), and to
+/// try a `failed` or lost device again only while nothing runs. Otherwise a
+/// device that drops mid-show would block every other setting (show mode,
+/// keep awake) until all cues are stopped; a lost one comes back by itself.
+fn audio_reopen(changed: bool, failed: bool, idle: bool) -> Result<bool, String> {
+    if changed && !idle {
+        return Err(t!("session.audio_device_busy"));
+    }
+    Ok(changed || (failed && idle))
+}
+
 /// Opens the configured device; on failure a silent output takes its place
 /// and the error is returned for display.
 fn open_output(
@@ -2888,6 +3022,34 @@ fn normalization(
     (changes, waiting)
 }
 
+/// Sets the offsets `changes` (from [`normalization`]) where the cue still
+/// uses that file; with `only_new`, only where it has none yet. Linked
+/// cues follow.
+fn set_offsets(show: &mut Show, changes: &[(CueId, String, f64)], only_new: bool) {
+    let wanted = |stored: Option<f64>| !only_new || stored.is_none();
+    for (id, file, db) in changes {
+        let changed = match show.cue_mut(*id).map(|c| &mut c.kind) {
+            Some(CueKind::Sound(s)) if &s.file == file && wanted(s.normalize_db) => {
+                s.normalize_db = Some(*db);
+                true
+            }
+            Some(CueKind::Playlist(p)) => {
+                let mut changed = false;
+                for item in p.items.iter_mut().filter(|item| &item.file == file && wanted(item.normalize_db))
+                {
+                    item.normalize_db = Some(*db);
+                    changed = true;
+                }
+                changed
+            }
+            _ => false,
+        };
+        if changed {
+            show.spread_link(*id);
+        }
+    }
+}
+
 /// Each `(label, zero-based first channel)` pair must fit the set channel
 /// count, or else what the device takes.
 fn check_pairs(
@@ -2962,6 +3124,10 @@ fn check_triggers(show: &Show, settings: &LocalSettings, cue: &mut Cue) -> Resul
 /// global shortcuts changed or on a cue moved into a group.
 fn trigger_problems(show: &Show, settings: &LocalSettings, cue: &Cue) -> Vec<String> {
     let mut problems = Vec::new();
+    // Asked for every cue of the view: no list walk for the many without one.
+    if cue.hotkey.is_none() && cue.midi_trigger.is_none() {
+        return problems;
+    }
     let main = show.index_of(cue.id).is_some();
     if let Some(key) = &cue.hotkey {
         let shown = key.text();
@@ -3008,9 +3174,11 @@ fn target_missing(show: &Show, cue: &Cue) -> bool {
         (CueKind::ExitLoop(d), AdvanceAt::LoopExit { of: Some(of) }) => {
             let targets: Vec<&Cue> = match &d.targets {
                 Targets::Cues(ids) => ids.iter().filter_map(|t| show.cue(*t)).collect(),
-                Targets::Previous(_) => {
-                    show.previous_before(cue.id).and_then(|p| show.cue(p)).into_iter().collect()
-                }
+                Targets::Previous(_) => show
+                    .previous_control_target_before(cue.id)
+                    .and_then(|p| show.cue(p))
+                    .into_iter()
+                    .collect(),
                 // Any running cue may be the one.
                 _ => return false,
             };
@@ -3103,6 +3271,105 @@ mod tests {
 
     fn device(max_channels: Option<u16>) -> DeviceProbe {
         DeviceProbe { name: "AG08".into(), max_channels }
+    }
+
+    fn tempdir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("jq-session-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// A new show in `dir` with the settings file next to it.
+    fn open_session(dir: &Path, writer: &Writer) -> Session {
+        let file = ShowFile::load(&dir.join("Show.jqshow"))
+            .or_else(|_| ShowFile::create(dir, "Show", false))
+            .unwrap();
+        let (midi_tx, _) = std::sync::mpsc::channel();
+        let peaks = Arc::new(PeakCache::disabled());
+        Session::open(file, false, dir.join("settings.json"), peaks, writer.clone(), midi_tx, &mut Vec::new())
+    }
+
+    /// Makes an edit and lets the autosave queue it.
+    fn edit_and_autosave(session: &mut Session, name: &str) {
+        session.rename(name).unwrap();
+        let now = Instant::now();
+        session.autosave_tick(now);
+        session.autosave_tick(now + AUTOSAVE_DELAY * 2);
+    }
+
+    #[test]
+    fn settings_are_written_in_the_background() {
+        let dir = tempdir("settings");
+        let (writer, notices) = Writer::spawn();
+        let mut session = open_session(&dir, &writer);
+        let release = writer.hold();
+        session.set_layout(Some(serde_json::json!({ "root": "cues" })), &mut Vec::new());
+        session.set_selection_mode(SelectionMode::PlayheadFollows, &mut Vec::new());
+        session.set_audio_dir(Some(dir.clone()), &mut Vec::new());
+        // The show thread went on without waiting for the disk.
+        let path = dir.join("settings.json");
+        assert_eq!(LocalSettings::load(&path, "x").unwrap().layout, None);
+        drop(release);
+        writer.flush_all();
+        let saved = LocalSettings::load(&path, &session.file.show.id.to_string()).unwrap();
+        assert_eq!(saved.layout, Some(serde_json::json!({ "root": "cues" })));
+        assert_eq!(
+            (saved.selection_mode, saved.audio_dir),
+            (SelectionMode::PlayheadFollows, Some(dir.clone()))
+        );
+        assert!(notices.try_iter().next().is_none());
+
+        // A failed write is reported, not lost silently.
+        std::fs::remove_file(&path).unwrap();
+        std::fs::create_dir(&path).unwrap();
+        session.set_audio_dir(None, &mut Vec::new());
+        writer.flush_all();
+        let failed: Vec<Notice> = notices.try_iter().collect();
+        assert!(
+            matches!(&failed[..], [Notice::Warning(e)] if e.starts_with("Setting not saved")),
+            "{failed:?}"
+        );
+        drop(session);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn an_explicit_save_comes_after_a_queued_autosave() {
+        let dir = tempdir("save-order");
+        let (writer, notices) = Writer::spawn();
+        let mut session = open_session(&dir, &writer);
+        let autosave = session.file.autosave_path();
+        let release = writer.hold();
+        edit_and_autosave(&mut session, "Neu");
+        assert!(!autosave.exists(), "queued, not written yet");
+        let releasing = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(50));
+            drop(release);
+        });
+        // Waits behind the autosave, then removes it.
+        session.save().unwrap();
+        releasing.join().unwrap();
+        assert!(!autosave.exists(), "the older autosave did not land after the save");
+        assert_eq!(ShowFile::load(&session.file.path).unwrap().show.name, "Neu");
+        assert!(!session.close_check(Instant::now()).dirty);
+
+        // Leaving without saving removes an autosave still queued as well.
+        edit_and_autosave(&mut session, "Verworfen");
+        session.discard_autosave().unwrap();
+        writer.flush_all();
+        assert!(!autosave.exists());
+
+        // Reopening reads back what is still queued: the autosave is offered.
+        let release = writer.hold();
+        edit_and_autosave(&mut session, "Absturz");
+        drop(session);
+        drop(release);
+        let reopened = open_session(&dir, &writer);
+        assert_eq!(reopened.recovery.as_ref().map(|(show, _)| show.name.as_str()), Some("Absturz"));
+        assert!(notices.try_iter().next().is_none());
+        drop(reopened);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
@@ -3337,7 +3604,7 @@ mod tests {
         let mut show = Show { cues: vec![sound], ..Show::default() };
         let check = |show: &Show, cue: &Cue| target_problems(show, cue);
         let first = control(ControlKind::Pan, Targets::Previous(PreviousKeyword::Previous));
-        assert_eq!(check(&show, &first), ["No previous entry – the cue acts on nothing"]);
+        assert_eq!(check(&show, &first), ["No sound, playlist or group before it – the cue acts on nothing"]);
         assert!(check(&show, &control(ControlKind::Pan, Targets::Cues(vec![]))).is_empty());
         let gone = CueId::new();
         assert_eq!(
@@ -3551,5 +3818,126 @@ mod tests {
             check_pairs(&ag08, Some(10), [("Main".to_string(), 0)].into_iter()),
             Err("“AG08” only has 8 channels, 10 are set".into())
         );
+    }
+
+    #[test]
+    fn media_in_use_covers_the_undo_and_redo_history() {
+        let sound = |file: &str| Cue::new(CueKind::Sound(SoundCue::new(file)));
+        let (kept, deleted) = (sound("bleibt.wav"), sound("geloescht.wav"));
+        let id = deleted.id;
+        let mut editor = Editor::new(Show { cues: vec![kept, deleted], ..Show::default() });
+        editor.mark_saved();
+        editor.delete(&[id]);
+        editor.mark_saved();
+        // Deleted and saved: only undo can bring it back, so its file stays.
+        assert_eq!(media_in(editor.history(), &[]), ["bleibt.wav", "geloescht.wav"]);
+        editor.undo();
+        editor.change(|s| s.cues.clear());
+        editor.undo();
+        assert_eq!(
+            media_in(editor.history(), &[sound("ablage.wav")]),
+            ["ablage.wav", "bleibt.wav", "geloescht.wav"]
+        );
+    }
+
+    #[test]
+    fn a_failed_device_does_not_block_settings_while_cues_run() {
+        // Changed audio settings: reopened, refused while cues run.
+        assert_eq!(audio_reopen(true, false, true), Ok(true));
+        assert!(audio_reopen(true, true, false).is_err());
+        // Only failed or lost: tried again while idle, else left alone.
+        assert_eq!(audio_reopen(false, true, true), Ok(true));
+        assert_eq!(audio_reopen(false, true, false), Ok(false), "e.g. entering show mode mid-show");
+        assert_eq!(audio_reopen(false, false, false), Ok(false));
+    }
+
+    #[test]
+    fn a_reopened_runner_keeps_the_stopwatches() {
+        let watch = Stopwatch { id: "w".into(), name: "Pause".into(), countdown: Some(600.0) };
+        let show = Show { stopwatches: vec![watch], ..Show::default() };
+        let runner = |output: &mut Vec<AudioOutput>| {
+            let (out, controller) = AudioOutput::null(48_000, 2, 4);
+            output.push(out);
+            Runner::new(
+                show.clone(),
+                PathBuf::new(),
+                LocalSettings::default(),
+                controller,
+                Arc::new(FileLoader),
+            )
+        };
+        let mut outputs = Vec::new();
+        let mut old = runner(&mut outputs);
+        let start = Instant::now();
+        old.stopwatch("w", jq_show::StopwatchAction::Start, start);
+        let mut new = runner(&mut outputs);
+        old.carry_over(&mut new);
+        let later = start + Duration::from_secs(90);
+        let w = &new.state(later).stopwatches[0];
+        assert!(w.running && (w.elapsed - 90.0).abs() < 1e-6, "{:?}", (w.running, w.elapsed));
+        assert_eq!(w.remaining.map(f64::round), Some(510.0));
+    }
+
+    #[test]
+    fn automatic_offsets_join_the_history_and_keep_redo() {
+        let mut manual = SoundCue::new("b.wav");
+        manual.normalize_db = Some(2.0);
+        let (auto, manual) =
+            (Cue::new(CueKind::Sound(SoundCue::new("a.wav"))), Cue::new(CueKind::Sound(manual)));
+        let (auto_id, manual_id) = (auto.id, manual.id);
+        let mut editor = Editor::new(Show { cues: vec![auto, manual], ..Show::default() });
+        editor.change(|s| s.name = "eins".into());
+        editor.change(|s| s.name = "zwei".into());
+        editor.undo();
+        let changes = vec![(auto_id, "a.wav".to_string(), -3.0), (manual_id, "b.wav".to_string(), -5.0)];
+        editor.amend(|show| set_offsets(show, &changes, true));
+        let offset = |show: &Show, id| match &show.cue(id).unwrap().kind {
+            CueKind::Sound(s) => s.normalize_db,
+            _ => None,
+        };
+        assert!(editor.can_redo(), "redo is kept");
+        assert!(editor.is_dirty());
+        assert_eq!(offset(editor.show(), auto_id), Some(-3.0));
+        assert_eq!(offset(editor.show(), manual_id), Some(2.0), "a set offset stays");
+        editor.undo();
+        assert_eq!(offset(editor.show(), auto_id), Some(-3.0), "undo does not take it back");
+        editor.redo();
+        editor.redo();
+        assert_eq!((editor.show().name.as_str(), offset(editor.show(), auto_id)), ("zwei", Some(-3.0)));
+    }
+
+    #[test]
+    fn previous_targets_are_found_as_playback_finds_them() {
+        let sound = Cue::new(CueKind::Sound(SoundCue::new("a.wav")));
+        let previous = || Targets::Previous(PreviousKeyword::Previous);
+        let fade = Cue::new(CueKind::control(ControlKind::Volume, previous()));
+        let mut position = Cue::new(CueKind::control(ControlKind::Position, previous()));
+        if let CueKind::Position(p) = &mut position.kind {
+            p.to = PositionTo::NextMark;
+        }
+        let show = Show { cues: vec![sound.clone(), fade.clone(), position.clone()], ..Show::default() };
+        assert_eq!(chosen_targets(&show, &position), [sound.id], "the fade cue in between is passed over");
+        assert!(target_problems(&show, &position).is_empty());
+        assert_eq!(position_problems(&show, &position, |_| Some(10.0)).len(), 1, "the sound has no marks");
+
+        let wait = Cue::new(CueKind::Wait(WaitCue { duration: 1.0 }));
+        let show = Show { cues: vec![wait, fade.clone()], ..Show::default() };
+        assert_eq!(
+            target_problems(&show, &fade),
+            ["No sound, playlist or group before it – the cue acts on nothing"]
+        );
+    }
+
+    #[test]
+    fn verbatim_windows_paths_become_plain_ones() {
+        assert_eq!(without_verbatim(r"\\?\C:\Shows\Media").as_deref(), Some(r"C:\Shows\Media"));
+        assert_eq!(without_verbatim(r"\\?\d:\").as_deref(), Some(r"d:\"));
+        assert_eq!(without_verbatim(r"\\?\UNC\server\share\a").as_deref(), Some(r"\\server\share\a"));
+        assert_eq!(without_verbatim(r"C:\Shows"), None, "plain already");
+        assert_eq!(without_verbatim(r"\\?\Volume{1234}\x"), None);
+        assert_eq!(without_verbatim(r"\\?\C:\Shows\con.wav"), None, "a device name");
+        assert_eq!(without_verbatim(r"\\?\C:\Shows\COM1"), None);
+        assert_eq!(without_verbatim(r"\\?\C:\Shows\Ende. "), None, "trailing space");
+        assert_eq!(without_verbatim(r"\\?\C:\Shows\Console.wav").as_deref(), Some(r"C:\Shows\Console.wav"));
     }
 }

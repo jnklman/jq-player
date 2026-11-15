@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte';
+
   import CaretDown from '~icons/ph/caret-down-bold';
   import CaretUp from '~icons/ph/caret-up-bold';
   import XMark from '~icons/ph/x-bold';
@@ -8,10 +10,11 @@
   import { ScrollArea } from '$lib/components/ui/scroll-area';
 
   import type { CueId } from '../lib/api';
-  import { addCue, duplicateCue, edit } from '../lib/commands';
+  import { addCue, claimUndo, duplicateCue, edit, SHOW_HISTORY } from '../lib/commands';
   import { addGroups, type AddItem, mainListOnly, typeLabel } from '../lib/control';
   import { t } from '../lib/i18n/index.svelte';
-  import { cueById, dialogEscape, mode } from '../lib/store.svelte';
+  import { isTextField } from '../lib/shortcuts';
+  import { cueById, mode } from '../lib/store.svelte';
   import { empty, hint, panel } from '../lib/ui';
   import Inspector from './inspector/Inspector.svelte';
 
@@ -35,6 +38,12 @@
     if (id) selected = id;
   }
 
+  /** The copy goes right after the original and becomes selected. */
+  async function duplicate() {
+    const id = selected && (await duplicateCue(selected));
+    if (id) selected = id;
+  }
+
   function move(by: number) {
     if (selected && index + by >= 0 && index + by < children.length) {
       edit({ op: 'move', ids: [selected], to: index + by });
@@ -48,6 +57,27 @@
     selected = next;
   }
 
+  let content = $state<HTMLElement | null>(null);
+
+  // The dialog edits the show directly: undo and redo stay the show's.
+  onDestroy(claimUndo({ owner: () => content, ...SHOW_HISTORY }));
+
+  /**
+   * Delete removes the selected cue of the group (the main shortcut handler leaves the key to open dialogs). Not
+   * while typing, in show mode, or when another dialog or menu is on top of this one.
+   */
+  function onkeydown(e: KeyboardEvent) {
+    if (e.code !== 'Delete' || e.ctrlKey || e.altKey || e.shiftKey || e.metaKey || e.defaultPrevented) return;
+    if (locked || !selected || isTextField(e.target)) return;
+    const top = [
+      ...document.querySelectorAll('[data-slot="dialog-content"], [data-slot="alert-dialog-content"]'),
+    ].pop();
+    if (!content || top !== content) return;
+    if (document.querySelector('[data-slot="dropdown-menu-content"], [data-slot="select-content"]')) return;
+    e.preventDefault();
+    if (!e.repeat) remove();
+  }
+
   $effect(() => {
     // A group deleted meanwhile (undo, another edit) closes the dialog.
     if (!group) onclose();
@@ -55,8 +85,10 @@
 </script>
 
 <!-- Esc closes the dialog only with "close_first" (else it stays a panic), a click outside always. -->
+<svelte:window {onkeydown} />
+
 <Dialog.Root open onOpenChange={(open) => !open && onclose()}>
-  <Dialog.Content class="h-[min(760px,calc(100%-2rem))] max-w-6xl" escapeKeydownBehavior={dialogEscape()}>
+  <Dialog.Content bind:ref={content} class="h-[min(760px,calc(100%-2rem))] max-w-6xl">
     <Dialog.Header>
       <Dialog.Title>
         {t('group.title', { number: group?.number ?? '' })} · {group?.title || t('group.untitled')}
@@ -98,7 +130,7 @@
               disabled={index < 0 || index >= children.length - 1}
               onclick={() => move(1)}><CaretDown /></Button
             >
-            <Button disabled={!selected} onclick={() => duplicateCue(selected)}>{t('group.duplicate')}</Button>
+            <Button disabled={!selected} onclick={duplicate}>{t('group.duplicate')}</Button>
             <Button variant="destructive" disabled={!selected} onclick={remove}>{t('common.delete')}</Button>
           </div>
           <div class="flex flex-wrap gap-1.5">

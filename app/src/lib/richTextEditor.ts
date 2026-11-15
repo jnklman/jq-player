@@ -14,6 +14,7 @@ import {
   type ViewUpdate,
 } from '@codemirror/view';
 
+import { COMMIT_EVENT } from './commit';
 import { type Format, parsePieces, pieceClass, toggleFormat } from './richText';
 import { formatShortcut } from './shortcuts';
 import { tw } from './ui';
@@ -71,7 +72,10 @@ export interface RichTextEditor {
   destroy(): void;
 }
 
-/** An editor in `parent`; `onchange` gets the text when the field loses the focus after a change (as `change`). */
+/**
+ * An editor in `parent`; `onchange` gets the text when the field loses the focus after a change (as `change`), or
+ * when the editor is destroyed with a change not sent yet.
+ */
 export function createRichTextEditor(
   parent: HTMLElement,
   options: { text: string; placeholder: string; disabled: boolean; label: string; onchange: (text: string) => void },
@@ -104,11 +108,7 @@ export function createRichTextEditor(
         EditorView.contentAttributes.of({ 'aria-label': options.label, 'aria-multiline': 'true' }),
         EditorView.contentAttributes.of({ class: tw`outline-hidden` }),
         EditorView.updateListener.of((update) => {
-          if (!update.focusChanged || update.view.hasFocus) return;
-          const current = update.state.doc.toString();
-          if (current === committed) return;
-          committed = current;
-          options.onchange(current);
+          if (update.focusChanged && !update.view.hasFocus) flush();
         }),
         hint.of(placeholder(currentHint)),
         access.of(accessFor(currentDisabled)),
@@ -118,6 +118,16 @@ export function createRichTextEditor(
     });
 
   const view = new EditorView({ parent, state: stateFor(options.text) });
+  // Ctrl+S commits the text while it keeps the focus (see `commitTyping` in shortcuts.ts).
+  view.contentDOM.addEventListener(COMMIT_EVENT, () => flush());
+
+  // Sends a change not sent yet; CodeMirror reports a lost focus only later, too late for an editor that goes away.
+  const flush = () => {
+    const current = view.state.doc.toString();
+    if (current === committed) return;
+    committed = current;
+    options.onchange(current);
+  };
 
   return {
     view,
@@ -134,6 +144,7 @@ export function createRichTextEditor(
       view.dispatch({ effects: access.reconfigure(accessFor(disabled)) });
     },
     destroy() {
+      flush();
       view.destroy();
     },
   };

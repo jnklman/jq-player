@@ -1,6 +1,8 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
 
+  import TrimEnd from '~icons/ph/arrow-line-left-bold';
+  import TrimStart from '~icons/ph/arrow-line-right-bold';
   import ZoomAll from '~icons/ph/arrows-out-line-horizontal-bold';
   import ZoomOut from '~icons/ph/magnifying-glass-minus-bold';
   import ZoomIn from '~icons/ph/magnifying-glass-plus-bold';
@@ -15,15 +17,16 @@
   import { Tooltip } from '$lib/components/ui/tooltip';
 
   import { api, type Cue, type CueId } from '../../lib/api';
-  import { edit } from '../../lib/commands';
+  import { claimUndo, edit } from '../../lib/commands';
+  import { DraftHistory } from '../../lib/draftHistory';
   import { fmtPosition } from '../../lib/format';
   import { t } from '../../lib/i18n/index.svelte';
   import { roundMs } from '../../lib/input';
-  import { isTextField } from '../../lib/shortcuts';
+  import { isTextField, keepsSpace } from '../../lib/shortcuts';
   import { rateLabel, speedOf } from '../../lib/speed';
   import { cueById, mode, ui } from '../../lib/store.svelte';
   import { hint } from '../../lib/ui';
-  import { copyTimes, type Times } from '../../lib/waveform';
+  import { audibleRange, copyTimes, type Times, trimTimes } from '../../lib/waveform';
   import EditDialog from '../EditDialog.svelte';
   import WaveformTimeline from './WaveformTimeline.svelte';
   import WaveformTimes from './WaveformTimes.svelte';
@@ -69,10 +72,32 @@
   let dragged = $state<Times | null>(null);
   const shown: Times = $derived(dragged ?? draft);
 
+  // Ctrl+Z/Y step through the draft's changes, not the show's history.
+  const history = new DraftHistory<Times>();
+
   /** Into the draft only; "Fertig" sends it. */
   function commit(changes: Partial<Times>) {
-    if (!locked) draft = { ...$state.snapshot(draft), ...changes };
+    if (locked) return;
+    const before = $state.snapshot(draft);
+    draft = { ...before, ...changes };
+    history.record(before, $state.snapshot(draft));
   }
+
+  /** One step of the draft's history; not while a handle is dragged. */
+  function step(to: (current: Times) => Times | null) {
+    if (locked || dragged) return;
+    const next = to($state.snapshot(draft));
+    if (next) draft = next;
+  }
+
+  let box = $state<HTMLElement | null>(null);
+  onDestroy(
+    claimUndo({
+      owner: () => box,
+      undo: () => step((current) => history.undo(current)),
+      redo: () => step((current) => history.redo(current)),
+    }),
+  );
 
   /** "Fertig": the draft onto the cue as it is now, as one undo step. */
   async function apply(): Promise<boolean> {
@@ -90,6 +115,15 @@
   let cursor = $state<number | null>(null);
   const end = $derived(Math.min(shown.end ?? duration, duration));
 
+  /** Moves the start or end onto the file's audible part (found from its peaks). */
+  let trimming = $state(false);
+  async function trim(edge: 'start' | 'end') {
+    if (!cue || !ui.view) return;
+    trimming = true;
+    const audible = await audibleRange(ui.view.media_dir, cue.file).finally(() => (trimming = false));
+    if (audible) commit(trimTimes(draft, edge, audible, duration));
+  }
+
   // --- Preview
 
   const preview = $derived(ui.runtime?.preview?.cue === cueId ? ui.runtime.preview : null);
@@ -106,9 +140,13 @@
     else playFrom(cursor ?? shown.start);
   }
 
-  /** Whether Space goes to the player: not in fields, which keep their keys. */
+  /**
+   * Whether Space goes to the player: not in fields, which keep their keys, nor (while editing) on a button reached
+   * with Tab, which clicks with it. A clicked button or the dialog itself leaves Space to the player.
+   */
   function playerKey(e: KeyboardEvent): boolean {
-    return e.key === ' ' && !e.defaultPrevented && !e.ctrlKey && !e.metaKey && !e.altKey && !isTextField(e.target);
+    if (e.key !== ' ' || e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey) return false;
+    return !(locked ? isTextField(e.target) : keepsSpace(e.target));
   }
 
   // Space works the player here instead of GO (the shortcuts leave it alone
@@ -141,6 +179,7 @@
 
 <EditDialog
   {title}
+  bind:ref={box}
   class="h-[min(820px,calc(100%-2rem))] max-w-7xl"
   {dirty}
   applyLabel={t('common.done')}
@@ -179,6 +218,18 @@
           disabled={!previewSet || duration <= 0}
           onclick={() => api.previewAt(cueId, shown.start, end)}
           ><SpeakerHigh class="size-4" /> {t('wave.range')}</Tooltip
+        >
+        <Tooltip
+          tip={t('wave.trim_start_tip')}
+          class="{buttonVariants()} ml-3"
+          disabled={locked || trimming || duration <= 0}
+          onclick={() => trim('start')}><TrimStart class="size-3.5" /> {t('wave.trim_start')}</Tooltip
+        >
+        <Tooltip
+          tip={t('wave.trim_end_tip')}
+          class={buttonVariants()}
+          disabled={locked || trimming || duration <= 0}
+          onclick={() => trim('end')}><TrimEnd class="size-3.5" /> {t('wave.trim_end')}</Tooltip
         >
         <span class="ml-3 font-mono text-[13px] text-fg-2 tabular-nums">
           {#if playhead != null}<span class="text-go">▶ {fmtPosition(playhead)}</span>

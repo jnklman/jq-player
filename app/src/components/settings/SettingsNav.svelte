@@ -120,8 +120,8 @@
           onclick={() => view.open(tab.id)}
         >
           <Icon class={['shrink-0 text-base', selected ? 'text-primary' : 'text-muted-foreground']} />
-          {tab.title}
-          <span class="ml-auto flex items-center gap-1">
+          <span class="min-w-0 flex-1 truncate">{tab.title}</span>
+          <span class="flex shrink-0 items-center gap-1">
             {#if hits}
               <span class="text-[11px] text-primary tabular-nums">{hits}</span>
             {/if}

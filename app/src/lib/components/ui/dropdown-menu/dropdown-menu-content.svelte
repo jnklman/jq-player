@@ -2,6 +2,7 @@
   import { DropdownMenu as DropdownMenuPrimitive } from 'bits-ui';
   import type { ComponentProps } from 'svelte';
 
+  import { dialogEscape } from '$lib/store.svelte.js';
   import { cn, type WithoutChildrenOrChild } from '$lib/utils.js';
 
   import DropdownMenuPortal from './dropdown-menu-portal.svelte';
@@ -25,10 +26,11 @@
     {sideOffset}
     {align}
     class={cn(
-      'z-50 max-h-(--bits-dropdown-menu-content-available-height) min-w-40 origin-(--bits-dropdown-menu-content-transform-origin) overflow-x-hidden overflow-y-auto rounded-lg border border-input bg-popover p-1 text-popover-foreground shadow-2xl duration-100 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:overflow-hidden data-closed:fade-out-0 data-closed:zoom-out-95',
+      'z-50 max-h-(--bits-dropdown-menu-content-available-height) min-w-40 origin-(--bits-dropdown-menu-content-transform-origin) overflow-x-hidden overflow-y-auto rounded-lg border border-input bg-popover p-1 text-popover-foreground shadow-2xl outline-hidden duration-100 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:overflow-hidden data-closed:fade-out-0 data-closed:zoom-out-95',
       className,
     )}
     preventOverflowTextSelection={false}
+    escapeKeydownBehavior={dialogEscape()}
     {...restProps}
   />
 </DropdownMenuPortal>

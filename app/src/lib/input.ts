@@ -4,14 +4,48 @@
 /** The number in `text`; null if empty or not a number. */
 export function parseNumber(text: string): number | null {
   const raw = text.trim().replace(',', '.').replace('−', '-');
-  if (raw === '') return null;
+  // Plain decimal notation (and an exponent, as a number field accepts it), not what `Number` also takes ("0x10", "1_0").
+  if (!/^[+-]?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$/i.test(raw)) return null;
   const value = Number(raw);
   return isFinite(value) ? value : null;
+}
+
+/** A number as a field shows it: without floating-point noise ("0.30000000000000004" → "0.3"), always with a point. */
+export function plainNumber(value: number): string {
+  return String(Number(value.toPrecision(12)));
 }
 
 /** The number in a field's change or input event; null if empty or not a number. */
 export function numberOf(e: Event): number | null {
   return parseNumber((e.currentTarget as HTMLInputElement).value);
+}
+
+/**
+ * Puts `text` back into a field. A number field holding something unreadable ("1-2") already has the value
+ * `''`, so setting `''` changes nothing and the entry would stay: it goes through another value first.
+ */
+export function showValue(input: HTMLInputElement, text: string) {
+  if (text === '' && input.validity.badInput) input.value = '0';
+  input.value = text;
+}
+
+type FieldEvent = Event & { currentTarget: HTMLInputElement };
+
+/**
+ * The handlers of a number field that writes on each edit (a settings draft): `set` gets the text. An
+ * unreadable entry ("1-2") reads as empty but clears nothing, and when the field is left it shows `get()` again.
+ */
+export function liveNumber(get: () => number | null, set: (text: string) => void) {
+  return {
+    oninput: (e: FieldEvent) => {
+      if (!e.currentTarget.validity.badInput) set(e.currentTarget.value);
+    },
+    // On Enter and blur, not change: an unreadable entry over an empty field leaves the value '' and sends no change.
+    onkeydown: (e: KeyboardEvent & { currentTarget: HTMLInputElement }) => {
+      if (e.key === 'Enter') showValue(e.currentTarget, String(get() ?? ''));
+    },
+    onblur: (e: FieldEvent) => showValue(e.currentTarget, String(get() ?? '')),
+  };
 }
 
 /** `value` within `min`…`max` (either may be left out). */

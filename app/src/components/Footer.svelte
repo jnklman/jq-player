@@ -32,8 +32,9 @@
       !ui.runtime?.gaps.length,
   );
 
-  async function chooseFolder() {
-    if (ui.view && (await chooseMediaFolder(ui.view))) mediaMenuOpen = false;
+  function chooseFolder() {
+    mediaMenuOpen = false;
+    if (ui.view) void chooseMediaFolder(ui.view);
   }
 
   function scanMedia() {
@@ -42,7 +43,8 @@
   }
 
   async function openMediaFolder() {
-    if (await attempt(api.openMediaDir())) mediaMenuOpen = false;
+    // The command answers with null: only `undefined` means it failed.
+    if ((await attempt(api.openMediaDir())) !== undefined) mediaMenuOpen = false;
   }
 </script>
 

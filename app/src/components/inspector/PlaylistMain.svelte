@@ -52,7 +52,7 @@
           <span class={['flex min-w-0 grow items-center gap-1', missing ? 'text-stop-soft' : 'text-fg-2']}>
             <Tooltip tip={missing ? t('playlist.file_missing', { file }) : file} side="right">
               {#snippet child({ props })}
-                <span {...props} class="truncate">{file.split('/').at(-1)}</span>
+                <span {...props} class="truncate">{file.split(/[\\/]/).at(-1)}</span>
               {/snippet}
             </Tooltip>
           </span>

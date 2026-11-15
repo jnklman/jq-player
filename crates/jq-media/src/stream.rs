@@ -2,7 +2,7 @@
 //! seek position) as stereo at a target rate, and [`open_stream`] runs a
 //! reader thread that keeps the chunks of a streamed buffer loaded.
 
-use std::collections::{BTreeSet, HashMap, VecDeque};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -35,11 +35,24 @@ const FOLLOW: Duration = Duration::from_millis(10);
 /// How long a chunk that failed to decode is left alone, so a broken spot
 /// neither spins nor holds up the chunks other voices need.
 const ERROR_PAUSE: Duration = Duration::from_millis(500);
+/// How long a chunk that is no longer wanted stays loaded. A jump crossfades
+/// from the old position, whose chunk the voice still reads for the length
+/// of the fade; unloading it at once would cut the tail short.
+const EVICT_DELAY: Duration = Duration::from_secs(3);
+/// Longest stream the chunk table is sized for, in seconds. A bogus header
+/// duration must not allocate an absurd table; the reader finds the real end.
+const MAX_STREAM_SECS: f64 = 48.0 * 3600.0;
 /// Resampler input chunk (frames).
 const RESAMPLE_CHUNK: usize = 1024;
 /// Source frames a resampled seek starts early, so the resampler has its
 /// history (half its sinc length and then some) once the target comes.
 const RESAMPLE_MARGIN: usize = 256;
+/// Source frames decoded and dropped before a seek target (about 0.2 s).
+/// A lossy decoder (MP3, AAC) starts cold after a seek: its first frames
+/// lack the overlap with the frame before and, for MP3, the bit reservoir,
+/// and come out wrong. Decoding from the target directly would
+/// click where the chunk meets the one before.
+const SEEK_PREROLL: usize = 9216;
 
 /// Decodes a file in order as stereo at `target_rate`, with seeking.
 pub struct StreamDecoder {
@@ -59,8 +72,9 @@ pub struct StreamDecoder {
     /// Stereo output frames ready to hand out, from `out_pos` on.
     output: Vec<f32>,
     out_pos: usize,
-    /// Source frames to drop after an accurate seek (it lands before the target).
-    skip_source: usize,
+    /// Source frame a seek continues at, until the first packet reaching it
+    /// is decoded; the frames before it are dropped.
+    seek_to: Option<usize>,
     /// Output frames to drop: the resampler's delay.
     skip_output: usize,
     /// Output frames to drop after the delay: a resampled seek starts early.
@@ -114,7 +128,7 @@ impl StreamDecoder {
             input: Vec::new(),
             output: Vec::new(),
             out_pos: 0,
-            skip_source: 0,
+            seek_to: None,
             skip_output: 0,
             skip_lead: 0,
             fed: 0,
@@ -163,21 +177,13 @@ impl StreamDecoder {
     /// samples decoding from the start would give there.
     pub fn seek(&mut self, frame: usize) -> Result<(), MediaError> {
         let (source_frame, lead) = self.seek_point(frame);
-        let secs = source_frame as f64 / self.source_rate as f64;
+        let secs = source_frame.saturating_sub(SEEK_PREROLL) as f64 / self.source_rate as f64;
         let time = Time::try_from_secs_f64(secs).unwrap_or(Time::ZERO);
-        let seeked = self
-            .format
+        self.format
             .seek(SeekMode::Accurate, SeekTo::Time { time, track_id: Some(self.track_id) })
             .map_err(|source| MediaError::Decode { path: self.path.clone(), source })?;
         self.decoder.reset();
-        let tick_secs = self
-            .time_base
-            .map_or(1.0 / self.source_rate as f64, |tb| tb.numer.get() as f64 / tb.denom.get() as f64);
-        // Counted from the frame asked for: `required_ts` went through
-        // seconds and may be a frame off.
-        let landed =
-            (seeked.actual_ts.get().max(0) as f64 * tick_secs * self.source_rate as f64).round() as usize;
-        self.skip_source = source_frame.saturating_sub(landed);
+        self.seek_to = Some(source_frame);
         self.input.clear();
         self.output.clear();
         self.out_pos = 0;
@@ -206,6 +212,14 @@ impl StreamDecoder {
         let source = (frame as u128 * self.source_rate as u128 / self.target_rate as u128) as usize;
         let periods = source.saturating_sub(RESAMPLE_MARGIN) / source_period;
         (periods * source_period, frame - periods * output_period)
+    }
+
+    /// A timestamp of the track in source frames.
+    fn ts_frames(&self, ts: i64) -> i64 {
+        let tick_secs = self
+            .time_base
+            .map_or(1.0 / self.source_rate as f64, |tb| tb.numer.get() as f64 / tb.denom.get() as f64);
+        (ts as f64 * tick_secs * self.source_rate as f64).round() as i64
     }
 
     /// Decodes the next packet (or flushes at the end).
@@ -243,8 +257,20 @@ impl StreamDecoder {
             Err(e) => return Err(decode_err(e)),
         };
         let frames = self.packet.len() / channels;
-        let skip = self.skip_source.min(frames);
-        self.skip_source -= skip;
+        // Placed by its own timestamp, not by where the seek landed: a
+        // decoder may put out nothing for the first packets after a reset
+        // (Vorbis does, with gapless trimming).
+        let skip = match self.seek_to {
+            Some(target) => {
+                let at = self.ts_frames(packet.pts.get());
+                let skip = (target as i64 - at).clamp(0, frames as i64) as usize;
+                if skip < frames {
+                    self.seek_to = None;
+                }
+                skip
+            }
+            None => 0,
+        };
         self.fed += frames - skip;
         let source = &self.packet[skip * channels..frames * channels];
         if self.resampler.is_some() {
@@ -325,23 +351,62 @@ fn gcd(mut a: u32, mut b: u32) -> u32 {
 /// header states its length.
 pub fn open_stream(path: &Path, target_rate: u32) -> Result<AudioBuffer, MediaError> {
     let decoder = StreamDecoder::open(path, Some(target_rate))?;
-    let secs = decoder.duration().ok_or_else(|| MediaError::NoAudioTrack { path: path.to_owned() })?;
-    let data = Arc::new(StreamData::new((secs * target_rate as f64).ceil() as usize));
+    let secs = decoder
+        .duration()
+        .filter(|s| s.is_finite() && *s > 0.0)
+        .ok_or_else(|| MediaError::NoAudioTrack { path: path.to_owned() })?;
+    let data = Arc::new(StreamData::new((secs.min(MAX_STREAM_SECS) * target_rate as f64).ceil() as usize));
     let reader_data = data.clone();
+    let source = Source { path: path.to_owned(), target_rate, stamp: stamp(path) };
     std::thread::Builder::new()
         .name("jq-stream".into())
-        .spawn(move || read_chunks(&reader_data, decoder))
+        .spawn(move || read_chunks(&reader_data, source, decoder))
         .map_err(|source| MediaError::Io { path: path.to_owned(), source })?;
     Ok(AudioBuffer::streamed(target_rate, data))
 }
 
+/// The file a stream reads, as it was when the stream was opened.
+struct Source {
+    path: PathBuf,
+    target_rate: u32,
+    stamp: Option<(u64, std::time::SystemTime)>,
+}
+
+impl Source {
+    /// Opens the file again, unless it changed since: one buffer must not
+    /// mix chunks of two different files. The media watcher reads a changed
+    /// file anew anyway.
+    fn reopen(&self) -> Result<StreamDecoder, MediaError> {
+        if stamp(&self.path) != self.stamp {
+            let source = std::io::Error::other("the file changed since it was read");
+            return Err(MediaError::Io { path: self.path.clone(), source });
+        }
+        StreamDecoder::open(&self.path, Some(self.target_rate))
+    }
+}
+
+/// Length and modification time of `path`, as far as they can be read.
+fn stamp(path: &Path) -> Option<(u64, std::time::SystemTime)> {
+    let meta = std::fs::metadata(path).ok()?;
+    Some((meta.len(), meta.modified().ok()?))
+}
+
 /// The reader loop: load the most urgent missing chunk, drop unwanted ones,
 /// free retired chunks after the grace period.
-fn read_chunks(data: &StreamData, mut decoder: StreamDecoder) {
+///
+/// While no voice plays and nothing is left to load, the reader closes the
+/// file and opens it again for the next chunk it needs. An open file cannot
+/// be replaced on Windows (Explorer refuses to copy over it), and a loaded
+/// cue would otherwise keep it open as long as the show is. In show mode the
+/// media lock keeps the files from being changed instead.
+fn read_chunks(data: &StreamData, source: Source, decoder: StreamDecoder) {
+    let mut decoder = Some(decoder);
     let mut retired: VecDeque<(Instant, Retired)> = VecDeque::new();
     // Only this thread stores and evicts, so it knows what is loaded without
     // looking at every chunk of a long file.
     let mut loaded = BTreeSet::new();
+    // Since when each loaded chunk is no longer wanted.
+    let mut unwanted_since: HashMap<usize, Instant> = HashMap::new();
     // Chunks that failed to decode, and until when they are skipped.
     let mut failed: HashMap<usize, Instant> = HashMap::new();
     // Chunk the decoder would deliver next without seeking.
@@ -354,8 +419,20 @@ fn read_chunks(data: &StreamData, mut decoder: StreamDecoder) {
         }
         failed.retain(|_, until| *until > now);
         let wanted = wanted_chunks(data);
-        let unwanted: Vec<usize> = loaded.iter().copied().filter(|c| !wanted.contains(c)).collect();
-        for c in unwanted {
+        let wanted_set: HashSet<usize> = wanted.iter().copied().collect();
+        unwanted_since.retain(|c, _| loaded.contains(c) && !wanted_set.contains(c));
+        for &c in &loaded {
+            if !wanted_set.contains(&c) {
+                unwanted_since.entry(c).or_insert(now);
+            }
+        }
+        let expired: Vec<usize> = unwanted_since
+            .iter()
+            .filter(|(_, since)| now.duration_since(**since) >= EVICT_DELAY)
+            .map(|(&c, _)| c)
+            .collect();
+        for c in expired {
+            unwanted_since.remove(&c);
             loaded.remove(&c);
             retired.extend(data.evict(c).map(|r| (now, r)));
         }
@@ -363,10 +440,15 @@ fn read_chunks(data: &StreamData, mut decoder: StreamDecoder) {
             let timeout = if data.has_voices() {
                 Some(FOLLOW)
             } else {
+                decoder = None;
                 // Only retired chunks to free and failed ones to retry come
                 // due by themselves.
-                let due =
-                    retired.front().map(|(at, _)| *at + GRACE).into_iter().chain(failed.values().copied());
+                let due = retired
+                    .front()
+                    .map(|(at, _)| *at + GRACE)
+                    .into_iter()
+                    .chain(failed.values().copied())
+                    .chain(unwanted_since.values().map(|since| *since + EVICT_DELAY));
                 due.min().map(|at| at.saturating_duration_since(now))
             };
             data.wait_for_change(seen, timeout);
@@ -374,6 +456,14 @@ fn read_chunks(data: &StreamData, mut decoder: StreamDecoder) {
         };
         let mut samples = Vec::with_capacity(CHUNK_FRAMES * 2);
         let result = (|| {
+            let decoder = match &mut decoder {
+                Some(d) => d,
+                None => {
+                    // A freshly opened decoder stands at the start.
+                    next = Some(0);
+                    decoder.insert(source.reopen()?)
+                }
+            };
             if next != Some(chunk) {
                 decoder.seek(chunk * CHUNK_FRAMES)?;
             }
@@ -406,8 +496,9 @@ fn wanted_chunks(data: &StreamData) -> Vec<usize> {
     let count = data.chunk_count();
     let last = data.frames().div_ceil(CHUNK_FRAMES);
     let mut wanted = Vec::new();
-    let add = |c: usize, wanted: &mut Vec<usize>| {
-        if c < count && c < last.max(1) && !wanted.contains(&c) {
+    let mut seen = HashSet::new();
+    let mut add = |c: usize, wanted: &mut Vec<usize>| {
+        if c < count && c < last.max(1) && seen.insert(c) {
             wanted.push(c);
         }
     };
@@ -418,7 +509,7 @@ fn wanted_chunks(data: &StreamData) -> Vec<usize> {
         }
     }
     for pin in data.pins() {
-        for c in pin.start / CHUNK_FRAMES..=pin.end.saturating_sub(1) / CHUNK_FRAMES {
+        for c in pin.start / CHUNK_FRAMES..=(pin.end.saturating_sub(1) / CHUNK_FRAMES).min(count) {
             add(c, &mut wanted);
         }
     }

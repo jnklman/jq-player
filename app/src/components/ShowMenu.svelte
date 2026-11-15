@@ -119,7 +119,7 @@
         {#if canRename}
           <Tooltip
             tip={t('showmenu.rename')}
-            keys="Enter"
+            keys={t('key.enter')}
             class={buttonVariants({ variant: 'default', size: 'icon' })}
             aria-label={t('showmenu.rename')}
             onclick={rename}

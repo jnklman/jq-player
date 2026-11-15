@@ -2,6 +2,7 @@
   import { Select as SelectPrimitive } from 'bits-ui';
   import type { ComponentProps } from 'svelte';
 
+  import { dialogEscape } from '$lib/store.svelte.js';
   import type { WithoutChildrenOrChild } from '$lib/utils.js';
   import { cn, type WithoutChild } from '$lib/utils.js';
 
@@ -33,6 +34,7 @@
       className,
     )}
     preventOverflowTextSelection={false}
+    escapeKeydownBehavior={dialogEscape()}
     {...restProps}
   >
     <SelectScrollUpButton />

@@ -2,6 +2,7 @@
 // function per command, so a button and its shortcut always do the same
 // (selection afterwards included). Every call reports a failure as a notice.
 
+import { cueAfter, firstAdded } from './added';
 import { api, type Cue, type CueId, type EditOp, type GroupCue, type LevelLimits, type ShowView } from './api';
 import type { AddItem } from './control';
 import { cueLabel, isPlaceholder } from './cue';
@@ -12,6 +13,7 @@ import {
   allCues,
   ask,
   attempt,
+  attemptChange,
   cueById,
   cues,
   type Mode,
@@ -22,9 +24,10 @@ import {
   ui,
 } from './store.svelte';
 
-/** Sends one edit; the new view, or `undefined` if it failed (shown as a notice). */
+/** Sends one edit; resolves once the store shows it, with the new view, or `undefined` if it failed (shown as a
+ * notice). */
 export function edit(op: EditOp): Promise<ShowView | undefined> {
-  return attempt(api.edit(op));
+  return attemptChange(api.edit(op));
 }
 
 // --- Clipboard and selection
@@ -73,9 +76,19 @@ async function pasteAndSelect(op: EditOp) {
   if (pasted.length) void revealCue(pasted[0], 'smooth');
 }
 
-/** Duplicates the cue (default: the one in the inspector); `linked`: the copy is an instance of it. */
-export function duplicateCue(id: CueId | null = ui.selected, linked = false) {
-  if (id) void edit({ op: 'duplicate', id, linked });
+/** Duplicates the cue (default: the one in the inspector); `linked`: the copy is an instance of it. A copy in the
+ * main list gets selected; returns its id (`undefined` if nothing was duplicated). */
+export async function duplicateCue(id: CueId | null = ui.selected, linked = false): Promise<CueId | undefined> {
+  if (!id) return undefined;
+  const inMain = cues().some((cue) => cue.id === id);
+  const view = await edit({ op: 'duplicate', id, linked });
+  const copy = view && cueAfter(view.show.cues, id)?.id;
+  if (!copy) return undefined;
+  if (inMain) {
+    select(copy);
+    void revealCue(copy, 'smooth');
+  }
+  return copy;
 }
 
 /** The cue whose settings linking the selection would take (the one in the
@@ -102,6 +115,15 @@ export function selectEveryCue() {
   selectAll(cues().map((cue) => cue.id));
 }
 
+/** Puts the focus into the "Go to" field of the cue list toolbar, its text selected; false if this window has none. */
+export function focusGoto(): boolean {
+  const field = document.querySelector<HTMLInputElement>('[data-goto-field]');
+  if (!field) return false;
+  field.focus();
+  field.select();
+  return true;
+}
+
 /** Selects the scene marker and its cues, up to the next marker or the end of the list. */
 export function selectScene(id: CueId) {
   const list = cues();
@@ -111,12 +133,54 @@ export function selectScene(id: CueId) {
   selectAll(list.slice(at, next < 0 ? undefined : next).map((cue) => cue.id));
 }
 
+/** What undo and redo do while a dialog is open (see `claimUndo`). */
+export interface DialogUndo {
+  /** The dialog box: the claim holds only while it is the topmost dialog. */
+  owner: () => Element | null | undefined;
+  undo(): void;
+  redo(): void;
+}
+
+/** The show's own history, for a dialog that edits the show directly (the group dialog). */
+export const SHOW_HISTORY = {
+  undo: () => void edit({ op: 'undo' }),
+  redo: () => void edit({ op: 'redo' }),
+};
+
+// Claims of open dialogs, the latest (opened on top) last.
+const claims: DialogUndo[] = [];
+
+/**
+ * While the returned function is not called, undo and redo (keys and buttons) in the dialog `claim.owner` go to
+ * `claim`. In any other dialog they do nothing: a draft applied at the end would overwrite what they changed,
+ * and the operator would not see it anyway.
+ */
+export function claimUndo(claim: DialogUndo): () => void {
+  claims.push(claim);
+  return () => {
+    const at = claims.indexOf(claim);
+    if (at >= 0) claims.splice(at, 1);
+  };
+}
+
+/** The topmost open dialog or question, if any. */
+function topDialog(): Element | undefined {
+  return [...document.querySelectorAll('[data-slot="dialog-content"], [data-slot="alert-dialog-content"]')].pop();
+}
+
+/** What undo and redo act on now: the show's history, the topmost dialog's claim, or nothing (another dialog). */
+function history(): { undo(): void; redo(): void } | null {
+  const top = topDialog();
+  if (!top) return SHOW_HISTORY;
+  return claims.find((claim) => claim.owner() === top) ?? null;
+}
+
 export function undo() {
-  void edit({ op: 'undo' });
+  history()?.undo();
 }
 
 export function redo() {
-  void edit({ op: 'redo' });
+  history()?.redo();
 }
 
 export function renumber() {
@@ -186,10 +250,12 @@ export function placeBeforeSelection(): Place {
 export async function addCue(item: AddItem, place: Place = placeAfterSelection()): Promise<CueId | undefined> {
   const op = await addOp(item, place);
   if (!op) return undefined;
+  // Taken after the file picker, which can take long: the show may have changed meanwhile.
+  const listOf = (list: Cue[]) => (place.group ? findGroup(list, place.group)?.cues : list) ?? [];
+  const before = listOf(cues());
   const view = await edit(op);
   if (!view) return undefined;
-  const list = place.group ? findGroup(view.show.cues, place.group)?.cues : view.show.cues;
-  return list?.[place.index]?.id;
+  return firstAdded(before, listOf(view.show.cues));
 }
 
 /** Adds a cue to the main list (default: after the selection), selects it and scrolls it into view. */
@@ -270,11 +336,16 @@ export async function replaceSoundFile(cue: Cue) {
   const name = (path.split(/[\\/]/).at(-1) ?? '').replace(/\.[^.]*$/, '');
   let retitle = isPlaceholder(cue) && (cue.title === '' || translations('cue.placeholder_title').includes(cue.title));
   if (!retitle && name !== cue.title) {
-    const answer = await ask(t('commands.retitle_title'), t('commands.retitle_text', { title: cue.title, name }), [
-      { label: t('common.cancel'), value: 'cancel' },
-      { label: t('commands.keep_title'), value: 'keep', focus: true },
-      { label: t('commands.take_name'), value: 'retitle' },
-    ]);
+    const answer = await ask(
+      t('commands.retitle_title'),
+      t('commands.retitle_text', { title: cue.title, name }),
+      [
+        { label: t('common.cancel'), value: 'cancel' },
+        { label: t('commands.keep_title'), value: 'keep', focus: true },
+        { label: t('commands.take_name'), value: 'retitle' },
+      ],
+      'cancel',
+    );
     if (answer === 'cancel') return;
     retitle = answer === 'retitle';
   }
@@ -318,10 +389,15 @@ export async function setLevelLimits(next: LevelLimits): Promise<boolean> {
     changes.silenced.length && t('commands.limits_silenced', { cues: names(changes.silenced) }),
   ].filter((line) => typeof line === 'string');
   if (lines.length) {
-    const answer = await ask(t('commands.limits_title'), `${lines.join('\n')}\n\n${t('commands.limits_undoable')}`, [
-      { label: t('common.cancel'), value: 'cancel', focus: true },
-      { label: t('commands.limits_apply'), value: 'apply' },
-    ]);
+    const answer = await ask(
+      t('commands.limits_title'),
+      `${lines.join('\n')}\n\n${t('commands.limits_undoable')}`,
+      [
+        { label: t('common.cancel'), value: 'cancel', focus: true },
+        { label: t('commands.limits_apply'), value: 'apply' },
+      ],
+      'cancel',
+    );
     if (answer !== 'apply') return false;
   }
   return !!(await edit({ op: 'set_level_limits', limits: next }));
