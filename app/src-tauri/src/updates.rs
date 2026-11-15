@@ -8,6 +8,7 @@ use std::sync::{Mutex, mpsc};
 use std::time::Duration;
 
 use serde::Serialize;
+use tauri::utils::{config::BundleType, platform::bundle_type};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_updater::{Update, UpdaterExt};
 
@@ -98,6 +99,7 @@ pub async fn install_update(
     if crate::paths::portable() {
         return Err(t!("update.portable"));
     }
+    updatable()?;
     if pending.1.swap(true, Ordering::AcqRel) {
         return Err(t!("update.installing"));
     }
@@ -132,6 +134,19 @@ pub async fn install_update(
     update.install(bytes).map_err(|e| t!("update.install_failed", error = e))?;
     // The installer ends the program on Windows; elsewhere this starts the new version.
     app.restart();
+}
+
+/// Refuses an update this copy cannot install. `latest.json` has the NSIS
+/// installer, the MSI, the AppImage and the deb package; the updater picks its
+/// installer from the bundle type, so an rpm install would download one of
+/// those and fail with "invalid updater binary format". A deb update runs
+/// `dpkg -i` through pkexec (or sudo), which asks for the password.
+fn updatable() -> Result<(), String> {
+    match bundle_type() {
+        Some(BundleType::Nsis | BundleType::Msi | BundleType::AppImage | BundleType::Deb) => Ok(()),
+        Some(BundleType::Rpm) => Err(t!("update.rpm")),
+        _ => Err(t!("update.not_bundled")),
+    }
 }
 
 /// Refuses an update while the show could be disturbed: show mode, cues

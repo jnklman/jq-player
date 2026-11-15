@@ -5,7 +5,11 @@
 //
 // Looks for the signed updater files in the artifact dir: the regular NSIS
 // installer (`*-setup.exe`, not the offline one, which has no signature) for
-// Windows and the AppImage for Linux, each with its `.sig`. The URLs are those
+// Windows, the English MSI for copies installed from an MSI (either language:
+// they upgrade each other), the AppImage for Linux and the deb package for
+// copies installed from it, each with its `.sig`. The updater looks for
+// `{os}-{arch}-{bundle type}` first, then `{os}-{arch}`: a deb or MSI install
+// must get its own package type. Pre-releases have no MSI (see build.yml). The URLs are those
 // GitHub gives the release assets (spaces in file names become dots).
 
 import { readdirSync, readFileSync, statSync } from 'node:fs';
@@ -28,7 +32,14 @@ function* walk(path) {
 const signed = [...walk(dir)].filter((file) => file.endsWith('.sig')).map((file) => file.slice(0, -4));
 const pick = (pattern) => signed.filter((file) => pattern.test(basename(file)));
 
-const targets = { 'windows-x86_64': pick(/-setup\.exe$/), 'linux-x86_64': pick(/\.AppImage$/) };
+const targets = {
+  'windows-x86_64': pick(/-setup\.exe$/),
+  'windows-x86_64-msi': pick(/_en-US\.msi$/),
+  'linux-x86_64': pick(/\.AppImage$/),
+  'linux-x86_64-deb': pick(/\.deb$/),
+};
+const prerelease = tag.includes('-');
+if (prerelease) delete targets['windows-x86_64-msi'];
 const platforms = {};
 for (const [target, files] of Object.entries(targets)) {
   if (files.length !== 1) {

@@ -69,7 +69,8 @@
   `tauri.release.conf.json` (`createUpdaterArtifacts`, CI only) makes. Installing is refused in show mode, while
   cues run or with unsaved changes. The public key is in `tauri.conf.json`; the private key is the repository
   secret `TAURI_SIGNING_PRIVATE_KEY` (+ `_PASSWORD`). If the key is lost, installed copies can never update again.
-  Updates work for the NSIS installer (Windows) and the AppImage (Linux), not for MSI, deb or the
+  Updates work for the NSIS installer and the MSI (Windows; `windows-x86_64-msi` in `latest.json`, the English
+  one), the AppImage and the deb package (Linux; `dpkg -i` via pkexec, `linux-x86_64-deb`), not for the
   portable .exe (feature `portable`: config, cache and webview data in `jQ Player Data` next to the exe,
   see `app/src-tauri/src/paths.rs`; `install_update` refuses).
 

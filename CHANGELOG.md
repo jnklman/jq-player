@@ -12,6 +12,11 @@ different in the app, not how the code changed). The Release workflow turns
 
 ## Unreleased
 
+### Added
+
+- Copies installed from the deb or MSI package update themselves like the AppImage and the setup
+  ("Install update" in the About dialog; for the deb it asks for the password).
+
 ## 0.2.0 – 2026-11-15
 
 ### Added
