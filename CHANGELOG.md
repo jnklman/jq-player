@@ -12,6 +12,8 @@ different in the app, not how the code changed). The Release workflow turns
 
 ## Unreleased
 
+## 0.2.1 – 2026-11-15
+
 ### Added
 
 - Copies installed from the deb or MSI package update themselves like the AppImage and the setup
