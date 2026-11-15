@@ -1,0 +1,69 @@
+# Formatting, lints, type checks and tests of the backend and the UI.
+#
+# Runs on every pull request and as the first stage of the Build workflow.
+# A successful run leaves a small artifact named after the git tree it tested
+# ("tests-passed-<tree hash>"). Build looks for it and skips the tests when
+# the same content has passed before: merging a pull request whose base has
+# not moved gives main exactly the tree the pull request tested (merge, squash
+# or rebase alike), and the Release workflow's version commit changes nothing
+# but the version, which Build accounts for.
+name: Tests
+
+on:
+  pull_request:
+  workflow_call:
+  workflow_dispatch:
+
+# Called from Build, `github.workflow` is Build's name, so the group must not
+# collide with Build's own; outside pull requests every run gets its own.
+concurrency:
+  group: tests-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  tests:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: System libraries (ALSA, JACK, PipeWire, WebKitGTK)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libjack-jackd2-dev libpipewire-0.3-dev libwebkit2gtk-4.1-dev librsvg2-dev patchelf
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - name: Version numbers in sync
+        run: node scripts/version.mjs --check
+      - run: npm ci
+        working-directory: app
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test
+      - run: npm run check && npm run lint && npm run format && npm test
+        working-directory: app
+      - name: License files up to date
+        run: npm run licenses -- --check
+        working-directory: app
+      # On a pull request the checkout is the merge with the base branch, so
+      # this is the tree main gets when the pull request is merged as it is.
+      - name: Tree hash
+        run: echo "TREE=$(git rev-parse 'HEAD^{tree}')" >> "$GITHUB_ENV"
+      - name: Remember the result
+        run: echo "$GITHUB_SHA" > tests-passed.txt
+      - uses: actions/upload-artifact@v7
+        with:
+          name: tests-passed-${{ env.TREE }}
+          path: tests-passed.txt
+          retention-days: 90
