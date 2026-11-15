@@ -636,6 +636,8 @@ export interface LocalSettings {
   language: string;
   /** Look for a newer release shortly after the start (`update_available` event); off by default. */
   check_updates: boolean;
+  /** Warn about silence because a streamed file came too late from the disk. Default false. */
+  underrun_warning: boolean;
   /** Folder the audio file picker starts in; null = the show's media folder. Set with `setAudioDir`. */
   audio_dir: string | null;
   /** Arrangement of the panels per mode (`{ edit, show }`, see `lib/layout.svelte.ts`; with the panel windows), stored as

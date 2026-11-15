@@ -1279,7 +1279,12 @@ impl Runner {
             // A file that failed to load may move arming on to the next item.
             self.arm();
         }
-        for (path, frames) in self.cache.take_underruns(now) {
+        // Taken even when not reported, so they do not pile up.
+        let mut underruns = self.cache.take_underruns(now);
+        if !self.settings.underrun_warning {
+            underruns.clear();
+        }
+        for (path, frames) in underruns {
             let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
             let ms = frames * 1000 / self.engine.config().sample_rate.max(1) as u64;
             self.notices.push(Notice::Warning(t!("runner.underrun", name = name, ms = ms)));

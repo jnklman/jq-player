@@ -1,5 +1,7 @@
 <script lang="ts">
+  import { Checkbox } from '$lib/components/ui/checkbox';
   import { Input } from '$lib/components/ui/input';
+  import { Label } from '$lib/components/ui/label';
 
   import type { LocalSettings } from '../../lib/api';
   import type { AudioSetup } from '../../lib/audioSetup.svelte';
@@ -9,7 +11,7 @@
   import { positiveOrNull } from '../../lib/settings';
   import { settingsView } from '../../lib/settingsView.svelte';
   import { ui } from '../../lib/store.svelte';
-  import { hint } from '../../lib/ui';
+  import { check, hint } from '../../lib/ui';
   import SimpleSelect from '../SimpleSelect.svelte';
   import SettingGroup from './SettingGroup.svelte';
   import SettingRow from './SettingRow.svelte';
@@ -140,6 +142,13 @@
       <span class={hint}>
         {setup.hostSetsBuffer ? t('device.jack_buffer') : t('device.buffer_hint')}
       </span>
+    </SettingRow>
+    <SettingRow label={t('device.underruns')} keywords={t('device.underruns_keywords')}>
+      <Label class="{check} pt-1.5">
+        <Checkbox bind:checked={draft.underrun_warning} />
+        {t('device.underrun_warning')}
+      </Label>
+      <span class={hint}>{t('device.underruns_hint')}</span>
     </SettingRow>
   </SettingGroup>
 </SettingsPanel>

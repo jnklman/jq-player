@@ -1975,6 +1975,7 @@ fn streamed_cue_is_armed_only_where_loaded_and_reports_underruns() {
     }
     let (early_id, late_id) = (early.id, late.id);
     let mut rig = Rig::new(vec![early, late]);
+    rig.runner.set_settings(LocalSettings { underrun_warning: true, ..rig.runner.settings().clone() });
     rig.wait_armed(early_id);
     assert!(!rig.runner.is_armed(late_id), "start chunk not loaded");
     rig.act(Action::StartCue(late_id));
@@ -1996,6 +1997,32 @@ fn streamed_cue_is_armed_only_where_loaded_and_reports_underruns() {
     assert_eq!(silences(&mut rig), 1, "the rest once it is over");
     rig.run(1000);
     assert_eq!(silences(&mut rig), 0);
+}
+
+#[test]
+fn underruns_are_not_reported_by_default() {
+    let mut early = sound("1", "stream.wav");
+    let mut late = sound("2", "stream.wav");
+    if let (CueKind::Sound(a), CueKind::Sound(b)) = (&mut early.kind, &mut late.kind) {
+        a.start = 1.0;
+        b.start = 70.0;
+    }
+    let (early_id, late_id) = (early.id, late.id);
+    let mut rig = Rig::new(vec![early, late]);
+    assert!(!rig.runner.settings().underrun_warning);
+    rig.wait_armed(early_id);
+    rig.act(Action::StartCue(late_id));
+    rig.run(8000);
+    rig.act(Action::StopCue(late_id));
+    rig.run(2000);
+    let notices = rig.runner.take_notices();
+    assert!(!notices.iter().any(|n| matches!(n, Notice::Warning(m) if m.contains("silence"))), "{notices:?}");
+    // Turned on later, the silence from before is not reported.
+    rig.runner.set_settings(LocalSettings { underrun_warning: true, ..rig.runner.settings().clone() });
+    rig.run(1000);
+    assert!(
+        !rig.runner.take_notices().iter().any(|n| matches!(n, Notice::Warning(m) if m.contains("silence")))
+    );
 }
 
 fn group_cues(group: &Cue) -> &[Cue] {

@@ -99,6 +99,9 @@ pub struct LocalSettings {
     /// request to GitHub). Only tells the operator; installing is always
     /// their decision.
     pub check_updates: bool,
+    /// Warn about silence played because a streamed file did not come from
+    /// the disk in time (not preloaded far enough).
+    pub underrun_warning: bool,
 }
 
 impl LocalSettings {
@@ -211,6 +214,7 @@ impl Default for LocalSettings {
             media_watch: WatchMode::Events,
             language: jq_i18n::AUTO.into(),
             check_updates: false,
+            underrun_warning: false,
         }
     }
 }

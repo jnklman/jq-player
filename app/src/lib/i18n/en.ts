@@ -976,6 +976,12 @@ const en = {
   'device.unsupported': '{frames} (not supported)',
   'device.jack_buffer': 'Set by the JACK server for all programs.',
   'device.buffer_hint': 'Smaller = less delay, but more prone to dropouts.',
+  'device.underruns': 'Disk underruns',
+  'device.underruns_keywords':
+    'underrun silence disk preload stream late warning Aussetzer Stille Platte vorladen Warnung',
+  'device.underrun_warning': 'Warn about files not loaded in time',
+  'device.underruns_hint':
+    'A streamed file that does not come from the disk fast enough plays silence. With the warning on, this is reported along with how long the silence lasted. Dropouts of the audio device are always reported.',
   'media_tab.events': 'Notification by the system',
   'media_tab.poll': 'look every second',
   'media_tab.changes': 'Changes',

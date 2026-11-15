@@ -93,7 +93,7 @@ export const tabTitle = (tab: SettingsTab) =>
 
 /** The draft fields each tab edits (the waveform cache applies at once and is not among them). */
 const TAB_FIELDS: Record<SettingsTab, (keyof LocalSettings)[]> = {
-  device: ['host', 'device', 'channels', 'buffer_frames'],
+  device: ['host', 'device', 'channels', 'buffer_frames', 'underrun_warning'],
   routing: ['outputs', 'preview_device', 'preview_channel'],
   show: ['fade_all', 'panic_fade', 'go_lockout', 'end_warning'],
   keys: ['keys', 'jump_back', 'jump_forward', 'jump_end', 'volume_step', 'pan_step', 'rate_step'],

@@ -977,6 +977,12 @@ const de: Record<MessageKey, string> = {
   'device.unsupported': '{frames} (nicht unterstützt)',
   'device.jack_buffer': 'Legt der JACK-Server für alle Programme fest.',
   'device.buffer_hint': 'Kleiner = weniger Verzögerung, aber anfälliger für Aussetzer.',
+  'device.underruns': 'Plattenaussetzer',
+  'device.underruns_keywords':
+    'Aussetzer Stille Platte vorladen Stream Warnung underrun silence disk preload late warning',
+  'device.underrun_warning': 'Warnung bei nicht rechtzeitig geladenen Dateien',
+  'device.underruns_hint':
+    'Kommt eine gestreamte Datei nicht schnell genug von der Platte, spielt sie Stille. Bei aktivierter Warnung wird dies samt Dauer der Stille gemeldet. Aussetzer des Audiogeräts werden immer gemeldet.',
   'media_tab.events': 'Benachrichtigung durch das System',
   'media_tab.poll': 'jede Sekunde abfragen',
   'media_tab.changes': 'Änderungen',
