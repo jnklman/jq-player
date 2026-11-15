@@ -47,6 +47,12 @@ const RESAMPLE_CHUNK: usize = 1024;
 /// Source frames a resampled seek starts early, so the resampler has its
 /// history (half its sinc length and then some) once the target comes.
 const RESAMPLE_MARGIN: usize = 256;
+/// Source frames decoded and dropped before a seek target (about 0.2 s).
+/// A lossy decoder (MP3, AAC) starts cold after a seek: its first frames
+/// lack the overlap with the frame before and, for MP3, the bit reservoir,
+/// and come out wrong. Decoding from the target directly would
+/// click where the chunk meets the one before.
+const SEEK_PREROLL: usize = 9216;
 
 /// Decodes a file in order as stereo at `target_rate`, with seeking.
 pub struct StreamDecoder {
@@ -66,8 +72,9 @@ pub struct StreamDecoder {
     /// Stereo output frames ready to hand out, from `out_pos` on.
     output: Vec<f32>,
     out_pos: usize,
-    /// Source frames to drop after an accurate seek (it lands before the target).
-    skip_source: usize,
+    /// Source frame a seek continues at, until the first packet reaching it
+    /// is decoded; the frames before it are dropped.
+    seek_to: Option<usize>,
     /// Output frames to drop: the resampler's delay.
     skip_output: usize,
     /// Output frames to drop after the delay: a resampled seek starts early.
@@ -121,7 +128,7 @@ impl StreamDecoder {
             input: Vec::new(),
             output: Vec::new(),
             out_pos: 0,
-            skip_source: 0,
+            seek_to: None,
             skip_output: 0,
             skip_lead: 0,
             fed: 0,
@@ -170,21 +177,13 @@ impl StreamDecoder {
     /// samples decoding from the start would give there.
     pub fn seek(&mut self, frame: usize) -> Result<(), MediaError> {
         let (source_frame, lead) = self.seek_point(frame);
-        let secs = source_frame as f64 / self.source_rate as f64;
+        let secs = source_frame.saturating_sub(SEEK_PREROLL) as f64 / self.source_rate as f64;
         let time = Time::try_from_secs_f64(secs).unwrap_or(Time::ZERO);
-        let seeked = self
-            .format
+        self.format
             .seek(SeekMode::Accurate, SeekTo::Time { time, track_id: Some(self.track_id) })
             .map_err(|source| MediaError::Decode { path: self.path.clone(), source })?;
         self.decoder.reset();
-        let tick_secs = self
-            .time_base
-            .map_or(1.0 / self.source_rate as f64, |tb| tb.numer.get() as f64 / tb.denom.get() as f64);
-        // Counted from the frame asked for: `required_ts` went through
-        // seconds and may be a frame off.
-        let landed =
-            (seeked.actual_ts.get().max(0) as f64 * tick_secs * self.source_rate as f64).round() as usize;
-        self.skip_source = source_frame.saturating_sub(landed);
+        self.seek_to = Some(source_frame);
         self.input.clear();
         self.output.clear();
         self.out_pos = 0;
@@ -213,6 +212,14 @@ impl StreamDecoder {
         let source = (frame as u128 * self.source_rate as u128 / self.target_rate as u128) as usize;
         let periods = source.saturating_sub(RESAMPLE_MARGIN) / source_period;
         (periods * source_period, frame - periods * output_period)
+    }
+
+    /// A timestamp of the track in source frames.
+    fn ts_frames(&self, ts: i64) -> i64 {
+        let tick_secs = self
+            .time_base
+            .map_or(1.0 / self.source_rate as f64, |tb| tb.numer.get() as f64 / tb.denom.get() as f64);
+        (ts as f64 * tick_secs * self.source_rate as f64).round() as i64
     }
 
     /// Decodes the next packet (or flushes at the end).
@@ -250,8 +257,20 @@ impl StreamDecoder {
             Err(e) => return Err(decode_err(e)),
         };
         let frames = self.packet.len() / channels;
-        let skip = self.skip_source.min(frames);
-        self.skip_source -= skip;
+        // Placed by its own timestamp, not by where the seek landed: a
+        // decoder may put out nothing for the first packets after a reset
+        // (Vorbis does, with gapless trimming).
+        let skip = match self.seek_to {
+            Some(target) => {
+                let at = self.ts_frames(packet.pts.get());
+                let skip = (target as i64 - at).clamp(0, frames as i64) as usize;
+                if skip < frames {
+                    self.seek_to = None;
+                }
+                skip
+            }
+            None => 0,
+        };
         self.fed += frames - skip;
         let source = &self.packet[skip * channels..frames * channels];
         if self.resampler.is_some() {
