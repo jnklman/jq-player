@@ -982,7 +982,7 @@ const de: Record<MessageKey, string> = {
     'Aussetzer Stille Platte vorladen Stream Warnung underrun silence disk preload late warning',
   'device.underrun_warning': 'Warnung bei nicht rechtzeitig geladenen Dateien',
   'device.underruns_hint':
-    'Kommt eine gestreamte Datei nicht schnell genug von der Platte, spielt sie Stille. Bei aktivierter Warnung wird dies samt Dauer der Stille gemeldet. Aussetzer des Audiogeräts werden immer gemeldet.',
+    'Eine nicht rechtzeitig geladene Datei spielt Stille oder startet verspätet. Das passiert z.\u00a0B. bei einem langsamen Netzlaufwerk oder wenn ein späterer Cue per Hotkey gestartet wird. Bei aktivierter Warnung wird dies immer gemeldet, sonst nur, wenn ein per GO gestarteter Cue verspätet startet. Aussetzer des Audiogeräts werden immer gemeldet.',
   'media_tab.events': 'Benachrichtigung durch das System',
   'media_tab.poll': 'jede Sekunde abfragen',
   'media_tab.changes': 'Änderungen',

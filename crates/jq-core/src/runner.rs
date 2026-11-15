@@ -2244,8 +2244,9 @@ impl Runner {
         }
         let (buffer, loaded_now) =
             self.cache.get_now(&path).map_err(|e| t!("runner.file_not_loadable", error = e))?;
-        // Cues started directly (hotkey, OSC) cannot all be armed.
-        if loaded_now && !self.is_direct_go(go) {
+        // Cues started directly (hotkey, OSC) cannot all be armed, so for
+        // them this is only reported along with disk underruns.
+        if loaded_now && (!self.is_direct_go(go) || self.settings.underrun_warning) {
             self.notices.push(Notice::Warning(t!("runner.not_preloaded", cue = name)));
         }
 

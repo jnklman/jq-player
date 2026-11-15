@@ -981,7 +981,7 @@ const en = {
     'underrun silence disk preload stream late warning Aussetzer Stille Platte vorladen Warnung',
   'device.underrun_warning': 'Warn about files not loaded in time',
   'device.underruns_hint':
-    'A streamed file that does not come from the disk fast enough plays silence. With the warning on, this is reported along with how long the silence lasted. Dropouts of the audio device are always reported.',
+    'A file that is not loaded in time plays silence or starts late. This happens, for example, with a slow network drive or when a later cue is started by hotkey. With the warning on, this is always reported, otherwise only when a cue started by GO starts late. Dropouts of the audio device are always reported.',
   'media_tab.events': 'Notification by the system',
   'media_tab.poll': 'look every second',
   'media_tab.changes': 'Changes',

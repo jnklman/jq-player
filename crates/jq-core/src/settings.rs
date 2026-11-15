@@ -100,7 +100,8 @@ pub struct LocalSettings {
     /// their decision.
     pub check_updates: bool,
     /// Warn about silence played because a streamed file did not come from
-    /// the disk in time (not preloaded far enough).
+    /// the disk in time (not preloaded far enough), and about cues started
+    /// directly (hotkey, OSC) that were not preloaded.
     pub underrun_warning: bool,
 }
 

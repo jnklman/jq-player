@@ -2217,19 +2217,23 @@ fn whole_auto_follow_chain_is_armed() {
 }
 
 #[test]
-fn direct_start_of_an_unarmed_cue_does_not_warn() {
-    let mut cues: Vec<Cue> = (1..=4).map(|i| sound(&i.to_string(), &format!("len{}.wav", 200 + i))).collect();
-    let mut hotkey = sound("5", "len600.wav");
-    hotkey.hotkey = Some(Chord::new("KeyH", "h"));
-    let id = hotkey.id;
-    cues.push(hotkey);
-    let mut rig = Rig::new(cues);
-    rig.wait_armed(rig.runner.show().cues[2].id);
-    assert!(!rig.runner.is_armed(id), "beyond what is armed");
-    rig.act(Action::StartCue(id));
-    rig.run(100);
-    assert_eq!(rig.active(), ["5"]);
-    assert_eq!(rig.runner.take_notices(), []);
+fn direct_start_of_an_unarmed_cue_warns_only_with_the_underrun_warning() {
+    for warn in [false, true] {
+        let mut cues: Vec<Cue> =
+            (1..=4).map(|i| sound(&i.to_string(), &format!("len{}.wav", 200 + i))).collect();
+        let mut hotkey = sound("5", "len600.wav");
+        hotkey.hotkey = Some(Chord::new("KeyH", "h"));
+        let id = hotkey.id;
+        cues.push(hotkey);
+        let mut rig = Rig::new(cues);
+        rig.runner.set_settings(LocalSettings { underrun_warning: warn, ..rig.runner.settings().clone() });
+        rig.wait_armed(rig.runner.show().cues[2].id);
+        assert!(!rig.runner.is_armed(id), "beyond what is armed");
+        rig.act(Action::StartCue(id));
+        rig.run(100);
+        assert_eq!(rig.active(), ["5"]);
+        assert_eq!(not_armed_warnings(&mut rig).len(), usize::from(warn), "warning {warn}");
+    }
 }
 
 #[test]
