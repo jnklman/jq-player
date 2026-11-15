@@ -1,5 +1,4 @@
 <script lang="ts">
-  import Slider from '$lib/components/ui/slider/slider.svelte';
   import * as ToggleGroup from '$lib/components/ui/toggle-group';
 
   import type { PositionTo } from '../../lib/api';
@@ -19,6 +18,7 @@
   import { RATE_MAX, RATE_MIN, TRANSPOSE_MAX } from '../../lib/speed';
   import { hint } from '../../lib/ui';
   import NumberField from '../fields/NumberField.svelte';
+  import SliderField from '../fields/SliderField.svelte';
   import SimpleSelect from '../SimpleSelect.svelte';
   import ExitLoopFields from './ExitLoopFields.svelte';
   import FieldRow from './FieldRow.svelte';
@@ -87,9 +87,8 @@
 {:else if first.type === 'pan'}
   {#if single?.type === 'pan'}
     <FieldRow label={t('control.pan')}>
-      <Slider
-        type="single"
-        aria-label={t('control.pan')}
+      <SliderField
+        label={t('control.pan')}
         step={0.01}
         min={-1}
         max={1}
@@ -98,6 +97,7 @@
         value={single.pan}
         onValueCommit={(pan) => edit.set({ pan: clamp(pan, -1, 1) })}
         reset={0}
+        number={{ value: single.pan, step: 0.01, min: -1, max: 1, onchange: (pan) => edit.set({ pan }) }}
       />
     </FieldRow>
   {:else}

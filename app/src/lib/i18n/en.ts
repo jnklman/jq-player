@@ -683,6 +683,8 @@ const en = {
   // Fields and layout
   'field.color': 'Color',
   'field.mixed': 'mixed',
+  'field.enter_value': 'Enter value',
+  'field.use_slider': 'Use slider',
   'richtext.bold': 'Bold',
   'richtext.italic': 'Italic',
   'richtext.underline': 'Underline',

@@ -684,6 +684,8 @@ const de: Record<MessageKey, string> = {
   // Fields and layout
   'field.color': 'Farbe',
   'field.mixed': 'gemischt',
+  'field.enter_value': 'Wert eingeben',
+  'field.use_slider': 'Schieberegler verwenden',
   'richtext.bold': 'Fett',
   'richtext.italic': 'Kursiv',
   'richtext.underline': 'Unterstrichen',
