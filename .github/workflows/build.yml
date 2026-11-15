@@ -220,8 +220,11 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v7
+      # Only the installers: when the tests ran in this run, their
+      # "tests-passed-*" marker is an artifact of it too.
       - uses: actions/download-artifact@v8
         with:
+          pattern: jq-player-*
           path: dist
           merge-multiple: true
       - name: Create release
