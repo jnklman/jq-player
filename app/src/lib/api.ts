@@ -1055,6 +1055,8 @@ export interface UpdateProgress {
 /** Why closing needs a question. */
 export interface CloseCheck {
   show_mode: boolean;
+  /** Show mode is locked in the show; updates are refused then. */
+  show_mode_locked: boolean;
   dirty: boolean;
   /** Running cues plus cues in their pre-wait. */
   running: number;

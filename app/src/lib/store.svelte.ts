@@ -20,6 +20,7 @@ import {
   type SelectionMode,
   type ShowEvent,
   type ShowView,
+  type UpdateInfo,
 } from './api';
 import { revealRow } from './cueScroll';
 import { setLanguage, t } from './i18n/index.svelte';
@@ -118,6 +119,8 @@ export const ui = $state({
   /** Briefly true after a save, for the confirmation in the header. */
   justSaved: false,
   notices: [] as ShownNotice[],
+  /** The newer release the start-up check found; the About dialog offers it without a new check. */
+  update: null as UpdateInfo | null,
 });
 
 // The revision of `ui.view` (see `Revision`).
@@ -297,10 +300,9 @@ export async function init(main: boolean) {
 
 async function listenAsMain() {
   await events.onNotice(notify);
-  // Not during a show: the operator finds the update in the About dialog later.
   await events.onUpdateAvailable((info) => {
-    if (mode() !== 'show')
-      notify({ level: 'warning', message: t('update.available_notice', { version: info.version }) });
+    ui.update = info;
+    notify({ level: 'warning', message: t('update.available_notice', { version: info.version }) });
   });
   await events.onCloseRequested((check) => {
     ui.leaving = {

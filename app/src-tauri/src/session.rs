@@ -2116,6 +2116,7 @@ impl Session {
         let state = self.runner.state(now);
         CloseCheck {
             show_mode: self.settings.show_mode,
+            show_mode_locked: self.editor.show().show_mode_locked,
             dirty: self.editor.is_dirty(),
             running: state.active.len() + state.waiting.len() + state.gaps.len(),
             imports: self.copies.len(),

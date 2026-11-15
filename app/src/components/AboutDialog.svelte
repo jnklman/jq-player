@@ -12,6 +12,7 @@
   import appIcon from '../../assets/app-icon.svg';
   import { api, events, type UpdateInfo } from '../lib/api';
   import { t } from '../lib/i18n/index.svelte';
+  import { ui } from '../lib/store.svelte';
   import { hint } from '../lib/ui';
 
   let { onclose }: { onclose: () => void } = $props();
@@ -31,7 +32,8 @@
     | { kind: 'available'; info: UpdateInfo }
     | { kind: 'installing'; percent: number | null }
     | { kind: 'error'; message: string };
-  let update = $state<UpdateState>({ kind: 'idle' });
+  // The update the start-up check found needs no new check.
+  let update = $state<UpdateState>(ui.update ? { kind: 'available', info: ui.update } : { kind: 'idle' });
 
   async function checkUpdate() {
     update = { kind: 'checking' };

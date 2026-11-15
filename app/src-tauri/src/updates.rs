@@ -1,7 +1,9 @@
 //! Self-update from the latest GitHub release (`latest.json`, see the Build
 //! workflow). Only ever on the operator's request: the check is a button in
-//! the About dialog, and installing is refused while a show could be
-//! disturbed, because on Windows the installer ends the program.
+//! the About dialog (or the notice after the start-up check), and installing
+//! is refused while a show could be disturbed, because the program restarts
+//! (on Windows the installer ends it). Idle show mode allows it; a locked one
+//! does not.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, mpsc};
@@ -84,8 +86,8 @@ pub async fn check_update(app: AppHandle, pending: State<'_, Pending>) -> Result
 }
 
 /// Downloads and installs the update found by `check_update`, then restarts.
-/// Refused while a show is in show mode, a cue is running or the show has
-/// unsaved changes: checked before the download and again right before
+/// Refused while show mode is locked, a cue is running, files are being
+/// copied in or the show has unsaved changes: checked before the download and again right before
 /// installing, since the download takes a while and the installer ends the
 /// program on Windows. The update stays pending if it fails, so a retry
 /// needs no new check.
@@ -149,8 +151,9 @@ fn updatable() -> Result<(), String> {
     }
 }
 
-/// Refuses an update while the show could be disturbed: show mode, cues
-/// running, files being copied in, unsaved changes.
+/// Refuses an update while the show could be disturbed: locked show mode,
+/// cues running, files being copied in, unsaved changes. Show mode alone
+/// does not count: between performances the operator may update.
 async fn show_allows_update(backend: &Backend) -> Result<(), String> {
     let (tx, rx) = mpsc::channel();
     // No answer in time counts as "something may be running".
@@ -161,11 +164,17 @@ async fn show_allows_update(backend: &Backend) -> Result<(), String> {
             .and_then(Result::ok),
         Err(_) => None,
     };
-    let check = check.unwrap_or(Some(CloseCheck { show_mode: true, dirty: false, running: 1, imports: 0 }));
+    let check = check.unwrap_or(Some(CloseCheck {
+        show_mode: true,
+        show_mode_locked: true,
+        dirty: false,
+        running: 1,
+        imports: 0,
+    }));
     match check {
-        Some(check) if check.show_mode || check.running > 0 || check.imports > 0 || check.dirty => {
-            Err(if check.dirty { t!("update.unsaved") } else { t!("update.busy") })
-        }
+        Some(check) if check.show_mode_locked => Err(t!("update.locked")),
+        Some(check) if check.running > 0 || check.imports > 0 => Err(t!("update.busy")),
+        Some(check) if check.dirty => Err(t!("update.unsaved")),
         _ => Ok(()),
     }
 }

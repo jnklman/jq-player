@@ -17,6 +17,17 @@ different in the app, not how the code changed). The Release workflow turns
 - Copies installed from the deb or MSI package update themselves like the AppImage and the setup
   ("Install update" in the About dialog; for the deb it asks for the password).
 
+### Changed
+
+- Updates can be installed in show mode as long as no cue is running; only a locked show mode
+  prevents them.
+
+### Fixed
+
+- The update found at start was not announced when the program started in show mode, and the About
+  dialog did not know about it either. The notice now also comes in show mode, and the About dialog
+  offers the update right away.
+
 ## 0.2.0 – 2026-11-15
 
 ### Added

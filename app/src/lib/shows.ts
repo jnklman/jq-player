@@ -151,6 +151,7 @@ export function saveShowAs(): Promise<void> {
 async function replaceShow(load: () => Promise<unknown>) {
   const check: CloseCheck = {
     show_mode: mode() === 'show',
+    show_mode_locked: ui.view?.show.show_mode_locked ?? false,
     dirty: ui.view?.dirty ?? false,
     running: (ui.runtime?.active.length ?? 0) + (ui.runtime?.waiting.length ?? 0) + (ui.runtime?.gaps.length ?? 0),
     imports: ui.runtime?.imports.length ?? 0,

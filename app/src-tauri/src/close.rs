@@ -62,7 +62,7 @@ fn check_and_ask(window: &Window) {
     let check = match ask_backend(&backend, Request::CloseCheck, CHECK_TIMEOUT) {
         Some(None) => return destroy(window),
         Some(Some(check)) => check,
-        None => CloseCheck { show_mode: true, dirty: false, running: 1, imports: 0 },
+        None => CloseCheck { show_mode: true, show_mode_locked: true, dirty: false, running: 1, imports: 0 },
     };
     if !check.show_mode && !check.dirty && check.running == 0 && check.imports == 0 {
         return destroy(window);

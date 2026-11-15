@@ -118,6 +118,8 @@ pub enum Request {
 #[derive(Clone, Copy, Debug, Serialize)]
 pub struct CloseCheck {
     pub show_mode: bool,
+    /// Show mode is locked in the show (`Show::show_mode_locked`).
+    pub show_mode_locked: bool,
     pub dirty: bool,
     /// Running cues plus cues waiting for their pre-wait.
     pub running: usize,
