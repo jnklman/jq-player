@@ -20,7 +20,7 @@
   {label}
   data-slot="select-item"
   class={cn(
-    'relative flex w-full cursor-default items-center gap-1.5 rounded-md py-1.5 pr-8 pl-3 text-[13px] outline-hidden select-none data-highlighted:bg-accent data-highlighted:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-45 [&_svg]:pointer-events-none [&_svg]:shrink-0',
+    'relative flex w-full cursor-default items-center gap-1.5 rounded-md py-1.5 pr-8 pl-3 text-[13px] outline-hidden select-none data-highlighted:bg-accent data-highlighted:text-accent-foreground data-disabled:opacity-45 [&_svg]:pointer-events-none [&_svg]:shrink-0',
     className,
   )}
   {...restProps}

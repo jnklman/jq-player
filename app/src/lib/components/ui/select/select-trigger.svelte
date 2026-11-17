@@ -20,7 +20,7 @@
   data-slot="select-trigger"
   data-size={size}
   class={cn(
-    'flex min-h-8 w-full min-w-0 items-center justify-between gap-1.5 rounded-lg border border-input bg-background pr-2 pl-2.5 text-left text-sm whitespace-nowrap text-foreground select-none disabled:cursor-default disabled:text-fg-2 aria-invalid:border-destructive data-placeholder:text-muted-foreground data-[size=sm]:min-h-7 *:data-[slot=select-value]:line-clamp-1 [&_svg]:pointer-events-none [&_svg]:shrink-0',
+    'flex min-h-8 w-full min-w-0 items-center justify-between gap-1.5 rounded-lg border border-input bg-background pr-2 pl-2.5 text-left text-sm whitespace-nowrap text-foreground select-none disabled:text-fg-2 aria-invalid:border-destructive data-placeholder:text-muted-foreground data-[size=sm]:min-h-7 *:data-[slot=select-value]:line-clamp-1 [&_svg]:pointer-events-none [&_svg]:shrink-0',
     className,
   )}
   {...restProps}

@@ -19,7 +19,7 @@
   bind:this={ref}
   data-slot="label"
   class={cn(
-    'flex items-center gap-2 text-[13px] select-none group-data-[disabled=true]:pointer-events-none peer-disabled:cursor-default',
+    'flex items-center gap-2 text-[13px] select-none group-data-[disabled=true]:pointer-events-none peer-disabled:cursor-not-allowed',
     className,
   )}
   {...restProps}

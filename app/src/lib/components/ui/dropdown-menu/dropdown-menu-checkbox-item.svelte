@@ -26,7 +26,7 @@
   bind:indeterminate
   data-slot="dropdown-menu-checkbox-item"
   class={cn(
-    'relative flex cursor-default items-center gap-2 rounded-md py-1.5 pr-8 pl-3 text-[13px] outline-hidden select-none data-highlighted:bg-accent data-highlighted:text-accent-foreground data-inset:pl-8 data-disabled:pointer-events-none data-disabled:opacity-45 [&_svg]:pointer-events-none [&_svg]:shrink-0',
+    'relative flex cursor-default items-center gap-2 rounded-md py-1.5 pr-8 pl-3 text-[13px] outline-hidden select-none data-highlighted:bg-accent data-highlighted:text-accent-foreground data-inset:pl-8 data-disabled:opacity-45 [&_svg]:pointer-events-none [&_svg]:shrink-0',
     className,
   )}
   {...restProps}

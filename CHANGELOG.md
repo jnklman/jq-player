@@ -32,6 +32,7 @@ different in the app, not how the code changed). The Release workflow turns
 - A file in a format that cannot be played (WMA, AC-3, DTS, HE-AAC or surround AAC, WavPack and
   others) is refused when it is added, naming the format, instead of failing only when the cue loads;
   MIDI files are explained.
+- Disabled buttons, fields and menu entries show a "not allowed" mouse pointer.
 
 ### Fixed
 

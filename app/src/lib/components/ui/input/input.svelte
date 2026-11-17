@@ -54,7 +54,7 @@
     bind:this={ref}
     data-slot={dataSlot}
     class={cn(
-      'min-h-8 w-full min-w-0 rounded-lg border border-input bg-background px-2.5 text-sm text-foreground select-text file:h-6 file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-dim disabled:pointer-events-none disabled:text-fg-2 disabled:select-none aria-invalid:border-destructive',
+      'min-h-8 w-full min-w-0 rounded-lg border border-input bg-background px-2.5 text-sm text-foreground select-text file:h-6 file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-dim disabled:text-fg-2 disabled:select-none aria-invalid:border-destructive',
       className,
     )}
     type="file"
@@ -76,7 +76,7 @@
     <input
       bind:this={ref}
       class={[
-        'min-w-0 flex-1 [appearance:textfield] self-stretch bg-transparent pr-1 pl-2.5 outline-hidden select-text placeholder:font-sans placeholder:text-xs placeholder:text-dim disabled:pointer-events-none disabled:text-fg-2 disabled:select-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none',
+        'min-w-0 flex-1 [appearance:textfield] self-stretch bg-transparent pr-1 pl-2.5 outline-hidden select-text placeholder:font-sans placeholder:text-xs placeholder:text-dim disabled:text-fg-2 disabled:select-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none',
         unit && 'text-right',
       ]}
       type="number"
@@ -118,7 +118,7 @@
     bind:this={ref}
     data-slot={dataSlot}
     class={cn(
-      'min-h-8 w-full min-w-0 rounded-lg border border-input bg-background px-2.5 text-sm text-foreground select-text file:h-6 file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-dim disabled:pointer-events-none disabled:text-fg-2 disabled:select-none aria-invalid:border-destructive',
+      'min-h-8 w-full min-w-0 rounded-lg border border-input bg-background px-2.5 text-sm text-foreground select-text file:h-6 file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-dim disabled:text-fg-2 disabled:select-none aria-invalid:border-destructive',
       className,
     )}
     {type}

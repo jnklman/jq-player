@@ -49,11 +49,11 @@
     }
   }
 >
-  <!-- The tooltip sits on a wrapper: a disabled trigger gets no pointer events. -->
+  <!-- The tooltip sits on a wrapper: a disabled trigger inside one gets no pointer events (styles.css). -->
   <Tooltip tip={tip ?? undefined}>
     {#snippet child({ props })}
       <span {...props} class={['flex min-w-0', className]}>
-        <Select.Trigger {id} aria-label={ariaLabel} class="disabled:pointer-events-none">
+        <Select.Trigger {id} aria-label={ariaLabel}>
           <span class={['truncate', !selected && 'text-muted-foreground']}>{selected?.label ?? placeholder}</span>
         </Select.Trigger>
       </span>

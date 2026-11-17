@@ -9,7 +9,7 @@
   // the plain grey button used throughout; "default" keeps shadcn's meaning
   // (primary colour) for components added later.
   export const buttonVariants = tv({
-    base: 'aria-invalid:border-destructive group/button inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg border border-transparent text-[13px] whitespace-nowrap select-none disabled:pointer-events-none disabled:opacity-45 [&_svg]:pointer-events-none [&_svg]:shrink-0',
+    base: 'aria-invalid:border-destructive group/button inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg border border-transparent text-[13px] whitespace-nowrap select-none disabled:opacity-45 [&_svg]:pointer-events-none [&_svg]:shrink-0',
     variants: {
       variant: {
         default: tw`bg-primary font-semibold text-primary-foreground hover:bg-primary/85`,

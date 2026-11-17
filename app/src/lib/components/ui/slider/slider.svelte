@@ -99,7 +99,7 @@ get along, so we shut typescript up by casting `value` to `never`.
           <SliderPrimitive.Thumb
             {...tipProps}
             index={thumb.index}
-            class="relative block size-3 shrink-0 rounded-full bg-fg transition-transform select-none after:absolute after:-inset-2 active:scale-115 disabled:pointer-events-none disabled:opacity-50"
+            class="relative block size-3 shrink-0 rounded-full bg-fg transition-transform select-none after:absolute after:-inset-2 active:scale-115 disabled:opacity-50"
           />
         {/snippet}
       </Tooltip>

@@ -6,6 +6,16 @@
 /* The app is dark only; `dark:` styles of the shadcn components always apply. */
 @custom-variant dark (&:is(.dark *));
 
+/* Disabled controls take pointer events (for their not-allowed cursor, see
+   below) but must not light up under the pointer. */
+@custom-variant hover {
+  @media (hover: hover) {
+    &:hover:not(:disabled, [data-disabled], [aria-disabled='true']) {
+      @slot;
+    }
+  }
+}
+
 /* Colours and type from the GUI mock-up (dark, for dim backstage light).
    Each colour becomes utilities like bg-panel, text-muted-foreground, border-line. */
 @theme {
@@ -196,6 +206,22 @@
 
   button:not(:disabled) {
     @apply cursor-pointer;
+  }
+
+  /* Every disabled control shows the not-allowed cursor, whatever cursor its
+     classes set. Controls therefore keep their pointer events when disabled,
+     except inside a tooltip wrapper (`Tooltip` with a `child` span), which
+     needs the hover itself to explain why the control is disabled: there the
+     wrapper shows the cursor. Only controls: a disabled <fieldset> (a locked
+     inspector or dialog) is `:disabled` too, but only the controls in it are. */
+  :is(button, input, select, textarea):disabled,
+  [data-disabled]:not(fieldset),
+  [aria-disabled='true'],
+  [data-slot='tooltip-trigger']:has(:is(button, input, select, textarea):disabled, [data-disabled]) {
+    @apply cursor-not-allowed!;
+  }
+  [data-slot='tooltip-trigger'] :is(:disabled, [data-disabled]) {
+    @apply pointer-events-none;
   }
 
   /* Scrolling areas are ScrollArea components (lib/components/ui). Where

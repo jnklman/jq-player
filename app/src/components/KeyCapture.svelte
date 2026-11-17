@@ -70,7 +70,7 @@
   <button
     type="button"
     class={[
-      'flex h-7 min-w-0 grow cursor-pointer items-center gap-1 overflow-hidden rounded-md border px-2 text-left text-xs whitespace-nowrap outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:opacity-40',
+      'flex h-7 min-w-0 grow cursor-pointer items-center gap-1 overflow-hidden rounded-md border px-2 text-left text-xs whitespace-nowrap outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40',
       recording
         ? 'border-primary bg-primary/10 text-primary'
         : 'border-dashed border-transparent enabled:hover:border-input enabled:hover:bg-background',

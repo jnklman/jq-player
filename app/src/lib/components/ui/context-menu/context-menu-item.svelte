@@ -21,7 +21,7 @@
   data-inset={inset}
   data-variant={variant}
   class={cn(
-    "group/context-menu-item relative flex cursor-pointer items-center gap-2 rounded-md px-3 py-1.5 text-[13px] outline-hidden select-none data-highlighted:bg-accent data-highlighted:text-accent-foreground data-inset:pl-8 data-[variant=destructive]:text-destructive data-disabled:pointer-events-none data-disabled:opacity-45 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+    "group/context-menu-item relative flex cursor-pointer items-center gap-2 rounded-md px-3 py-1.5 text-[13px] outline-hidden select-none data-highlighted:bg-accent data-highlighted:text-accent-foreground data-inset:pl-8 data-[variant=destructive]:text-destructive data-disabled:opacity-45 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
     className,
   )}
   {...restProps}
