@@ -3,7 +3,6 @@
 //! reader thread that keeps the chunks of a streamed buffer loaded.
 
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
-use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -17,13 +16,10 @@ use rubato::{
 };
 use symphonia::core::codecs::audio::{AudioDecoder, AudioDecoderOptions};
 use symphonia::core::errors::Error as SymError;
-use symphonia::core::formats::probe::Hint;
-use symphonia::core::formats::{FormatOptions, FormatReader, SeekMode, SeekTo, TrackType};
-use symphonia::core::io::MediaSourceStream;
-use symphonia::core::meta::MetadataOptions;
+use symphonia::core::formats::{FormatReader, SeekMode, SeekTo, TrackType};
 use symphonia::core::units::{Time, TimeBase};
 
-use crate::{MediaError, push_stereo};
+use crate::{MediaError, open_format, push_stereo};
 
 /// Chunks kept loaded ahead of a playing position (about 14 s at 48 kHz),
 /// so a slow or busy disk has time to catch up.
@@ -92,15 +88,7 @@ impl StreamDecoder {
     /// Opens `path`; `target_rate` `None` keeps the file's own rate.
     pub fn open(path: &Path, target_rate: Option<u32>) -> Result<Self, MediaError> {
         let decode_err = |source| MediaError::Decode { path: path.to_owned(), source };
-        let file = File::open(path).map_err(|source| MediaError::Io { path: path.to_owned(), source })?;
-        let mss = MediaSourceStream::new(Box::new(file), Default::default());
-        let mut hint = Hint::new();
-        if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-            hint.with_extension(ext);
-        }
-        let format = symphonia::default::get_probe()
-            .probe(&hint, mss, FormatOptions::default(), MetadataOptions::default())
-            .map_err(decode_err)?;
+        let format = open_format(path)?;
         let no_track = || MediaError::NoAudioTrack { path: path.to_owned() };
         let track = format.default_track(TrackType::Audio).ok_or_else(no_track)?;
         let params = track.codec_params.as_ref().and_then(|p| p.audio()).ok_or_else(no_track)?;

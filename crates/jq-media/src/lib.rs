@@ -7,6 +7,7 @@
 pub mod loudness;
 pub mod peaks;
 pub mod stream;
+mod wav_mpeg;
 
 use std::fs::File;
 use std::path::{Path, PathBuf};
@@ -15,8 +16,8 @@ use jq_engine::AudioBuffer;
 use jq_i18n::t;
 use symphonia::core::errors::Error as SymError;
 use symphonia::core::formats::probe::Hint;
-use symphonia::core::formats::{FormatOptions, TrackType};
-use symphonia::core::io::MediaSourceStream;
+use symphonia::core::formats::{FormatOptions, FormatReader, TrackType};
+use symphonia::core::io::{MediaSource, MediaSourceStream};
 use symphonia::core::meta::MetadataOptions;
 
 #[derive(Debug)]
@@ -174,18 +175,39 @@ fn peaks(samples: &[f32], channels: usize, buckets: usize) -> Vec<f32> {
         .collect()
 }
 
+/// Opens `path` with the container reader symphonia picks for it. A WAV
+/// file holding MPEG audio, which symphonia refuses, is read as the MPEG
+/// stream in its `data` chunk (see [`wav_mpeg`]).
+pub(crate) fn open_format(path: &Path) -> Result<Box<dyn FormatReader>, MediaError> {
+    let io_err = |source| MediaError::Io { path: path.to_owned(), source };
+    let decode_err = |source| MediaError::Decode { path: path.to_owned(), source };
+    let probe = |source: Box<dyn MediaSource>, ext: Option<&str>| {
+        let mut hint = Hint::new();
+        if let Some(ext) = ext {
+            hint.with_extension(ext);
+        }
+        let mss = MediaSourceStream::new(source, Default::default());
+        symphonia::default::get_probe().probe(
+            &hint,
+            mss,
+            FormatOptions::default(),
+            MetadataOptions::default(),
+        )
+    };
+    let file = File::open(path).map_err(io_err)?;
+    match probe(Box::new(file), path.extension().and_then(|e| e.to_str())) {
+        Err(refused @ SymError::Unsupported(_)) => match wav_mpeg::mpeg_data(path).map_err(io_err)? {
+            Some(data) => probe(Box::new(data), Some("mp3")).map_err(decode_err),
+            None => Err(decode_err(refused)),
+        },
+        result => result.map_err(decode_err),
+    }
+}
+
 /// Reads the duration in seconds from the file header without decoding.
 /// `None` if the container does not state it.
 pub fn probe_duration(path: &Path) -> Result<Option<f64>, MediaError> {
-    let file = File::open(path).map_err(|source| MediaError::Io { path: path.to_owned(), source })?;
-    let mss = MediaSourceStream::new(Box::new(file), Default::default());
-    let mut hint = Hint::new();
-    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-        hint.with_extension(ext);
-    }
-    let format = symphonia::default::get_probe()
-        .probe(&hint, mss, FormatOptions::default(), MetadataOptions::default())
-        .map_err(|source| MediaError::Decode { path: path.to_owned(), source })?;
+    let format = open_format(path)?;
     let track = format
         .default_track(TrackType::Audio)
         .ok_or_else(|| MediaError::NoAudioTrack { path: path.to_owned() })?;

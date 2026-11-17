@@ -16,6 +16,8 @@ different in the app, not how the code changed). The Release workflow turns
 
 - "Keep device awake" (Settings › Device) plays an inaudible signal with an adjustable level, so
   notebook speakers and other devices that switch off in silence no longer cut off the start of a cue.
+- WAV files that hold MP3 or MP2 audio (as broadcast software and some audio editors write them) play
+  like any other file instead of being refused as an unsupported format.
 
 ## 0.2.1 – 2026-11-15
 

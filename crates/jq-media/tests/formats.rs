@@ -37,7 +37,7 @@ const fn lossy(file: &'static str, rate: u32) -> Fixture {
     Fixture { file, rate, secs: 0.5, exact: None, mono: false, slack: 2048 }
 }
 
-const FIXTURES: [Fixture; 15] = [
+const FIXTURES: [Fixture; 16] = [
     lossless("pcm16.wav", 44_100, 0.25, 16),
     // 24 bit: WAVE_FORMAT_EXTENSIBLE.
     lossless("pcm24.wav", 44_100, 0.25, 24),
@@ -57,6 +57,10 @@ const FIXTURES: [Fixture; 15] = [
     lossy("cbr.mp3", 48_000),
     // ID3v2 with a title and a cover picture before the audio.
     lossy("tagged.mp3", 44_100),
+    // MP3 in WAV (format tag 0x0055): read by jq-media's `wav_mpeg`. Without
+    // a LAME header nothing tells the delay and padding (two MP3 frames):
+    // ffmpeg keeps them as well.
+    Fixture { slack: 2 * 1152, ..lossy("mp3-in.wav", 44_100) },
 ];
 
 fn path(file: &str) -> PathBuf {
@@ -246,14 +250,37 @@ fn opus_in_ogg_is_refused_with_a_reason() {
     assert!((secs - 0.5).abs() < 0.05, "{secs}");
 }
 
-/// `.wav` may hold MP3 (format tag 0x0055); symphonia's WAV reader only
-/// knows PCM, float, A-law/µ-law and ADPCM. Once it is read, move the file
-/// into `FIXTURES` (`lossy`).
+/// `.wav` may hold MP3 (format tag 0x0055). symphonia's WAV reader only
+/// knows PCM, float, A-law/µ-law and ADPCM, so jq-media reads the `data`
+/// chunk itself (`src/wav_mpeg.rs`, entered only when symphonia refuses).
+/// This asks symphonia directly. When it fails, symphonia reads these files
+/// itself: delete `wav_mpeg.rs`, its use in `open_format` and this test;
+/// `mp3-in.wav` in `FIXTURES` keeps checking that the files still play.
 #[test]
-fn mp3_in_wav_is_refused_with_a_reason() {
-    assert_refused("mp3-in.wav");
-    let error = probe_duration(&path("mp3-in.wav")).unwrap_err();
-    assert_eq!(error.reason(), "not a supported audio format", "not even the length");
+fn symphonia_still_refuses_mp3_in_wav() {
+    use symphonia::core::codecs::audio::AudioDecoderOptions;
+    use symphonia::core::formats::probe::Hint;
+    use symphonia::core::formats::{FormatOptions, TrackType};
+    use symphonia::core::io::MediaSourceStream;
+    use symphonia::core::meta::MetadataOptions;
+
+    let file = std::fs::File::open(path("mp3-in.wav")).unwrap();
+    let mss = MediaSourceStream::new(Box::new(file), Default::default());
+    let mut hint = Hint::new();
+    hint.with_extension("wav");
+    let read = symphonia::default::get_probe()
+        .probe(&hint, mss, FormatOptions::default(), MetadataOptions::default())
+        .and_then(|format| {
+            let params = format.default_track(TrackType::Audio).and_then(|t| t.codec_params.clone());
+            let params = params
+                .and_then(|p| p.audio().cloned())
+                .ok_or(symphonia::core::errors::Error::Unsupported("no track"))?;
+            symphonia::default::get_codecs().make_audio_decoder(&params, &AudioDecoderOptions::default())
+        });
+    assert!(
+        read.is_err(),
+        "symphonia reads MP3 in WAV now: remove jq-media's own handling (see this test's comment)"
+    );
 }
 
 /// symphonia's MP4 reader ignores edit lists, so AAC in MP4 keeps the
