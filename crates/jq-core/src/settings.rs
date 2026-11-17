@@ -103,6 +103,23 @@ pub struct LocalSettings {
     /// the disk in time (not preloaded far enough), and about cues started
     /// directly (hotkey, OSC) that were not preloaded.
     pub underrun_warning: bool,
+    /// Mix inaudible noise into the audio outputs, so devices that power
+    /// down after a few seconds of silence (notebook speakers) stay awake
+    /// and do not cut off the start of the next cue.
+    pub keep_alive_signal: bool,
+    /// Peak of that noise in dBFS (see [`KEEP_ALIVE_RANGE`]).
+    pub keep_alive_level: f64,
+}
+
+/// Levels offered for the keep-alive noise, dBFS: from about one step of a
+/// 16-bit output up to where it may become audible on quiet speakers.
+pub const KEEP_ALIVE_RANGE: std::ops::RangeInclusive<f64> = -96.0..=-50.0;
+
+impl LocalSettings {
+    /// The keep-alive noise's level for the audio outputs; `None` = off.
+    pub fn keep_alive(&self) -> Option<f64> {
+        self.keep_alive_signal.then_some(self.keep_alive_level)
+    }
 }
 
 impl LocalSettings {
@@ -216,6 +233,8 @@ impl Default for LocalSettings {
             language: jq_i18n::AUTO.into(),
             check_updates: false,
             underrun_warning: false,
+            keep_alive_signal: false,
+            keep_alive_level: -80.0,
         }
     }
 }

@@ -255,6 +255,7 @@ session.setting.rate_step = Schrittweite Rate
 session.setting.not_negative = {what} muss eine Zahl ≥ 0 sein
 session.setting.positive = {what} muss größer als 0 sein
 session.setting.jump_times = Sprungzeiten müssen größer als 0 sein
+session.setting.keep_alive_level = Der Pegel des Wachhalte-Signals liegt zwischen {min} und {max} dBFS
 session.setting.msc_device = MSC-Geräte-ID liegt zwischen 0 und 126
 session.setting.buffer = Puffergröße muss eine Zweierpotenz zwischen {min} und {max} sein
 session.setting.osc_port = OSC-Port muss zwischen 1 und 65535 liegen

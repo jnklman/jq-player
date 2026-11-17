@@ -1313,6 +1313,10 @@ impl Session {
                 return Err(t!("session.setting.positive", what = what));
             }
         }
+        if !jq_core::KEEP_ALIVE_RANGE.contains(&settings.keep_alive_level) {
+            let (min, max) = jq_core::KEEP_ALIVE_RANGE.into_inner();
+            return Err(t!("session.setting.keep_alive_level", min = min, max = max));
+        }
         if settings.msc_device.is_some_and(|d| d > 126) {
             return Err(t!("session.setting.msc_device"));
         }
@@ -1357,6 +1361,11 @@ impl Session {
         }
         self.settings = settings;
         self.save_settings();
+        // Takes effect at once, without opening the devices again.
+        self.output.set_keep_alive(self.settings.keep_alive());
+        if let Some(preview) = &self.preview_output {
+            preview.set_keep_alive(self.settings.keep_alive());
+        }
         if reopen {
             self.reopen_audio(notices);
         } else {
@@ -1614,6 +1623,7 @@ impl Session {
         let Some(spec) = preview_spec(&self.settings, self.output.info().sample_rate) else { return };
         match AudioOutput::open(&spec, PREVIEW_VOICES) {
             Ok((output, controller)) => {
+                output.set_keep_alive(self.settings.keep_alive());
                 self.preview_output = Some(output);
                 self.runner.set_preview_engine(Some(controller));
             }
@@ -2936,7 +2946,10 @@ fn open_output(
     notices: &mut Vec<Notice>,
 ) -> (AudioOutput, Controller, Option<AudioError>) {
     match AudioOutput::open(&main_spec(settings), MAX_VOICES) {
-        Ok((output, controller)) => (output, controller, None),
+        Ok((output, controller)) => {
+            output.set_keep_alive(settings.keep_alive());
+            (output, controller, None)
+        }
         Err(e) => {
             notices.push(Notice::Error(t!("session.audio_unavailable", error = e)));
             let (output, controller) = AudioOutput::null(48_000, 2, MAX_VOICES);

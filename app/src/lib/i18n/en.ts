@@ -984,6 +984,13 @@ const en = {
   'device.underrun_warning': 'Warn about files not loaded in time',
   'device.underruns_hint':
     'A file that is not loaded in time plays silence or starts late. This happens, for example, with a slow network drive or when a later cue is started by hotkey. With the warning on, this is always reported, otherwise only when a cue started by GO starts late. Dropouts of the audio device are always reported.',
+  'device.keep_alive': 'Keep device awake',
+  'device.keep_alive_keywords':
+    'keep alive awake wake silence cut off cutoff start crackle dropouts power saving notebook laptop Bluetooth speakers noise wach Stille abgeschnitten Knacken Aussetzer Energiesparen Lautsprecher Rauschen',
+  'device.keep_alive_signal': 'Play an inaudible signal',
+  'device.keep_alive_hint':
+    'Some devices, notebook or Bluetooth speakers in particular, switch themselves off after a few seconds of silence to save power. This can cause small dropouts when sounds play after a pause. With this setting, a quiet noise plays continuously to keep the device awake. The ideal level depends on the device.',
+  'device.keep_alive_level': 'Level of the signal',
   'media_tab.events': 'Notification by the system',
   'media_tab.poll': 'look every second',
   'media_tab.changes': 'Changes',

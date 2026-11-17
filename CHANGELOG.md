@@ -12,6 +12,11 @@ different in the app, not how the code changed). The Release workflow turns
 
 ## Unreleased
 
+### Added
+
+- "Keep device awake" (Settings › Device) plays an inaudible signal with an adjustable level, so
+  notebook speakers and other devices that switch off in silence no longer cut off the start of a cue.
+
 ## 0.2.1 – 2026-11-15
 
 ### Added

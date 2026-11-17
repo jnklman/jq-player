@@ -91,9 +91,12 @@ export const SETTINGS_GROUPS: { title: string; tabs: { id: SettingsTab; title: s
 export const tabTitle = (tab: SettingsTab) =>
   SETTINGS_GROUPS.flatMap((group) => group.tabs).find((entry) => entry.id === tab)?.title ?? tab;
 
+/** Levels offered for the keep-alive noise in dBFS (as the backend checks them). */
+export const KEEP_ALIVE_RANGE = { min: -96, max: -50 };
+
 /** The draft fields each tab edits (the waveform cache applies at once and is not among them). */
 const TAB_FIELDS: Record<SettingsTab, (keyof LocalSettings)[]> = {
-  device: ['host', 'device', 'channels', 'buffer_frames', 'underrun_warning'],
+  device: ['host', 'device', 'channels', 'buffer_frames', 'underrun_warning', 'keep_alive_signal', 'keep_alive_level'],
   routing: ['outputs', 'preview_device', 'preview_channel'],
   show: ['fade_all', 'panic_fade', 'go_lockout', 'end_warning'],
   keys: ['keys', 'jump_back', 'jump_forward', 'jump_end', 'volume_step', 'pan_step', 'rate_step'],

@@ -5,13 +5,15 @@
 
   import type { LocalSettings } from '../../lib/api';
   import type { AudioSetup } from '../../lib/audioSetup.svelte';
+  import { fmtDb } from '../../lib/format';
   import { t } from '../../lib/i18n/index.svelte';
   import { liveNumber } from '../../lib/input';
   import { withMissing } from '../../lib/options';
-  import { positiveOrNull } from '../../lib/settings';
+  import { KEEP_ALIVE_RANGE, positiveOrNull } from '../../lib/settings';
   import { settingsView } from '../../lib/settingsView.svelte';
   import { ui } from '../../lib/store.svelte';
   import { check, hint } from '../../lib/ui';
+  import SliderField from '../fields/SliderField.svelte';
   import SimpleSelect from '../SimpleSelect.svelte';
   import SettingGroup from './SettingGroup.svelte';
   import SettingRow from './SettingRow.svelte';
@@ -149,6 +151,34 @@
         {t('device.underrun_warning')}
       </Label>
       <span class={hint}>{t('device.underruns_hint')}</span>
+    </SettingRow>
+    <SettingRow label={t('device.keep_alive')} keywords={t('device.keep_alive_keywords')}>
+      <Label class="{check} pt-1.5">
+        <Checkbox bind:checked={draft.keep_alive_signal} />
+        {t('device.keep_alive_signal')}
+      </Label>
+      <div class="w-full max-w-90">
+        <SliderField
+          label={t('device.keep_alive_level')}
+          min={KEEP_ALIVE_RANGE.min}
+          max={KEEP_ALIVE_RANGE.max}
+          step={1}
+          value={draft.keep_alive_level}
+          disabled={!draft.keep_alive_signal}
+          format={(db) => `${fmtDb(db)}FS`}
+          reset={-80}
+          onValueChange={(db) => (draft.keep_alive_level = db)}
+          number={{
+            value: draft.keep_alive_level,
+            unit: 'dBFS',
+            step: 1,
+            min: KEEP_ALIVE_RANGE.min,
+            max: KEEP_ALIVE_RANGE.max,
+            onchange: (db) => (draft.keep_alive_level = db),
+          }}
+        />
+      </div>
+      <span class={hint}>{t('device.keep_alive_hint')}</span>
     </SettingRow>
   </SettingGroup>
 </SettingsPanel>

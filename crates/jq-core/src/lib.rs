@@ -20,7 +20,9 @@ pub use runner::{
     Action, ActiveState, Control, FollowState, Notice, PassState, RepeatState, Runner, State, StopwatchState,
     WaitingState,
 };
-pub use settings::{EscapeMode, LocalSettings, OpenLast, SelectionMode, Startup, WatchMode, WheelMode};
+pub use settings::{
+    EscapeMode, KEEP_ALIVE_RANGE, LocalSettings, OpenLast, SelectionMode, Startup, WatchMode, WheelMode,
+};
 pub use watch::{MediaWatcher, Stamps};
 
 #[cfg(test)]

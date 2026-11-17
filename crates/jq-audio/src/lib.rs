@@ -178,6 +178,32 @@ struct Shared {
     lost: Mutex<Option<String>>,
     /// Frames of the last callback; 0 before the first.
     callback_frames: AtomicU32,
+    /// Peak of the keep-alive noise, linear, as `f32` bits; 0 = off (see
+    /// [`AudioOutput::set_keep_alive`]).
+    keep_alive: AtomicU32,
+}
+
+/// White noise for the keep-alive signal: xorshift, no allocation, cheap
+/// enough for every sample of the audio thread.
+struct Noise(u32);
+
+impl Default for Noise {
+    fn default() -> Self {
+        Self(0x9E37_79B9)
+    }
+}
+
+impl Noise {
+    /// Uniform in ±1.
+    fn sample(&mut self) -> f32 {
+        let mut x = self.0;
+        x ^= x << 13;
+        x ^= x >> 17;
+        x ^= x << 5;
+        self.0 = x;
+        // The top 24 bits as a fraction in [0, 1), then centred.
+        (x >> 8) as f32 / (1u32 << 24) as f32 * 2.0 - 1.0
+    }
 }
 
 /// The mixer, wherever it runs: a stream callback or the null thread lends
@@ -470,6 +496,15 @@ impl AudioOutput {
     /// callback (and for the null output).
     pub fn callback_frames(&self) -> Option<u32> {
         Some(self.shared.callback_frames.load(Ordering::Relaxed)).filter(|&f| f > 0)
+    }
+
+    /// Mixes inaudible noise with a peak of `level_db` dBFS into the stream
+    /// from now on; `None` stops it. Some devices, notebook speakers above
+    /// all, power down after a few seconds of near silence and cut off the
+    /// start of the next sound while they wake up; the noise keeps them on.
+    pub fn set_keep_alive(&self, level_db: Option<f64>) {
+        let peak = level_db.map_or(0.0, |db| 10f64.powf(db / 20.0).min(1.0) as f32);
+        self.shared.keep_alive.store(peak.to_bits(), Ordering::Relaxed);
     }
 
     pub fn lost(&self) -> Option<String> {
@@ -820,6 +855,7 @@ where
     // The callback thread joins MMCSS in its first callback (one system call
     // per stream, before any audio of it is due).
     let mut join_pro_audio = pro_audio;
+    let mut noise = Noise::default();
     let stream = device.build_output_stream(
         *config,
         move |data: &mut [T], _| {
@@ -828,12 +864,17 @@ where
             }
             beat.beats.fetch_add(1, Ordering::Relaxed);
             frames.callback_frames.store((data.len() / channels) as u32, Ordering::Relaxed);
+            let keep_alive = f32::from_bits(frames.keep_alive.load(Ordering::Relaxed));
+            let mut out_sample = |s: f32| {
+                let s = if keep_alive > 0.0 { (s + noise.sample() * keep_alive).clamp(-1.0, 1.0) } else { s };
+                T::from_sample(s)
+            };
             if engine_channels == channels {
                 for out in data.chunks_mut(scratch.len()) {
                     let buf = &mut scratch[..out.len()];
                     lent.process(buf);
                     for (o, s) in out.iter_mut().zip(buf.iter()) {
-                        *o = T::from_sample(*s);
+                        *o = out_sample(*s);
                     }
                 }
             } else {
@@ -841,7 +882,7 @@ where
                     let buf = &mut scratch[..out.len() * engine_channels];
                     lent.process(buf);
                     for (o, frame) in out.iter_mut().zip(buf.chunks_exact(engine_channels)) {
-                        *o = T::from_sample((frame[0] + frame[1]) * 0.5);
+                        *o = out_sample((frame[0] + frame[1]) * 0.5);
                     }
                 }
             }
@@ -1012,5 +1053,39 @@ mod tests {
         ] {
             assert_eq!(alsa_card(id), None, "{id}");
         }
+    }
+
+    #[test]
+    fn keep_alive_noise_is_centred_white_and_never_digital_zero() {
+        let mut noise = Noise::default();
+        let samples: Vec<f32> = (0..48_000).map(|_| noise.sample()).collect();
+        assert!(samples.iter().all(|s| s.abs() <= 1.0));
+        let mean = samples.iter().sum::<f32>() / samples.len() as f32;
+        assert!(mean.abs() < 0.02, "mean {mean}");
+        // Even at −84 dBFS (two steps of 16 bits) it survives a 16-bit
+        // output: most samples are not 0, no long stretch of zeros.
+        let peak = 2.0 / 32768.0;
+        let ints: Vec<i16> =
+            samples.iter().map(|&s| <i16 as FromSample<f32>>::from_sample_(s * peak)).collect();
+        assert!(ints.iter().filter(|&&i| i != 0).count() > samples.len() / 3);
+        assert!(ints.split(|&i| i != 0).map(<[i16]>::len).max().unwrap_or(0) < 20);
+        assert!(ints.iter().all(|i| i.abs() <= 2));
+    }
+
+    #[test]
+    fn keep_alive_level_is_set_in_dbfs() {
+        let shared = Arc::new(Shared::default());
+        let output = AudioOutput {
+            _backend: Backend::Null(NullThread { stop: Arc::default(), handle: None }),
+            info: AudioOutput::null(48_000, 2, 1).0.info,
+            shared: shared.clone(),
+            fixed_channels: true,
+        };
+        let peak = || f32::from_bits(shared.keep_alive.load(Ordering::Relaxed));
+        assert_eq!(peak(), 0.0);
+        output.set_keep_alive(Some(-80.0));
+        assert!((peak() - 1e-4).abs() < 1e-9, "{}", peak());
+        output.set_keep_alive(None);
+        assert_eq!(peak(), 0.0);
     }
 }

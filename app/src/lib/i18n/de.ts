@@ -985,6 +985,13 @@ const de: Record<MessageKey, string> = {
   'device.underrun_warning': 'Warnung bei nicht rechtzeitig geladenen Dateien',
   'device.underruns_hint':
     'Eine nicht rechtzeitig geladene Datei spielt Stille oder startet verspätet. Das passiert z.\u202fB. bei einem langsamen Netzlaufwerk oder wenn ein späterer Cue per Hotkey gestartet wird. Bei aktivierter Warnung wird dies immer gemeldet, sonst nur, wenn ein per GO gestarteter Cue verspätet startet. Aussetzer des Audiogeräts werden immer gemeldet.',
+  'device.keep_alive': 'Gerät wach halten',
+  'device.keep_alive_keywords':
+    'wach Stille abgeschnitten Knacken Energiesparen Notebook Laptop Bluetooth Lautsprecher Rauschen keep alive awake silence cut off crackle power saving speakers noise',
+  'device.keep_alive_signal': 'Unhörbares Signal ausgeben',
+  'device.keep_alive_hint':
+    'Manche Geräte, vor allem Notebook- oder Bluetooth-Lautsprecher, schalten sich nach einigen Sekunden Stille ab, um Energie zu sparen. Das kann beim Abspielen von Sounds nach einer Pause zu kleinen Aussetzern führen. Mit dieser Einstellung wird dauerhaft ein leises Rauschen abgespielt, um das Gerät wach zu halten. Der ideale Pegel hängt vom Gerät ab.',
+  'device.keep_alive_level': 'Pegel des Signals',
   'media_tab.events': 'Benachrichtigung durch das System',
   'media_tab.poll': 'jede Sekunde abfragen',
   'media_tab.changes': 'Änderungen',

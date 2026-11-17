@@ -638,6 +638,11 @@ export interface LocalSettings {
   check_updates: boolean;
   /** Warn about silence because a streamed file came too late from the disk. Default false. */
   underrun_warning: boolean;
+  /** Mix inaudible noise into the outputs so devices that power down in silence stay awake; applies without reopening
+   * the device. Default false. */
+  keep_alive_signal: boolean;
+  /** Peak of that noise in dBFS, −96 … −50 (`KEEP_ALIVE_RANGE` in `lib/settings.ts`). Default −80. */
+  keep_alive_level: number;
   /** Folder the audio file picker starts in; null = the show's media folder. Set with `setAudioDir`. */
   audio_dir: string | null;
   /** Arrangement of the panels per mode (`{ edit, show }`, see `lib/layout.svelte.ts`; with the panel windows), stored as

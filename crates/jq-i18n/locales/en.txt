@@ -255,6 +255,7 @@ session.setting.rate_step = Rate step
 session.setting.not_negative = {what} must be a number ≥ 0
 session.setting.positive = {what} must be greater than 0
 session.setting.jump_times = Jump times must be greater than 0
+session.setting.keep_alive_level = The level of the keep-alive signal is between {min} and {max} dBFS
 session.setting.msc_device = The MSC device ID is between 0 and 126
 session.setting.buffer = The buffer size must be a power of two between {min} and {max}
 session.setting.osc_port = The OSC port must be between 1 and 65535
