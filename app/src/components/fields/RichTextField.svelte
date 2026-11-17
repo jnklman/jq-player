@@ -79,7 +79,8 @@
     bind:this={host}
     class={[
       'w-full min-w-0 resize-y overflow-auto rounded-lg border border-input bg-background px-2.5 py-2 text-sm text-foreground select-text has-focus-visible:outline-2 has-focus-visible:outline-offset-1 has-focus-visible:outline-ring',
-      disabled && 'text-fg-2',
+      // The editor is no control the rule in styles.css catches (just `contenteditable` off), so the cursor is set here.
+      disabled && 'cursor-not-allowed text-fg-2',
       className,
     ]}
   ></div>
