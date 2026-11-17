@@ -7,6 +7,7 @@ import type { ImportClash } from './api';
 import {
   chooseMediaFolder,
   cleanMediaFolder,
+  isAudioFile,
   isInsideDir,
   missingMediaFiles,
   pickAudio,
@@ -25,6 +26,16 @@ describe('isInsideDir', () => {
   it('ignores case and separators of Windows paths', () => {
     expect(isInsideDir('c:\\Shows\\A\\MEDIA\\x', 'C:\\shows\\a\\media')).toBe(true);
     expect(isInsideDir('C:/shows/a/media2', 'C:\\shows\\a\\media')).toBe(false);
+  });
+});
+
+describe('isAudioFile', () => {
+  it('goes by the extensions the picker offers, in any case', () => {
+    expect(isAudioFile('C:\\Music\\Rain.WAV')).toBe(true);
+    expect(isAudioFile('/music/a.b/song.opus')).toBe(true);
+    expect(isAudioFile('/music/notes.txt')).toBe(false);
+    expect(isAudioFile('/music/wav')).toBe(false);
+    expect(isAudioFile('/music/.wav/readme')).toBe(false);
   });
 });
 

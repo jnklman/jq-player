@@ -8,7 +8,7 @@ import type { AddItem } from './control';
 import { cueLabel, isPlaceholder } from './cue';
 import { fmtDb } from './format';
 import { t, translations } from './i18n/index.svelte';
-import { pickAudio } from './media';
+import { importAudio, isAudioFile, pickAudio } from './media';
 import {
   allCues,
   ask,
@@ -17,6 +17,7 @@ import {
   cueById,
   cues,
   type Mode,
+  notify,
   revealCue,
   select,
   selectAll,
@@ -243,12 +244,16 @@ export function placeBeforeSelection(): Place {
 /**
  * Adds a cue of `item`'s kind at `place` and returns the id of the (first) new
  * cue; `undefined` if nothing was added (picker cancelled, failure). Sound and
- * playlist cues ask for files first. A control cue in the main list acts on
- * the selected cues if several are, else on the entry before it. No group goes
- * into a group.
+ * playlist cues ask for files first, unless `files` are given (dropped onto
+ * the list). A control cue in the main list acts on the selected cues if
+ * several are, else on the entry before it. No group goes into a group.
  */
-export async function addCue(item: AddItem, place: Place = placeAfterSelection()): Promise<CueId | undefined> {
-  const op = await addOp(item, place);
+export async function addCue(
+  item: AddItem,
+  place: Place = placeAfterSelection(),
+  files?: string[],
+): Promise<CueId | undefined> {
+  const op = await addOp(item, place, files);
   if (!op) return undefined;
   // Taken after the file picker, which can take long: the show may have changed meanwhile.
   const listOf = (list: Cue[]) => (place.group ? findGroup(list, place.group)?.cues : list) ?? [];
@@ -259,18 +264,18 @@ export async function addCue(item: AddItem, place: Place = placeAfterSelection()
 }
 
 /** Adds a cue to the main list (default: after the selection), selects it and scrolls it into view. */
-export async function addCueAndSelect(item: AddItem, place: Place = placeAfterSelection()) {
-  const id = await addCue(item, place);
+export async function addCueAndSelect(item: AddItem, place: Place = placeAfterSelection(), files?: string[]) {
+  const id = await addCue(item, place, files);
   if (!id) return;
   select(id);
   void revealCue(id, 'smooth');
 }
 
-async function addOp(item: AddItem, { index, group }: Place): Promise<EditOp | null> {
+async function addOp(item: AddItem, { index, group }: Place, files?: string[]): Promise<EditOp | null> {
   switch (item.kind) {
     case 'sound':
     case 'playlist': {
-      const picked = ui.view && (await pickAudio(ui.view));
+      const picked = ui.view && (await (files ? importAudio(ui.view, files) : pickAudio(ui.view)));
       if (!picked) return null;
       return { op: item.kind === 'sound' ? 'add_sounds' : 'add_playlist', index, group, ...picked };
     }
@@ -289,6 +294,15 @@ async function addOp(item: AddItem, { index, group }: Place): Promise<EditOp | n
       return { op: 'add_control', kind: item.kind, index, targets, group };
     }
   }
+}
+
+/** Adds a sound cue for each dropped audio file at `place` and selects the first. Other files are left out,
+ * with a notice. */
+export async function addDroppedAudio(paths: string[], place: Place) {
+  const audio = paths.filter(isAudioFile);
+  const skipped = paths.length - audio.length;
+  if (skipped) notify({ level: 'warning', message: t('media.drop_skipped', { count: skipped }) });
+  if (audio.length) await addCueAndSelect({ label: '', kind: 'sound' }, place, audio);
 }
 
 /** The group `id`, also nested. */

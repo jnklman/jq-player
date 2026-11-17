@@ -316,7 +316,8 @@ fn create(app: &AppHandle, spec: &PanelWindow, support: WindowSupport) -> tauri:
         // Else drawn by the UI like the main window (rounded, own buttons).
         .decorations(native)
         .transparent(!native)
-        .disable_drag_drop_handler()
+        // Tauri's drag-drop handler stays on, as in the main window: it names the files dropped onto the
+        // cue list (`app/src/lib/fileDrop.ts`).
         .always_on_top(overlay)
         .skip_taskbar(overlay)
         // Shown once placed, like the main window.

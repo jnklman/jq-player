@@ -16,6 +16,8 @@ different in the app, not how the code changed). The Release workflow turns
 
 - "Keep device awake" (Settings › Device) plays an inaudible signal with an adjustable level, so
   notebook speakers and other devices that switch off in silence no longer cut off the start of a cue.
+- Audio files dragged from Explorer or a file manager onto the cue list become sound cues where they
+  are dropped (in edit mode), as if picked with "+ Sound".
 - WAV files that hold MP3 or MP2 audio (as broadcast software and some audio editors write them) play
   like any other file instead of being refused as an unsupported format.
 - "Add audio" also offers MP2, CAF and Ogg FLAC (.oga) files and the sound of MP4 and MOV videos.

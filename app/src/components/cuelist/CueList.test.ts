@@ -1,5 +1,5 @@
 import { fireEvent, screen, within } from '@testing-library/svelte';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { selection, ui } from '../../lib/store.svelte';
 import { backend } from '../../test/backend';
@@ -56,10 +56,73 @@ describe('CueList', () => {
   it('says when the list is empty', async () => {
     await loadShow(view([]));
     await renderUi(CueList);
-    expect(screen.getByText('No cues yet – “+ Sound” adds files.')).toBeInTheDocument();
+    expect(screen.getByText('No cues yet – drop audio files here or use “+ Sound”.')).toBeInTheDocument();
     await loadShow(view([], { settings: { show_mode: true } }));
     await settle();
     expect(screen.getByText('No cues.')).toBeInTheDocument();
+  });
+
+  it('adds dropped audio files as sound cues where they are dropped, marking the place while they hover', async () => {
+    await list();
+    // jsdom lays nothing out: every row 40 px high, the list at the top, the point on the list.
+    const height = vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(40);
+    document.elementFromPoint = () => row('a');
+    const line = () => document.querySelector<HTMLElement>('[data-drop-line]');
+    const zone = () => document.querySelector<HTMLElement>('[data-drop-zone]');
+    try {
+      await backend.emit('tauri://drag-enter', { paths: ['/x/notes.txt'], position: { x: 10, y: 50 } });
+      await settle();
+      expect(line()).toBeNull();
+      expect(zone()).toBeNull();
+      await backend.emit('tauri://drag-leave', null);
+
+      // Off the list: outlined with the hint, no line.
+      document.elementFromPoint = () => document.body;
+      await backend.emit('tauri://drag-enter', { paths: ['/x/rain.wav'], position: { x: 10, y: 50 } });
+      await settle();
+      expect(zone()).toHaveTextContent('Drop audio files here');
+      expect(line()).toBeNull();
+      await backend.emit('tauri://drag-leave', null);
+      await settle();
+      expect(zone()).toBeNull();
+      document.elementFromPoint = () => row('a');
+
+      await backend.emit('tauri://drag-enter', { paths: ['/x/notes.txt', '/x/rain.wav'], position: { x: 10, y: 50 } });
+      await settle();
+      // Before the second row: the point is in its upper half. Wholly below the scene marker above it.
+      expect(line()?.style.top).toBe('40px');
+      expect(line()?.dataset.dropLine).toBe('below');
+      expect(zone()).not.toBeNull();
+      await backend.emit('tauri://drag-over', { position: { x: 10, y: 70 } });
+      await settle();
+      expect(line()?.style.top).toBe('80px');
+      expect(line()?.dataset.dropLine).toBe('center');
+      // Wholly above the next scene marker.
+      await backend.emit('tauri://drag-over', { position: { x: 10, y: 110 } });
+      await settle();
+      expect(line()?.style.top).toBe('120px');
+      expect(line()?.dataset.dropLine).toBe('above');
+      await backend.emit('tauri://drag-over', { position: { x: 10, y: 70 } });
+
+      await backend.emit('tauri://drag-drop', { paths: ['/x/notes.txt', '/x/rain.wav'], position: { x: 10, y: 70 } });
+      await settle();
+      expect(line()).toBeNull();
+      expect(zone()).toBeNull();
+      expect(backend.edits).toEqual([
+        { op: 'add_sounds', index: 2, group: undefined, paths: ['/x/rain.wav'], copy_outside: false },
+      ]);
+
+      // Not off the list, nor in show mode.
+      document.elementFromPoint = () => document.body;
+      await backend.emit('tauri://drag-drop', { paths: ['/x/rain.wav'], position: { x: 10, y: 70 } });
+      document.elementFromPoint = () => row('a');
+      await loadShow(view(cues(), { settings: { show_mode: true } }));
+      await backend.emit('tauri://drag-drop', { paths: ['/x/rain.wav'], position: { x: 10, y: 70 } });
+      await settle();
+      expect(backend.edits).toHaveLength(1);
+    } finally {
+      height.mockRestore();
+    }
   });
 
   it('selects with a click, adds with Ctrl and extends with Shift while editing', async () => {

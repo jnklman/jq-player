@@ -28,6 +28,12 @@ const AUDIO = [
   'mov',
 ];
 
+/** Whether `path` has one of the extensions the file picker offers (case does not matter). */
+export function isAudioFile(path: string): boolean {
+  const ext = /\.([^./\\]+)$/.exec(path)?.[1]?.toLowerCase();
+  return !!ext && AUDIO.includes(ext);
+}
+
 export interface MissingMediaUse {
   key: string;
   label: string;
@@ -119,7 +125,17 @@ export async function pickAudio(
   const dir = await dirname(picked[0]);
   // Only a convenience: a failure must not stop adding the files.
   api.setAudioDir(isInsideDir(dir, mediaDir) ? null : dir).catch(() => {});
+  return importAudio(view, picked);
+}
 
+/**
+ * Prepares adding the audio files `picked` (from the file picker or dropped
+ * onto the list): files outside the media folder are offered to be copied
+ * in, as in `pickAudio`. `null`: cancelled or every file skipped.
+ */
+export async function importAudio(view: ShowView, picked: string[]): Promise<({ paths: string[] } & Import) | null> {
+  if (picked.length === 0) return null;
+  const mediaDir = view.media_dir;
   const check = await attempt(api.checkImport(mediaDir, picked));
   if (!check) return null;
   if (check.outside.length === 0) return { paths: picked, copy_outside: false };

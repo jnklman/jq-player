@@ -7,6 +7,7 @@ import type { Cue, EditOp } from './api';
 import {
   addCue,
   addCueAndSelect,
+  addDroppedAudio,
   addToPlaylist,
   canOpenWaveform,
   claimUndo,
@@ -336,6 +337,34 @@ describe('adding cues', () => {
     expect(ui.selected).toBe('rain');
     // The folder picked from is the media folder: remembered as "none".
     expect(backend.invoked('set_audio_dir')).toEqual([{ dir: null }]);
+  });
+
+  it('adds dropped audio files as sound cues without the picker, leaving out other files', async () => {
+    await loadShow(view(abc()));
+    editsTo(() => [sound('a'), sound('rain'), sound('wind'), ...abc().slice(1)]);
+    const media = '/shows/Test Show/media';
+    await addDroppedAudio([`${media}/rain.WAV`, `${media}/notes.txt`, `${media}/wind.flac`], { index: 1 });
+    expect(backend.invoked('plugin:dialog|open')).toEqual([]);
+    expect(backend.edits).toEqual([
+      {
+        op: 'add_sounds',
+        index: 1,
+        group: undefined,
+        paths: [`${media}/rain.WAV`, `${media}/wind.flac`],
+        copy_outside: false,
+      },
+    ]);
+    expect(ui.selected).toBe('rain');
+    expect(ui.notices.map((notice) => notice.message)).toEqual(['One file is not an audio file and was left out.']);
+    // Not where the picker starts: nothing was picked from a folder.
+    expect(backend.invoked('set_audio_dir')).toEqual([]);
+  });
+
+  it('adds nothing when no dropped file is audio', async () => {
+    await loadShow(view([]));
+    await addDroppedAudio(['/x/a.txt', '/x/b'], { index: 0 });
+    expect(backend.edits).toEqual([]);
+    expect(ui.notices.map((notice) => notice.message)).toEqual(['2 files are not audio files and were left out.']);
   });
 
   it('adds nothing when the edit fails', async () => {

@@ -9,10 +9,12 @@
   import { ScrollArea } from '$lib/components/ui/scroll-area';
 
   import { api, type Cue, type ShowView } from '../../lib/api';
-  import { edit } from '../../lib/commands';
+  import { addDroppedAudio, edit } from '../../lib/commands';
   import { LIST_HEADER_HEIGHT, rowScrollDelta } from '../../lib/cueScroll';
   import { chainWaiting, rowRunning } from '../../lib/cueStatus';
+  import { dropSlot, edgeScroller, onFileDrop } from '../../lib/fileDrop';
   import { t } from '../../lib/i18n/index.svelte';
+  import { isAudioFile } from '../../lib/media';
   import { sortable } from '../../lib/sortable';
   import { cues, mode, moveSelection, select, selection, selectionMode, ui } from '../../lib/store.svelte';
   import { empty } from '../../lib/ui';
@@ -205,6 +207,65 @@
     if (!(await edit({ op: 'move', ids, to: index }))) moved = null;
   }
 
+  // Audio files dragged onto the list in edit mode become sound cues where they are dropped. While they are
+  // over the window the list is outlined with a hint, as the cursor can't show where a drop is refused (the
+  // webview picks it once for the whole window); over the list a line marks the place (its height in the
+  // list's content). Near the list's top or bottom edge it scrolls, so a long list can be dropped into anywhere.
+  // The line lies under the sticky header and scene markers, like the rows; next to a scene marker it sits
+  // wholly beside it instead of on the boundary, where the marker would cover half of it.
+  // The outline follows the panel's rounded bottom corners: `rounded-xl` less its 1 px border (a popped-out
+  // panel's window has 10 px, or square corners with a native frame).
+  type DropLine = { top: number; side: 'center' | 'above' | 'below' };
+  let fileDrag = $state(false);
+  let dropLine = $state<DropLine | null>(null);
+
+  /** Where files dragged to the point would go: `null` if none is audio or the point isn't on the list. */
+  function dropTarget(x: number, y: number, paths: string[]): (DropLine & { index: number }) | null {
+    if (!scroller || !rows || !paths.some(isAudioFile)) return null;
+    const hit = document.elementFromPoint(x, y);
+    if (!hit || !scroller.contains(hit)) return null;
+    const slot = dropSlot(rows, y);
+    const side =
+      list[slot.index]?.type === 'scene' ? 'above' : list[slot.index - 1]?.type === 'scene' ? 'below' : 'center';
+    return { index: slot.index, top: rows.offsetTop + slot.top, side };
+  }
+
+  $effect(() => {
+    const element = scroller;
+    if (!editing || !element) return;
+    // The last hover, to place the line again as the list scrolls under a pointer that holds still.
+    let last: { x: number; y: number; paths: string[] } | null = null;
+    const hover = () => {
+      const target = last && dropTarget(last.x, last.y, last.paths);
+      dropLine = target && { top: target.top, side: target.side };
+      return target;
+    };
+    const edges = edgeScroller(element, hover, LIST_HEADER_HEIGHT);
+    const stop = onFileDrop({
+      over: (x, y, paths) => {
+        fileDrag = paths.some(isAudioFile);
+        last = { x, y, paths };
+        edges.update(hover() ? y : null);
+      },
+      leave: () => {
+        last = null;
+        edges.stop();
+        fileDrag = false;
+        dropLine = null;
+      },
+      drop: (x, y, paths) => {
+        const target = dropTarget(x, y, paths);
+        if (target) void addDroppedAudio(paths, { index: target.index });
+      },
+    });
+    return () => {
+      stop();
+      edges.stop();
+      fileDrag = false;
+      dropLine = null;
+    };
+  });
+
   // A right-click on a cue outside the selection selects it first, so the
   // context menu acts on the cue under the pointer.
   function oncontextmenu(e: MouseEvent) {
@@ -221,7 +282,7 @@
   <!-- Context menu in edit mode only. Keep the trigger's `select-none`: WebKit treats
    `select-auto` as `text`, so dragging the scrollbar would select the rows' text. -->
   <ContextMenu.Root>
-    <ContextMenu.Trigger disabled={!editing} class="flex min-h-0 flex-1 flex-col" {oncontextmenu}>
+    <ContextMenu.Trigger disabled={!editing} class="relative flex min-h-0 flex-1 flex-col" {oncontextmenu}>
       <!-- A click on empty space in the list (not on a cue row) clears the selection, unless it is linked to the playhead.
        No tab stop: the arrow keys move the playhead or selection, never scroll. -->
       <ScrollArea
@@ -235,7 +296,7 @@
           if (selectionMode() !== 'linked' && !target.closest('[data-cue], [data-slot="scroll-area-scrollbar"]'))
             select(null);
         }}
-        ><div class="pb-3">
+        ><div class="relative pb-3">
           <div
             class={[
               cueGrid,
@@ -276,6 +337,18 @@
             {/each}
           </div>
 
+          {#if dropLine}
+            <div
+              data-drop-line={dropLine.side}
+              class={[
+                'pointer-events-none absolute inset-x-0 z-0 h-0.5 rounded-full bg-primary',
+                dropLine.side === 'center' && '-translate-y-1/2',
+                dropLine.side === 'above' && '-translate-y-full',
+              ]}
+              style:top="{dropLine.top}px"
+            ></div>
+          {/if}
+
           {#if !list.length}
             <div class={empty}>{editing ? t('cuelist.empty_edit') : t('playhead.no_cues')}</div>
           {:else}
@@ -299,6 +372,19 @@
           {/if}
         </div></ScrollArea
       >
+      {#if fileDrag}
+        <div
+          data-drop-zone
+          class="pointer-events-none absolute inset-0 z-4 flex items-end justify-center rounded-b-[11px] bg-primary/5 pb-4 ring-2 ring-primary/70 ring-inset in-data-native-frame:rounded-none"
+        >
+          <span
+            class={[
+              'rounded-full bg-primary px-3 py-1 text-xs font-semibold text-primary-foreground shadow-lg transition-opacity',
+              dropLine !== null && 'opacity-60',
+            ]}>{t('cuelist.drop_hint')}</span
+          >
+        </div>
+      {/if}
     </ContextMenu.Trigger>
     {#if editing}<CueMenu />{/if}
   </ContextMenu.Root>
