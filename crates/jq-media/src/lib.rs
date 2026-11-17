@@ -331,6 +331,49 @@ mod tests {
     }
 
     /// A 440 Hz-ish sweep of `frames` mono frames.
+    #[test]
+    fn long_files_are_streamed_and_short_ones_decoded() {
+        let dir = test_dir("load");
+        let (short, long) = (dir.join("short.wav"), dir.join("long.wav"));
+        // At 1000 Hz mono both stay small on disk.
+        write_test_wav(&short, 1000, 1, &tone(29_000));
+        write_test_wav(&long, 1000, 1, &tone(STREAM_AFTER as usize * 1000 + 1000));
+
+        let decoded = load(&short, 1000).unwrap();
+        assert!(decoded.stream().is_none(), "{decoded:?}");
+        assert_eq!(decoded.frames(), 29_000);
+        assert_eq!(decoded.byte_size(), 29_000 * 2 * 4, "stereo f32");
+
+        let streamed = load(&long, 1000).unwrap();
+        assert!(streamed.stream().is_some(), "{streamed:?}");
+        assert_eq!(streamed.frames(), 31_000);
+        assert!(streamed.samples().is_empty() && streamed.byte_size() == 0, "nothing decoded into RAM");
+        drop((decoded, streamed));
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn errors_name_the_file_and_what_went_wrong() {
+        use std::error::Error;
+        let dir = test_dir("errors");
+        let missing = dir.join("missing.wav");
+        let error = load(&missing, 48_000).unwrap_err();
+        assert!(matches!(error, MediaError::Io { .. }) && error.source().is_some());
+        assert!(error.to_string().starts_with(&format!("{}: ", missing.display())), "{error}");
+
+        let text = dir.join("notes.wav");
+        std::fs::write(&text, "no audio in here, just some words to fill a header or two").unwrap();
+        let error = load(&text, 48_000).unwrap_err();
+        assert_eq!(error.to_string(), format!("{}: not a supported audio format", text.display()));
+        assert_eq!(error.reason(), "not a supported audio format", "without the path");
+
+        assert_eq!(MediaError::Cancelled.to_string(), "cancelled");
+        assert!(MediaError::Cancelled.source().is_none());
+        let resample = MediaError::Resample { path: text.clone(), message: "ratio".into() };
+        assert_eq!(resample.reason(), "Converting the sample rate failed: ratio");
+        std::fs::remove_dir_all(dir).ok();
+    }
+
     fn tone(frames: usize) -> Vec<i16> {
         (0..frames).map(|i| ((i as f32 * 0.0627).sin() * 12_000.0 + (i % 997) as f32) as i16).collect()
     }

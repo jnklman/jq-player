@@ -1,0 +1,5 @@
+# `cargo coverage`: runs the backend tests with line coverage (needs
+# `cargo install cargo-llvm-cov` and `rustup component add llvm-tools-preview`);
+# the report is `target/llvm-cov/html/index.html`.
+[alias]
+coverage = "llvm-cov --workspace --html"

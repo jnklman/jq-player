@@ -267,4 +267,100 @@ mod tests {
         assert_eq!(ControlAction::RateUp.action(Some(id)), Some(Action::RateUp(id)));
         assert_eq!(ControlAction::Go.action(Some(id)), Some(Action::Go));
     }
+
+    const ALL: [ControlAction; 27] = {
+        use ControlAction as C;
+        [
+            C::Go,
+            C::StopAll,
+            C::Panic,
+            C::FadeAll,
+            C::PauseAll,
+            C::ResumeAll,
+            C::TogglePauseAll,
+            C::PlayheadNext,
+            C::PlayheadPrev,
+            C::StopPreview,
+            C::Preview,
+            C::TogglePauseCue,
+            C::StopCue,
+            C::FadeCue,
+            C::RestartCue,
+            C::ExitLoopCue,
+            C::NextItem,
+            C::JumpBack,
+            C::JumpForward,
+            C::JumpEnd,
+            C::VolumeUp,
+            C::VolumeDown,
+            C::PanLeft,
+            C::PanRight,
+            C::RateUp,
+            C::RateDown,
+            C::FocusGoto,
+        ]
+    };
+
+    #[test]
+    fn every_action_has_its_own_name() {
+        let names: std::collections::HashSet<String> = ALL.iter().map(|a| a.name()).collect();
+        assert_eq!(names.len(), ALL.len(), "{names:?}");
+        assert!(names.iter().all(|n| !n.starts_with("action.")), "{names:?}");
+    }
+
+    #[test]
+    fn cue_actions_act_on_the_selected_cue() {
+        let id = CueId::new();
+        for action in ALL {
+            let Some(with) = action.action(Some(id)) else {
+                assert_eq!(action, ControlAction::FocusGoto, "only the UI's own has no runner action");
+                continue;
+            };
+            let on_cue = format!("{with:?}").contains(&format!("{id:?}"));
+            assert_eq!(on_cue, action.keys_only(), "{action:?} → {with:?}");
+            // The same action on another cue is another runner action.
+            assert_eq!(with == action.action(Some(CueId::new())).unwrap(), !on_cue, "{action:?}");
+        }
+    }
+
+    #[test]
+    fn fixed_keys_cannot_be_bound() {
+        for chord in fixed_keys() {
+            assert!(is_fixed(&chord), "{chord:?}");
+            let shifted = Chord { shift: true, ..chord.clone() };
+            assert!(is_fixed(&shifted), "also with Shift: {chord:?}");
+            let binding = KeyBinding { chord, action: ControlAction::StopAll };
+            assert!(check_keys(&[binding]).is_err());
+        }
+        // Ctrl+Alt is AltGr on many layouts: AltGr+S is no save.
+        let mut alt_gr = Chord::new("KeyS", "s").ctrl();
+        alt_gr.alt = true;
+        assert!(!is_fixed(&alt_gr));
+        assert!(!is_fixed(&Chord::new("KeyS", "s")), "a plain letter is free");
+        // A Ctrl key whose recorded label is no single letter goes by its code.
+        assert!(is_fixed(&Chord::new("KeyV", "").ctrl()));
+        assert!(!is_fixed(&Chord::new("Digit1", "").ctrl()));
+    }
+
+    #[test]
+    fn refusals_name_the_key_and_the_action() {
+        let bind = |chord: Chord, action| KeyBinding { chord, action };
+        assert_eq!(
+            check_keys(&[bind(Chord::new(" ", ""), ControlAction::FadeAll)]),
+            Err("FADE ALL: key missing".into())
+        );
+        assert_eq!(
+            check_keys(&[bind(Chord::new("KeyS", "s").ctrl(), ControlAction::Go)]),
+            Err("Ctrl+S is reserved and cannot be assigned".into())
+        );
+        assert_eq!(
+            check_keys(&[
+                bind(Chord::new("F1", ""), ControlAction::Go),
+                bind(Chord::new("F1", ""), ControlAction::StopAll)
+            ]),
+            Err("F1 is already assigned to “GO”".into())
+        );
+        let go = |code| bind(Chord::new(code, ""), ControlAction::Go);
+        assert_eq!(check_keys(&[go("F1"), go("F2"), go("F3")]), Err("“GO”: at most 2 keys".into()));
+    }
 }

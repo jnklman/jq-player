@@ -175,4 +175,79 @@ mod tests {
             ]
         );
     }
+
+    #[test]
+    fn hand_edited_control_cues_are_reported() {
+        use crate::model::{ControlKind, PreviousKeyword, Targets, WaitCue};
+        let show = Show::default();
+        let control = |kind, edit: fn(&mut CueKind)| {
+            let mut kind = CueKind::control(kind, Targets::Previous(PreviousKeyword::Previous));
+            edit(&mut kind);
+            check_values(&Cue::new(kind), &show)
+        };
+        let negative = |name: &str| format!("{name} is negative – counts as 0");
+
+        assert!(control(ControlKind::Rate, |_| {}).is_empty(), "new cues are fine");
+        assert_eq!(
+            control(ControlKind::Rate, |k| if let CueKind::Rate(r) = k {
+                (r.duration, r.rate, r.transpose) = (-1.0, Some(200.0), Some(20.0));
+            }),
+            [
+                negative("Duration"),
+                "Rate is outside 50–150 % – will be limited".into(),
+                "Transposition is outside ±12 semitones – will be limited".into()
+            ]
+        );
+        assert_eq!(
+            control(ControlKind::Volume, |k| if let CueKind::Volume(v) = k {
+                v.duration = Some(-2.0);
+            }),
+            [negative("Fade duration")]
+        );
+        assert_eq!(
+            control(ControlKind::Pan, |k| if let CueKind::Pan(p) = k {
+                (p.duration, p.pan) = (-1.0, 1.5);
+            }),
+            [negative("Duration"), "Pan is outside −1…+1 – will be limited".into()]
+        );
+        assert_eq!(
+            control(ControlKind::Reset, |k| if let CueKind::Reset(r) = k {
+                r.duration = -1.0;
+            }),
+            [negative("Duration")]
+        );
+        assert_eq!(
+            control(ControlKind::StartStop, |k| if let CueKind::StartStop(s) = k {
+                s.from = Some(-4.0);
+            }),
+            [negative("Start from")]
+        );
+        assert_eq!(
+            control(ControlKind::Position, |k| if let CueKind::Position(p) = k {
+                p.crossfade_ms = -10.0;
+            }),
+            [negative("Crossfade")]
+        );
+        let mut wait = Cue::new(CueKind::Wait(WaitCue { duration: -1.0 }));
+        wait.advance = crate::model::Advance::new(AdvanceAt::After { secs: -2.0 });
+        assert_eq!(check_values(&wait, &show), [negative("Follow time"), negative("Wait time")]);
+    }
+
+    #[test]
+    fn hand_edited_playlists_are_reported() {
+        let show = Show::default();
+        let mut p = crate::model::PlaylistCue::new(vec!["a.wav".into()]);
+        (p.fade_out, p.gap, p.pan, p.output) = (-1.0, -2.0, -1.5, "gone".into());
+        p.speed.transpose = 13.0;
+        assert_eq!(
+            check_values(&Cue::new(CueKind::Playlist(p)), &show),
+            [
+                "Fade-out is negative – counts as 0",
+                "Gap is negative – counts as 0",
+                "Transposition is outside ±12 semitones – will be limited",
+                "Pan is outside −1…+1 – will be limited",
+                "Output “gone” does not exist in the show – plays on channels 1/2",
+            ]
+        );
+    }
 }

@@ -210,4 +210,41 @@ mod tests {
         s.speed.rate = 50.0;
         assert!(check_timing(&s, 10.0).is_empty());
     }
+
+    #[test]
+    fn issues_read_with_numbers_counted_from_one() {
+        use TimingIssue as I;
+        let texts: Vec<String> = [
+            I::StartPastEnd,
+            I::EndPastFile,
+            I::VampEmpty { index: 0 },
+            I::VampBeforeStart { index: 1 },
+            I::VampPastEnd { index: 2 },
+            I::VampOverlap { index: 3, other: 0 },
+            I::VampCut { index: 4 },
+            I::MarkOutside { index: 5 },
+            I::MarkDuplicate { index: 6 },
+            I::FadeInTooLong,
+            I::EndFadeTooLong,
+        ]
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+        assert_eq!(
+            texts,
+            [
+                "Start is behind the end – the cue plays nothing",
+                "End is behind the end of the file",
+                "Vamp 1: its end is not behind its start – skipped",
+                "Vamp 2 is before the start",
+                "Vamp 3 is behind the end",
+                "Vamp 4 overlaps vamp 1 – skipped",
+                "Vamp 5 reaches beyond the end",
+                "Mark 6 is outside start–end",
+                "Mark 7 is there twice",
+                "Fade-in is longer than the section",
+                "End fade is longer than the section",
+            ]
+        );
+    }
 }

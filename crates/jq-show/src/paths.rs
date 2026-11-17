@@ -738,6 +738,15 @@ pub(crate) mod tests {
         // Same size, replaced by renaming (as editors and exports do).
         let tmp = dir.join("a.tmp");
         fs::write(&tmp, b"two").unwrap();
+        // Windows has no inode to tell the files apart, and its clock moves
+        // in ticks of ~15 ms: both writes can get the same modified time.
+        #[cfg(not(unix))]
+        fs::File::options()
+            .write(true)
+            .open(&tmp)
+            .unwrap()
+            .set_modified(first.modified.unwrap() + std::time::Duration::from_secs(2))
+            .unwrap();
         fs::rename(&tmp, &path).unwrap();
         assert_ne!(stamp(&path), Some(first));
         fs::remove_dir_all(dir).unwrap();

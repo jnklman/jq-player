@@ -76,7 +76,9 @@
 
 ## Commands
 
-- `cargo test`, `cargo clippy --all-targets`, `cargo fmt`
+- `cargo test`, `cargo clippy --all-targets`, `cargo fmt`, `cargo coverage` (alias in `.cargo/config.toml`
+  for `cargo llvm-cov`; once: `cargo install cargo-llvm-cov`, `rustup component add llvm-tools-preview`;
+  report in `target/llvm-cov/html/`)
 - UI: `cd app && npm run lint` (ESLint; `lint:fix` fixes), `npm run format` (Prettier, check only;
   `format:fix` writes and also sorts Tailwind classes), `npm run check` (types), `npm test` (Vitest),
   `npm run app` (app in development mode), `npm run coverage` (report in `app/coverage/`). UI tests run in jsdom

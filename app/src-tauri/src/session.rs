@@ -3942,6 +3942,384 @@ mod tests {
         );
     }
 
+    fn edit(session: &mut Session, op: EditOp) -> Result<(), String> {
+        session.edit(op, &mut Vec::new())
+    }
+
+    fn numbers(cues: &[Cue]) -> Vec<&str> {
+        cues.iter().map(|c| c.number.as_str()).collect()
+    }
+
+    fn group_cues(session: &Session, id: CueId) -> &[Cue] {
+        match &session.editor.show().cue(id).unwrap().kind {
+            CueKind::Group(g) => &g.cues,
+            _ => panic!("not a group"),
+        }
+    }
+
+    fn add_wait(session: &mut Session) -> CueId {
+        edit(session, EditOp::AddWait { index: None, group: None }).unwrap();
+        session.editor.show().cues.last().unwrap().id
+    }
+
+    #[test]
+    fn new_cues_are_numbered_where_they_go() {
+        let dir = tempdir("add");
+        let (writer, _) = Writer::spawn();
+        let mut session = open_session(&dir, &writer);
+        let first = add_wait(&mut session);
+        add_wait(&mut session);
+        edit(&mut session, EditOp::AddWait { index: Some(1), group: None }).unwrap();
+        edit(&mut session, EditOp::AddGroup { index: None }).unwrap();
+        let group = session.editor.show().cues.last().unwrap().id;
+        edit(&mut session, EditOp::AddPlaceholder { index: None, group: Some(group) }).unwrap();
+        edit(&mut session, EditOp::AddGoto { index: None, group: Some(group) }).unwrap();
+        edit(&mut session, EditOp::AddScene { index: Some(0) }).unwrap();
+        let cues = &session.editor.show().cues;
+        assert_eq!(numbers(cues), ["", "1", "1.5", "2", "3"], "scene markers get no number");
+        assert_eq!(numbers(group_cues(&session, group)), ["3.1", "3.2"]);
+        let wait = session.editor.show().cue(first).unwrap();
+        assert_eq!((wait.title.as_str(), wait.advance.at), ("Wait", AdvanceAt::End));
+
+        // A control cue on one target is named after it.
+        edit(
+            &mut session,
+            EditOp::AddControl {
+                kind: ControlKind::Volume,
+                index: None,
+                targets: Some(vec![first]),
+                group: None,
+            },
+        )
+        .unwrap();
+        let fade = session.editor.show().cues.last().unwrap();
+        assert_eq!(fade.title, format!("{} Wait", control_title(ControlKind::Volume)));
+        assert!(
+            matches!(&fade.kind, CueKind::Volume(v) if v.duration == Some(3.0) && v.targets == Targets::Cues(vec![first]))
+        );
+        let watch = Stopwatch { id: "w".into(), name: "Vorstellung".into(), countdown: None };
+        edit(&mut session, EditOp::SetStopwatches { stopwatches: vec![watch] }).unwrap();
+        edit(
+            &mut session,
+            EditOp::AddControl { kind: ControlKind::Stopwatch, index: None, targets: None, group: None },
+        )
+        .unwrap();
+        let stopwatch = session.editor.show().cues.last().unwrap();
+        assert!(matches!(&stopwatch.kind, CueKind::Stopwatch(w) if w.watch.as_deref() == Some("w")));
+        assert_eq!(stopwatch.title, control_title(ControlKind::Stopwatch), "no single target");
+
+        // Each addition is one undo step; the runner follows.
+        let count = session.editor.show().cues.len();
+        edit(&mut session, EditOp::Undo).unwrap();
+        assert_eq!(session.editor.show().cues.len(), count - 1);
+        assert_eq!(session.runner.show().cues.len(), count - 1);
+        assert!(edit(&mut session, EditOp::AddWait { index: None, group: Some(CueId::new()) }).is_err());
+        drop(session);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_locked_show_takes_no_edits() {
+        let dir = tempdir("locked");
+        let (writer, _) = Writer::spawn();
+        let mut session = open_session(&dir, &writer);
+        add_wait(&mut session);
+        edit(&mut session, EditOp::LockShowMode { locked: true }).unwrap();
+        assert!(session.settings.show_mode, "locking enters show mode");
+        assert_eq!(
+            edit(&mut session, EditOp::AddWait { index: None, group: None }),
+            Err(t!("session.show_mode_locked"))
+        );
+        assert_eq!(edit(&mut session, EditOp::Undo), Err(t!("session.show_mode_locked")));
+        assert_eq!(session.editor.show().cues.len(), 1);
+
+        // Unlocking is the one edit show mode takes.
+        edit(&mut session, EditOp::LockShowMode { locked: false }).unwrap();
+        assert!(session.settings.show_mode, "unlocking does not leave show mode");
+        session.settings.show_mode = false;
+        // An undo that brings the lock back enters show mode again.
+        edit(&mut session, EditOp::Undo).unwrap();
+        assert!(session.editor.show().show_mode_locked && session.settings.show_mode);
+        drop(session);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn pasted_copies_get_new_ids_numbers_and_no_triggers() {
+        let dir = tempdir("paste");
+        let (writer, _) = Writer::spawn();
+        let mut session = open_session(&dir, &writer);
+        let a = add_wait(&mut session);
+        add_wait(&mut session);
+        edit(&mut session, EditOp::AddGroup { index: None }).unwrap();
+        let group = session.editor.show().cues.last().unwrap().id;
+        edit(&mut session, EditOp::AddWait { index: None, group: Some(group) }).unwrap();
+        let inner = group_cues(&session, group)[0].id;
+        let mut cue = session.editor.show().cue(a).unwrap().clone();
+        cue.hotkey = Some(Chord::new("F5", ""));
+        cue.midi_trigger = Some(jq_core::midi::MidiTrigger::Note { channel: 0, note: 60 });
+        edit(&mut session, EditOp::UpdateCue { cue: Box::new(cue) }).unwrap();
+
+        assert!(!session.view().can_paste);
+        assert_eq!(
+            edit(&mut session, EditOp::Copy { ids: vec![CueId::new()] }),
+            Err(t!("edit.cue_not_found"))
+        );
+        edit(&mut session, EditOp::Copy { ids: vec![a] }).unwrap();
+        assert!(session.view().can_paste);
+        edit(&mut session, EditOp::Undo).unwrap();
+        assert!(session.editor.show().cue(a).unwrap().hotkey.is_none(), "copying was no undo step");
+        edit(&mut session, EditOp::Redo).unwrap();
+
+        edit(&mut session, EditOp::Paste { after: Some(a), linked: false }).unwrap();
+        let copy = &session.editor.show().cues[1];
+        assert_ne!(copy.id, a);
+        assert_eq!((copy.number.as_str(), copy.hotkey.clone(), copy.midi_trigger), ("1.5", None, None));
+        assert_eq!(copy.link, None);
+        edit(&mut session, EditOp::Paste { after: Some(inner), linked: false }).unwrap();
+        assert_eq!(numbers(group_cues(&session, group)), ["3.1", "3.2"], "a number of the group");
+
+        edit(&mut session, EditOp::Paste { after: None, linked: true }).unwrap();
+        let linked = session.editor.show().cues.last().unwrap();
+        assert!(linked.link.is_some());
+        assert_eq!(linked.link, session.editor.show().cue(a).unwrap().link, "the original is linked too");
+
+        // Groups and scene markers stay out of groups.
+        edit(&mut session, EditOp::Copy { ids: vec![group] }).unwrap();
+        assert_eq!(
+            edit(&mut session, EditOp::Paste { after: Some(inner), linked: false }),
+            Err(t!("session.no_group_in_group"))
+        );
+        edit(&mut session, EditOp::AddScene { index: None }).unwrap();
+        let scene = session.editor.show().cues.last().unwrap().id;
+        edit(&mut session, EditOp::Copy { ids: vec![scene] }).unwrap();
+        assert_eq!(
+            edit(&mut session, EditOp::Paste { after: Some(inner), linked: false }),
+            Err(t!("session.scene_main_only"))
+        );
+        drop(session);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn cut_and_paste_replace_swap_cues_in_one_step() {
+        let dir = tempdir("replace");
+        let (writer, _) = Writer::spawn();
+        let mut session = open_session(&dir, &writer);
+        let (a, b, c) = (add_wait(&mut session), add_wait(&mut session), add_wait(&mut session));
+        let title = |session: &mut Session, id: CueId, title: &str| {
+            let mut cue = session.editor.show().cue(id).unwrap().clone();
+            cue.title = title.into();
+            edit(session, EditOp::UpdateCue { cue: Box::new(cue) }).unwrap();
+        };
+        title(&mut session, a, "A");
+        title(&mut session, c, "C");
+        let titles = |session: &Session| -> Vec<String> {
+            session.editor.show().cues.iter().map(|c| c.title.clone()).collect()
+        };
+
+        edit(&mut session, EditOp::Cut { ids: vec![c] }).unwrap();
+        assert_eq!(titles(&session), ["A", "Wait"]);
+        edit(&mut session, EditOp::PasteReplace { ids: vec![a], swap: true }).unwrap();
+        assert_eq!(titles(&session), ["C", "Wait"]);
+        assert_eq!(session.editor.show().cues[1].id, b);
+        // The replaced cue is on the clipboard now.
+        edit(&mut session, EditOp::Paste { after: None, linked: false }).unwrap();
+        assert_eq!(titles(&session), ["C", "Wait", "A"]);
+
+        edit(&mut session, EditOp::Undo).unwrap();
+        edit(&mut session, EditOp::Undo).unwrap();
+        assert_eq!(titles(&session), ["A", "Wait"], "deleting and pasting were one step");
+        edit(&mut session, EditOp::PasteReplace { ids: vec![], swap: false }).unwrap();
+        assert_eq!(titles(&session), ["A", "Wait"], "nothing to replace");
+        drop(session);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn show_settings_are_checked_before_they_change() {
+        let dir = tempdir("show-settings");
+        let (writer, _) = Writer::spawn();
+        let mut session = open_session(&dir, &writer);
+        let watch =
+            |id: &str, name: &str, countdown| Stopwatch { id: id.into(), name: name.into(), countdown };
+        for bad in [
+            vec![watch("w", "Pause", Some(0.0))],
+            vec![watch("w", "Pause", Some(MAX_COUNTDOWN + 1.0))],
+            vec![watch("w", "Pause", None), watch("w", "Akt", None)],
+            vec![watch(" ", "Pause", None)],
+            vec![watch("w", " ", None)],
+        ] {
+            assert!(
+                edit(&mut session, EditOp::SetStopwatches { stopwatches: bad.clone() }).is_err(),
+                "{bad:?}"
+            );
+        }
+        assert!(session.editor.show().stopwatches.is_empty());
+        let fine = vec![watch("w", "Pause", Some(900.0)), watch("v", "Akt", None)];
+        edit(&mut session, EditOp::SetStopwatches { stopwatches: fine.clone() }).unwrap();
+        assert_eq!(session.editor.show().stopwatches, fine);
+
+        let device = |id: &str, host: &str, port| NetDevice {
+            id: id.into(),
+            name: "Licht".into(),
+            host: host.into(),
+            port,
+        };
+        for bad in [
+            vec![device("l", "", 8000)],
+            vec![device("l", "10.0.0.2", 0)],
+            vec![device("l", "10.0.0.2", 8000), device("l", "10.0.0.3", 8000)],
+        ] {
+            assert!(edit(&mut session, EditOp::SetDevices { devices: bad.clone() }).is_err(), "{bad:?}");
+        }
+        edit(&mut session, EditOp::SetDevices { devices: vec![device("l", "10.0.0.2", 8000)] }).unwrap();
+        edit(&mut session, EditOp::AddOsc { index: None, group: None }).unwrap();
+        let osc = session.editor.show().cues.last().unwrap();
+        assert!(matches!(&osc.kind, CueKind::Osc(o) if o.device.as_deref() == Some("l")), "the first device");
+
+        assert!(edit(&mut session, EditOp::SetNormalization { target: -50.0, on_import: true }).is_err());
+        edit(&mut session, EditOp::SetNormalization { target: -23.0, on_import: true }).unwrap();
+        let show = session.editor.show();
+        assert_eq!((show.loudness_target, show.normalize_on_import), (-23.0, true));
+
+        let fade = OthersEffect { duck_db: 5.0, ..OthersEffect::default() };
+        assert!(edit(&mut session, EditOp::SetOthers { others: fade }).is_err(), "ducking lowers");
+        drop(session);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn cue_edits_are_checked_and_capped() {
+        let dir = tempdir("update");
+        let (writer, _) = Writer::spawn();
+        let mut session = open_session(&dir, &writer);
+        edit(&mut session, EditOp::AddPlaceholder { index: None, group: None }).unwrap();
+        let mut sound = session.editor.show().cues[0].clone();
+        let wait = add_wait(&mut session);
+
+        if let CueKind::Sound(s) = &mut sound.kind {
+            s.volume_db = 20.0;
+        }
+        edit(&mut session, EditOp::UpdateCue { cue: Box::new(sound.clone()) }).unwrap();
+        let volume = |session: &Session| match &session.editor.show().cues[0].kind {
+            CueKind::Sound(s) => s.volume_db,
+            _ => panic!(),
+        };
+        assert_eq!(volume(&session), LevelLimits::default().max_db, "capped at the show's maximum");
+        let unknown = Cue::new(CueKind::Wait(WaitCue { duration: 1.0 }));
+        assert_eq!(
+            edit(&mut session, EditOp::UpdateCue { cue: Box::new(unknown.clone()) }),
+            Err(t!("edit.cue_not_found"))
+        );
+        assert_eq!(
+            edit(&mut session, EditOp::UpdateCues { cues: vec![sound.clone(), unknown] }),
+            Err(t!("edit.cue_not_found"))
+        );
+        sound.hotkey = Some(Chord::new("Space", " "));
+        assert!(edit(&mut session, EditOp::UpdateCue { cue: Box::new(sound.clone()) }).is_err(), "GO's key");
+
+        // New limits bring the volumes in at once.
+        assert!(
+            edit(&mut session, EditOp::SetLevelLimits { limits: LevelLimits { max_db: 0.0, min_db: -3.0 } })
+                .is_err()
+        );
+        edit(&mut session, EditOp::SetLevelLimits { limits: LevelLimits { max_db: -6.0, min_db: -60.0 } })
+            .unwrap();
+        assert_eq!(volume(&session), -6.0);
+        edit(&mut session, EditOp::Undo).unwrap();
+        assert_eq!(volume(&session), 6.0, "with the limits, in one step");
+
+        assert_eq!(
+            edit(&mut session, EditOp::SetCueType { ids: vec![wait], kind: ControlKind::Pan }),
+            Err(t!("session.convert_control_only"))
+        );
+        edit(
+            &mut session,
+            EditOp::AddControl { kind: ControlKind::Volume, index: None, targets: None, group: None },
+        )
+        .unwrap();
+        let fade = session.editor.show().cues.last().unwrap().id;
+        edit(&mut session, EditOp::SetCueType { ids: vec![fade], kind: ControlKind::Pan }).unwrap();
+        assert!(matches!(session.editor.show().cue(fade).unwrap().kind, CueKind::Pan(_)));
+        drop(session);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn picked_files_are_stored_relative_linked_or_copied() {
+        let dir = tempdir("import");
+        let (writer, _) = Writer::spawn();
+        let mut session = open_session(&dir, &writer);
+        let media = session.file.media_dir();
+        let outside = dir.join("outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        for path in [
+            media.join("inside.wav"),
+            media.join("clash.wav"),
+            outside.join("clash.wav"),
+            outside.join("far.wav"),
+        ] {
+            std::fs::write(&path, path.to_string_lossy().as_bytes()).unwrap();
+        }
+        let add = |session: &mut Session, path: PathBuf, import: Import| {
+            let mut notices = Vec::new();
+            session
+                .edit(EditOp::AddSounds { paths: vec![path], index: None, import, group: None }, &mut notices)
+                .unwrap();
+            notices
+        };
+        let last_file = |session: &Session| match &session.editor.show().cues.last().unwrap().kind {
+            CueKind::Sound(s) => s.file.clone(),
+            _ => panic!(),
+        };
+        let copy = |choice: Option<OnClash>| Import {
+            copy_outside: true,
+            on_clash: choice.map(|c| (outside.join("clash.wav"), c)).into_iter().collect(),
+        };
+
+        assert!(add(&mut session, media.join("inside.wav"), Import::default()).is_empty());
+        assert_eq!(last_file(&session), "inside.wav");
+        assert_eq!(session.editor.show().cues[0].title, "inside");
+
+        let notices = add(&mut session, outside.join("far.wav"), Import::default());
+        assert!(matches!(&notices[..], [Notice::Warning(w)] if w.contains("far.wav")), "{notices:?}");
+        let linked = last_file(&session);
+        assert!(Path::new(&linked).is_absolute() && !linked.contains('\\'), "{linked}");
+
+        let count = session.editor.show().cues.len();
+        assert!(add(&mut session, outside.join("clash.wav"), copy(Some(OnClash::Skip))).is_empty());
+        assert_eq!(session.editor.show().cues.len(), count, "skipped");
+        add(&mut session, outside.join("clash.wav"), copy(Some(OnClash::UseExisting)));
+        assert_eq!(last_file(&session), "clash.wav");
+        assert!(session.copies.is_empty(), "the file there is used");
+
+        let notices = add(&mut session, outside.join("clash.wav"), copy(None));
+        let renamed = last_file(&session);
+        assert_ne!(renamed, "clash.wav");
+        assert!(matches!(&notices[..], [Notice::Warning(w)] if w.contains(&renamed)), "{notices:?}");
+        assert!(session.view().cue_info.values().any(|i| i.importing), "plays once copied");
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !session.copies.is_empty() && Instant::now() < deadline {
+            session.media_tick(&mut Vec::new());
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(
+            std::fs::read(media.join(&renamed)).unwrap(),
+            std::fs::read(outside.join("clash.wav")).unwrap()
+        );
+        let gone = EditOp::AddSounds {
+            paths: vec![outside.join("gone.wav")],
+            index: None,
+            import: Import::default(),
+            group: None,
+        };
+        let error = edit(&mut session, gone).unwrap_err();
+        assert!(error.contains("gone.wav"), "{error}");
+        drop(session);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn verbatim_windows_paths_become_plain_ones() {
         assert_eq!(without_verbatim(r"\\?\C:\Shows\Media").as_deref(), Some(r"C:\Shows\Media"));

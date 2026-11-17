@@ -711,4 +711,51 @@ mod tests {
         assert!(matches!(ShowFile::load(&p), Err(ShowFileError::TooNew { .. })));
         fs::remove_dir_all(dir).unwrap();
     }
+
+    #[test]
+    fn errors_name_the_file_and_the_cause() {
+        use std::error::Error;
+        let dir = tempdir("errors");
+        let p = dir.join("x.jq");
+        let message = |e: ShowFileError| (e.to_string(), e.source().is_some());
+        let shown = p.display();
+
+        let (text, cause) = message(ShowFile::load(&p).unwrap_err());
+        assert!(text.starts_with(&format!("{shown}: ")) && cause, "{text}");
+        fs::write(&p, "{").unwrap();
+        let (text, cause) = message(ShowFile::load(&p).unwrap_err());
+        assert!(text.starts_with(&format!("{shown}: not a valid show file: ")) && cause, "{text}");
+        fs::write(&p, r#"{"format": "other", "version": 1}"#).unwrap();
+        assert_eq!(
+            message(ShowFile::load(&p).unwrap_err()),
+            (format!("{shown}: format “other” is not a show file"), false)
+        );
+        fs::write(&p, r#"{"format": "jqshow", "version": 99}"#).unwrap();
+        assert_eq!(
+            message(ShowFile::load(&p).unwrap_err()).0,
+            format!("{shown}: version 99 is newer than this program version ({VERSION})")
+        );
+        assert_eq!(
+            message(ShowFile::create(&dir, "a/b", true).unwrap_err()).0,
+            "“a/b” is not possible as a file or folder name"
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_second_show_in_the_same_folder_is_refused() {
+        let dir = tempdir("same-folder");
+        let first = ShowFile::create(&dir, "Eins", false).unwrap();
+        let again = ShowFile::create(&dir, "Eins", false).unwrap_err();
+        assert!(matches!(&again, ShowFileError::Exists(p) if *p == first.path));
+        assert_eq!(again.to_string(), format!("{} already exists", first.path.display()));
+        // Its media folder is taken by the first show.
+        assert!(matches!(
+            ShowFile::create(&dir, "Zwei", false),
+            Err(ShowFileError::Exists(p)) if p == dir.join("media")
+        ));
+        assert!(!dir.join("Zwei.jqshow").exists(), "nothing is left behind");
+        assert_eq!(ShowFile::load(&first.path).unwrap().show.name, "Eins");
+        fs::remove_dir_all(dir).unwrap();
+    }
 }

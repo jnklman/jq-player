@@ -2012,5 +2012,307 @@ mod tests {
         assert_eq!((r.duration, r.curve, r.rate, r.transpose), (3.0, PanCurve::Linear, Some(100.0), None));
         let Some(CueKind::Volume(v)) = CueKind::Rate(r).convert(ControlKind::Volume) else { panic!() };
         assert_eq!((v.duration, v.curve), (Some(3.0), FadeCurve::Linear));
+        assert_eq!(
+            CueKind::Wait(WaitCue { duration: 1.0 }).convert(ControlKind::Pan),
+            None,
+            "not a control cue"
+        );
+    }
+
+    fn sound(volume_db: f64) -> Cue {
+        Cue::new(CueKind::Sound(SoundCue { volume_db, ..SoundCue::new("a.wav") }))
+    }
+
+    fn wait() -> Cue {
+        Cue::new(CueKind::Wait(WaitCue { duration: 1.0 }))
+    }
+
+    fn scene() -> Cue {
+        Cue::new(CueKind::Scene(SceneCue {}))
+    }
+
+    fn group(mode: GroupMode, cues: Vec<Cue>) -> Cue {
+        Cue::new(CueKind::Group(GroupCue { mode, cues }))
+    }
+
+    fn volume_of(show: &Show, id: CueId) -> f64 {
+        match &show.cue(id).unwrap().kind {
+            CueKind::Sound(s) => s.volume_db,
+            _ => panic!("not a sound cue"),
+        }
+    }
+
+    #[test]
+    fn played_level_respects_the_limits() {
+        let limits = LevelLimits::default();
+        assert_eq!((limits.max_db, limits.min_db), (6.0, -60.0));
+        assert_eq!(limits.level(-10.0, -3.0), Some(-13.0));
+        assert_eq!(limits.level(0.0, 10.0), Some(6.0), "capped at the maximum");
+        assert_eq!(limits.level(-60.0, 30.0), None, "at the minimum is silence, whatever the offset");
+        assert_eq!(limits.level(f64::NAN, 0.0), None);
+        assert_eq!(limits.level(-6.0, f64::NAN), Some(-6.0), "a broken offset counts as none");
+        assert_eq!(limits.level(-6.0, f64::INFINITY), Some(-6.0));
+
+        assert!(limits.caps(0.0, 10.0));
+        assert!(!limits.caps(0.0, 6.0), "exactly the maximum is not capped");
+        assert!(!limits.caps(-70.0, 100.0), "silence is not capped");
+
+        assert!(limits.silences(-60.0));
+        assert!(!limits.silences(-59.9));
+        assert!(!limits.silences(SILENCE_DB), "set to silence on purpose");
+    }
+
+    #[test]
+    fn new_limits_cap_and_silence_volumes_inside_groups_too() {
+        let (loud, quiet_before, silent, quiet_now) =
+            (sound(10.0), sound(-65.0), sound(SILENCE_DB), sound(-50.0));
+        let inner = sound(8.0);
+        let ids = [loud.id, quiet_before.id, silent.id, quiet_now.id, inner.id];
+        let mut fade =
+            Cue::new(CueKind::control(ControlKind::Volume, Targets::Previous(PreviousKeyword::Previous)));
+        if let CueKind::Volume(v) = &mut fade.kind {
+            v.volume_db = Some(9.0);
+        }
+        let fade_id = fade.id;
+        let mut show = Show {
+            cues: vec![loud, quiet_before, silent, quiet_now, group(GroupMode::All, vec![inner]), fade],
+            ..Show::default()
+        };
+        let new = LevelLimits { max_db: 3.0, min_db: -40.0 };
+        let changes = show.clamp_levels(LevelLimits::default(), new);
+        assert_eq!(changes.capped, [ids[0], ids[4], fade_id]);
+        assert_eq!(changes.silenced, [ids[3]], "only what was audible before is reported");
+        let volumes: Vec<f64> = ids.iter().map(|id| volume_of(&show, *id)).collect();
+        assert_eq!(volumes, [3.0, SILENCE_DB, SILENCE_DB, SILENCE_DB, 3.0]);
+
+        // Lowering the minimum again brings nothing back.
+        let changes = show.clamp_levels(new, LevelLimits::default());
+        assert_eq!(changes, LevelChanges::default());
+        assert_eq!(volume_of(&show, ids[1]), SILENCE_DB);
+    }
+
+    #[test]
+    fn only_changed_volumes_are_capped() {
+        let before = sound(10.0);
+        let mut cue = before.clone();
+        cue.cap_changed_levels(Some(&before), 6.0);
+        assert_eq!(cue.levels(), [(cue.id, 10.0)], "read from the file, untouched");
+        if let CueKind::Sound(s) = &mut cue.kind {
+            s.volume_db = 12.0;
+        }
+        cue.cap_changed_levels(Some(&before), 6.0);
+        assert_eq!(cue.levels(), [(cue.id, 6.0)]);
+        let mut new = sound(10.0);
+        new.cap_changed_levels(None, 6.0);
+        assert_eq!(new.levels(), [(new.id, 6.0)], "a new cue is capped");
+        let silence_fade =
+            Cue::new(CueKind::control(ControlKind::Volume, Targets::Previous(PreviousKeyword::Previous)));
+        assert!(silence_fade.levels().is_empty(), "a fade without a target level sets none");
+    }
+
+    #[test]
+    fn walking_the_list_passes_scene_markers_and_respects_groups() {
+        let (first, a, marker, b) = (scene(), wait(), scene(), wait());
+        let (c, d) = (wait(), wait());
+        let (e, f) = (wait(), wait());
+        let sequence = group(GroupMode::Sequence, vec![c.clone(), d.clone()]);
+        let together = group(GroupMode::All, vec![e.clone(), f.clone()]);
+        let show = Show {
+            cues: vec![
+                first.clone(),
+                a.clone(),
+                marker.clone(),
+                b.clone(),
+                sequence.clone(),
+                together.clone(),
+            ],
+            ..Show::default()
+        };
+
+        assert_eq!(show.playable_from(0), Some(1));
+        assert_eq!(show.playable_from(2), Some(3));
+        assert_eq!(show.playable_from(6), None);
+
+        assert_eq!(show.next_after(a.id), Some(b.id), "past the scene marker");
+        assert_eq!(show.next_after(c.id), Some(d.id), "a sequence chains");
+        assert_eq!(show.next_after(d.id), None, "the end of the group");
+        assert_eq!(show.next_after(e.id), None, "cues starting together do not chain");
+        assert_eq!(show.next_after(together.id), None);
+        assert_eq!(show.next_after(CueId::new()), None);
+
+        assert_eq!(show.previous_before(a.id), Some(first.id), "the sibling directly before");
+        assert_eq!(show.previous_before(first.id), None);
+        assert_eq!(show.previous_before(d.id), Some(c.id));
+        assert_eq!(show.previous_before(c.id), None, "not out of the group");
+        assert_eq!(show.previous_before(CueId::new()), None);
+
+        assert_eq!(show.parent(d.id).map(|g| g.id), Some(sequence.id));
+        assert_eq!(show.parent(a.id), None);
+        assert_eq!(show.index_of(b.id), Some(3));
+        assert_eq!(show.index_of(c.id), None, "top level only");
+        let all: Vec<CueId> = show.all().iter().map(|c| c.id).collect();
+        assert_eq!(
+            all[4..],
+            [sequence.id, c.id, d.id, together.id, e.id, f.id],
+            "each group before its cues"
+        );
+        assert_eq!(together.descendants(), [e.id, f.id]);
+    }
+
+    #[test]
+    fn a_renewed_copy_keeps_its_inner_references() {
+        let inner = sound(0.0);
+        let outside = CueId::new();
+        let mut devamp =
+            Cue::new(CueKind::control(ControlKind::ExitLoop, Targets::Cues(vec![inner.id, outside])));
+        devamp.advance = Advance::new(AdvanceAt::LoopExit { of: Some(inner.id) });
+        let goto = Cue::new(CueKind::GoTo(GoToCue { target: Some(inner.id), start: false }));
+        let mut copy = group(GroupMode::Sequence, vec![inner.clone(), devamp.clone(), goto.clone()]);
+        copy.link = Some(LinkId::new());
+        let original = copy.clone();
+        copy.renew_ids();
+
+        assert_ne!(copy.id, original.id);
+        assert_eq!(copy.link, None, "a copy is not an instance");
+        let CueKind::Group(g) = &copy.kind else { panic!() };
+        let new_inner = g.cues[0].id;
+        assert!(![inner.id, devamp.id, goto.id].contains(&new_inner));
+        assert_eq!(g.cues[1].kind.targets(), Some(&Targets::Cues(vec![new_inner, outside])), "outside stays");
+        assert_eq!(g.cues[1].advance.at, AdvanceAt::LoopExit { of: Some(new_inner) });
+        assert!(matches!(g.cues[2].kind, CueKind::GoTo(GoToCue { target: Some(t), .. }) if t == new_inner));
+    }
+
+    #[test]
+    fn endless_cues_do_not_end_by_themselves() {
+        let with = |f: fn(&mut SoundCue)| {
+            let mut s = SoundCue::new("a.wav");
+            f(&mut s);
+            Cue::new(CueKind::Sound(s))
+        };
+        assert!(with(|_| {}).ends_by_itself());
+        assert!(with(|s| s.loop_mode = LoopMode::Times(3)).ends_by_itself());
+        assert!(!with(|s| s.loop_mode = LoopMode::Forever).ends_by_itself());
+        assert!(!with(|s| s.vamps = vec![Vamp { start: 1.0, end: 2.0 }]).ends_by_itself());
+        let list = |repeat| Cue::new(CueKind::Playlist(PlaylistCue { repeat, ..PlaylistCue::new(vec![]) }));
+        assert!(list(false).ends_by_itself());
+        assert!(!list(true).ends_by_itself());
+        assert!(wait().ends_by_itself());
+        assert!(group(GroupMode::All, vec![wait(), list(false)]).ends_by_itself());
+        assert!(!group(GroupMode::All, vec![wait(), list(true)]).ends_by_itself());
+    }
+
+    #[test]
+    fn linked_cues_follow_the_changed_one() {
+        let link = Some(LinkId::new());
+        let linked = |volume| Cue { link, title: format!("{volume}"), ..sound(volume) };
+        let (a, b, c) = (linked(-3.0), linked(-3.0), linked(-3.0));
+        let ids = [a.id, b.id, c.id];
+        let before = Show { cues: vec![a, b, c], ..Show::default() };
+        assert_eq!(before.linked(ids[1]), [ids[0], ids[2]]);
+        assert!(before.linked(CueId::new()).is_empty());
+
+        let mut show = before.clone();
+        if let Some(Cue { kind: CueKind::Sound(s), pre_wait, .. }) = show.cue_mut(ids[1]) {
+            s.volume_db = -9.0;
+            *pre_wait = 2.0;
+        }
+        assert_eq!(show.sync_links(Some(&before)), [ids[0], ids[2]]);
+        for id in ids {
+            assert_eq!((volume_of(&show, id), show.cue(id).unwrap().pre_wait), (-9.0, 2.0));
+        }
+        assert_eq!(show.cue(ids[0]).unwrap().title, "-3", "the title belongs to the instance");
+        assert!(show.sync_links(Some(&show.clone())).is_empty(), "consistent already");
+
+        // spread_link copies from a given cue.
+        if let Some(Cue { kind: CueKind::Sound(s), .. }) = show.cue_mut(ids[2]) {
+            s.volume_db = 0.0;
+        }
+        show.spread_link(ids[2]);
+        assert!(ids.iter().all(|id| volume_of(&show, *id) == 0.0));
+    }
+
+    #[test]
+    fn links_that_cannot_hold_are_dropped() {
+        let link = Some(LinkId::new());
+        let a = Cue { link, ..sound(-3.0) };
+        let b = Cue { link, ..sound(-6.0) };
+        let other_type = Cue { link, ..wait() };
+        let grouped = Cue { link, ..group(GroupMode::All, vec![]) };
+        let alone = Cue { link: Some(LinkId::new()), ..sound(0.0) };
+        let ids = [a.id, b.id, other_type.id, grouped.id, alone.id];
+        let mut show = Show { cues: vec![a, b, other_type, grouped, alone], ..Show::default() };
+
+        // After loading: the first cue is the source.
+        assert_eq!(show.sync_links(None), [ids[1]]);
+        assert_eq!(volume_of(&show, ids[1]), -3.0);
+        let links: Vec<bool> = ids.iter().map(|id| show.cue(*id).unwrap().link.is_some()).collect();
+        assert_eq!(links, [true, true, false, false, false]);
+        assert!(show.sync_links(None).is_empty());
+    }
+
+    #[test]
+    fn a_chord_names_its_key_and_modifiers() {
+        assert_eq!(Chord::new("KeyF", "f").ctrl().shift().text(), "Ctrl+Shift+F");
+        let mut alt = Chord::new("Digit1", "");
+        alt.alt = true;
+        assert_eq!(alt.text(), "Alt+1", "the code without its prefix when no label was recorded");
+        assert_eq!(Chord::new("F5", " ").text(), "F5", "a blank label counts as none");
+        assert_eq!(Chord::new("Space", " ").text(), "Space");
+        assert_eq!(Chord::new("Escape", "Escape").text(), "Esc");
+        assert_eq!(Chord::new("KeyY", "z").ctrl().text(), "Ctrl+Z", "the recorded layout's letter");
+
+        assert!(
+            Chord::new("KeyY", "z").same(&Chord::new("KeyY", "y")),
+            "the label does not make another key"
+        );
+        assert_ne!(Chord::new("KeyY", "z"), Chord::new("KeyY", "y"), "but a different value");
+        assert!(!Chord::new("KeyY", "z").same(&Chord::new("KeyY", "z").shift()));
+    }
+
+    #[test]
+    fn type_names_match_the_file() {
+        let mut kinds = vec![
+            CueKind::Sound(SoundCue::new("a.wav")),
+            CueKind::Wait(WaitCue { duration: 1.0 }),
+            CueKind::Osc(OscCue { device: None, messages: vec![] }),
+            CueKind::Midi(MidiCue { messages: vec![] }),
+            CueKind::Playlist(PlaylistCue::new(vec![])),
+            CueKind::Group(GroupCue::default()),
+            CueKind::GoTo(GoToCue::default()),
+            CueKind::Scene(SceneCue {}),
+        ];
+        let controls = [
+            ControlKind::StartStop,
+            ControlKind::Pause,
+            ControlKind::Volume,
+            ControlKind::Pan,
+            ControlKind::Rate,
+            ControlKind::Position,
+            ControlKind::ExitLoop,
+            ControlKind::Reset,
+            ControlKind::Stopwatch,
+        ];
+        for kind in controls {
+            let cue = CueKind::control(kind, Targets::Previous(PreviousKeyword::Previous));
+            assert_eq!(cue.control_kind(), Some(kind));
+            assert!(cue.targets().is_some() || kind == ControlKind::Stopwatch, "{kind:?} has targets");
+            kinds.push(cue);
+        }
+        for mut kind in kinds {
+            let json = serde_json::to_value(Cue::new(kind.clone())).unwrap();
+            assert_eq!(json["type"], kind.type_name());
+            assert_eq!(kind.targets().is_some(), kind.targets_mut().is_some(), "{}", kind.type_name());
+        }
+        assert_eq!(CueKind::Scene(SceneCue {}).control_kind(), None);
+    }
+
+    #[test]
+    fn repeat_counts_below_two_are_off() {
+        let parse = |json: &str| serde_json::from_str::<Repeat>(json).map_err(|e| e.to_string());
+        assert_eq!(parse("0"), Ok(Repeat::Off));
+        assert_eq!(parse("1"), Ok(Repeat::Off));
+        assert_eq!(parse("3"), Ok(Repeat::Times(3)));
+        assert_eq!(parse(r#""forever""#), Ok(Repeat::Forever));
+        assert!(parse(r#""sometimes""#).unwrap_err().contains("unknown repeat"));
     }
 }
