@@ -223,6 +223,12 @@
   [data-slot='tooltip-trigger'] :is(:disabled, [data-disabled]) {
     @apply pointer-events-none;
   }
+  /* With its pointer events, a click can still put a (blinking) caret into a
+     disabled field, e.g. in a popover; it can't be typed into, so the caret
+     is hidden. */
+  :is(input, textarea):disabled {
+    @apply caret-transparent;
+  }
 
   /* Scrolling areas are ScrollArea components (lib/components/ui). Where
      there can't be one (text areas, long menus), the native scrollbar looks
