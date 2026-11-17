@@ -36,7 +36,7 @@ export type Edge = 'left' | 'right' | 'top' | 'bottom';
 /** Where a dragged panel lands on another one: beside it, or in its place (swap). */
 export type DropZone = Edge | 'center';
 
-/** A panel in a window of its own; `opacity` (0.3–1) is the overlay's background, the UI's alone. */
+/** A panel in a window of its own; `opacity` (0.05–1) is the overlay's, background and content, the UI's alone. */
 export interface DetachedPanel extends PanelWindow {
   opacity: number;
 }
@@ -52,7 +52,7 @@ export interface Layout {
 /** Where a panel is: in the main window, in a window of its own (of a kind), or switched off. */
 export type Placement = 'main' | WindowKind | 'hidden';
 
-export const MIN_OPACITY = 0.3;
+export const MIN_OPACITY = 0.05;
 
 const inWindow = (placement: Placement): placement is WindowKind => placement === 'window' || placement === 'overlay';
 

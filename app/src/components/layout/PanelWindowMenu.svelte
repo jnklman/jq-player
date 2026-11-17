@@ -41,7 +41,14 @@
       </Popover.Trigger>
     {/snippet}
   </Tooltip>
-  <Popover.Content align="end" sideOffset={8} class="flex w-64 flex-col gap-3" aria-label={t('window.label')}>
+  <!-- `data-window-menu`: the overlay keeps its opacity while this is open (`styles.css`). -->
+  <Popover.Content
+    align="end"
+    sideOffset={8}
+    class="flex w-64 flex-col gap-3"
+    aria-label={t('window.label')}
+    data-window-menu
+  >
     {#if windowSupport.overlay}
       <ToggleGroup.Root
         type="single"
@@ -60,7 +67,7 @@
         <Slider
           type="single"
           aria-label={t('layout.opacity')}
-          step={0.05}
+          step={0.01}
           min={MIN_OPACITY}
           max={1}
           value={opacity}

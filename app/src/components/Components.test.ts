@@ -493,10 +493,10 @@ describe('PanelWindow', () => {
     slider.focus();
     await user.keyboard('{ArrowLeft}');
     await settle();
-    expect(sentToMain().at(-1)).toEqual({ panel: 'transport', opacity: 0.75 });
+    expect(sentToMain().at(-1)).toEqual({ panel: 'transport', opacity: 0.79 });
     // The slider's value holds until the saved layout has it.
-    await loadShow(overlayView(0.75), runtime());
-    expect(document.documentElement.style.getPropertyValue('--overlay-opacity')).toBe('0.75');
+    await loadShow(overlayView(0.79), runtime());
+    expect(document.documentElement.style.getPropertyValue('--overlay-opacity')).toBe('0.79');
   });
 
   it('says when its panel does not exist, and closes', async () => {

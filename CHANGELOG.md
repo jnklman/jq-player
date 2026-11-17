@@ -33,6 +33,8 @@ different in the app, not how the code changed). The Release workflow turns
   others) is refused when it is added, naming the format, instead of failing only when the cue loads;
   MIDI files are explained.
 - Disabled buttons, fields and menu entries show a "not allowed" mouse pointer.
+- The opacity of an overlay panel now fades its text and controls too, not only its background. It
+  goes down to 5 % in 1 % steps, and the panel turns solid while the mouse is over it or over a menu it opened.
 
 ### Fixed
 

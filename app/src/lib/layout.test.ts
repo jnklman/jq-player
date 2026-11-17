@@ -34,7 +34,7 @@ describe('normalized', () => {
         { panel: 'cues', kind: 'window' },
         { panel: 'inspector', kind: 'overlay' },
         { panel: 'unknown', kind: 'window' },
-        { panel: 'transport', kind: 'overlay', x: 10, y: 20, width: 300, height: 'big', opacity: 0.1 },
+        { panel: 'transport', kind: 'overlay', x: 10, y: 20, width: 300, height: 'big', opacity: 0.01 },
       ],
     };
     stored.root = split('horizontal', [
@@ -51,7 +51,7 @@ describe('normalized', () => {
       y: 20,
       width: 300,
       height: null,
-      opacity: 0.3,
+      opacity: 0.05,
     });
     expect(panelsIn(layout.root)).toEqual(['cues', 'active']);
     expect(layout.hidden).toEqual(['inspector']);

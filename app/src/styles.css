@@ -262,13 +262,27 @@
 }
 
 /* An overlay panel window (`data-overlay`, set by PanelWindow.svelte): the
-   window and the panel's own background let through what lies behind them,
-   by `--overlay-opacity` (0.3–1); text and controls stay solid. Outside the
-   layers, so they win over the `bg-…` utilities of the same elements. */
+   window is transparent and the panel, background and content alike, lets
+   through what lies behind it by `--overlay-opacity` (0.05–1). It turns
+   solid while the mouse is anywhere in the window, also over the dialogs and
+   menus it opens (portalled out of the frame, always solid), except while the
+   window menu is open, whose slider shows the opacity it sets, without the
+   fade. Outside the layers, so they win over the `bg-…` utilities of the
+   same elements. */
 [data-overlay] #app {
   background-color: transparent;
 }
 
 [data-overlay] [data-slot='panel-frame'] {
-  background-color: color-mix(in srgb, var(--color-panel) calc(var(--overlay-opacity, 1) * 100%), transparent);
+  opacity: var(--overlay-opacity, 1);
+  transition: opacity 300ms;
+}
+
+[data-overlay]:hover:not(:has([data-window-menu])) [data-slot='panel-frame'] {
+  opacity: 1;
+}
+
+/* The slider's changes show at once. */
+[data-overlay]:has([data-window-menu]) [data-slot='panel-frame'] {
+  transition: none;
 }
