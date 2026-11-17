@@ -494,6 +494,7 @@ const de: Record<MessageKey, string> = {
   'header.audio_more': 'Alle Audio-Einstellungen …',
   'header.audio_unavailable': 'Gerät nicht verfügbar: {error}',
   'header.audio_retry': 'Erneut versuchen',
+  'header.audio_show_locked': 'Der Show-Modus ist gesperrt. Das Gerät lässt sich in den Einstellungen ändern.',
   'header.audio_busy': 'Cues laufen. Das Gerät lässt sich ändern, sobald alle gestoppt sind.',
   'header.keep_awake_error': 'Fehler: {error}',
   'header.keep_awake_tip': 'Ruhezustand und Bildschirmschoner verhindern',

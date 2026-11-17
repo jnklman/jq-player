@@ -1,4 +1,5 @@
 <script lang="ts">
+  import LockSimple from '~icons/ph/lock-simple-bold';
   import { Button } from '$lib/components/ui/button';
   import { Input } from '$lib/components/ui/input';
   import { Label } from '$lib/components/ui/label';
@@ -28,7 +29,10 @@
   let applying = $state(false);
   // The backend opens the device again only while no cue runs.
   const busy = $derived(cuesRunning());
+  // A locked show mode keeps the device as it is here; the settings dialog still changes it, deliberately.
+  const showLocked = $derived(view.show.show_mode_locked);
   const locked = $derived(applying || busy);
+  const fieldsLocked = $derived(locked || showLocked);
 
   /** Applies the draft's device fields; a failed device is opened again even unchanged. Channels that do not fit
    * stay in the draft with their message, unapplied. */
@@ -48,6 +52,13 @@
     ui.settingsOpen = true;
   }
 </script>
+
+{#if showLocked}
+  <span class="flex items-center gap-1.5 text-xs text-muted-foreground">
+    <LockSimple class="size-4 shrink-0" />
+    {t('header.audio_show_locked')}
+  </span>
+{/if}
 
 <div class="flex flex-col gap-1">
   <span class="font-medium">{t('header.audio_title')}</span>
@@ -70,14 +81,14 @@
   {/if}
 </div>
 
-<fieldset class="m-0 flex min-w-0 flex-col gap-3 border-0 p-0" disabled={locked}>
+<fieldset class="m-0 flex min-w-0 flex-col gap-3 border-0 p-0" disabled={fieldsLocked}>
   <Label class={field}>
     {t('device.host')}
     <SimpleSelect
       class="w-full"
       aria-label={t('device.host')}
       value={draft.host ?? ''}
-      disabled={locked}
+      disabled={fieldsLocked}
       options={setup.hostOptions}
       onchange={(host) => {
         setup.setHost(host);
@@ -93,14 +104,14 @@
         aria-label={t('midi_fields.device')}
         value={draft.device ?? ''}
         tip={setup.selectedDevice?.description}
-        disabled={locked || setup.loading}
+        disabled={fieldsLocked || setup.loading}
         options={setup.deviceOptions}
         onchange={(device) => {
           draft.device = device || null;
           void apply();
         }}
       />
-      <ReloadDevices {setup} disabled={locked} />
+      <ReloadDevices {setup} disabled={fieldsLocked} />
     </div>
   </Label>
   <div class="grid grid-cols-[6rem_minmax(0,1fr)] gap-2">
@@ -112,7 +123,7 @@
         max={setup.mainMax ?? undefined}
         placeholder={t('device.default')}
         aria-label={t('device.channels')}
-        disabled={locked}
+        disabled={fieldsLocked}
         value={draft.channels ?? ''}
         {...liveNumber(
           () => draft.channels,
@@ -127,7 +138,7 @@
         class="w-full"
         aria-label={t('device.buffer')}
         value={setup.bufferValue}
-        disabled={locked || setup.hostSetsBuffer}
+        disabled={fieldsLocked || setup.hostSetsBuffer}
         options={setup.bufferOptions}
         onchange={(frames) => {
           setup.setBuffer(frames);

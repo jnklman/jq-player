@@ -17,7 +17,8 @@ different in the app, not how the code changed). The Release workflow turns
 - "Keep device awake" (Settings › Device) plays an inaudible signal with an adjustable level, so
   notebook speakers and other devices that switch off in silence no longer cut off the start of a cue.
 - Clicking the audio device in the header opens a menu to change the host, device, channel count and
-  buffer size directly; each change takes effect at once.
+  buffer size directly; each change takes effect at once. In a locked show mode it only shows the
+  device; it can then be changed only in the settings.
 - Audio files dragged from Explorer or a file manager onto the cue list become sound cues where they
   are dropped (in edit mode), as if picked with "+ Sound".
 - WAV files that hold MP3 or MP2 audio (as broadcast software and some audio editors write them) play

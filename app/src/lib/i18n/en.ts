@@ -494,6 +494,7 @@ const en = {
   'header.audio_more': 'All audio settings …',
   'header.audio_unavailable': 'Device not available: {error}',
   'header.audio_retry': 'Try again',
+  'header.audio_show_locked': 'Show mode is locked. Change the device in the settings.',
   'header.audio_busy': 'Cues are running. The device can be changed once all have stopped.',
   'header.keep_awake_error': 'Error: {error}',
   'header.keep_awake_tip': 'Prevent sleep mode and screen saver',

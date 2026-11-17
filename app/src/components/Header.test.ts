@@ -171,6 +171,18 @@ describe('Header', () => {
     for (const name of ['Host', 'Device', 'Channels']) expect(within(menu).getByLabelText(name)).toBeEnabled();
   });
 
+  it('locks the audio menu in a locked show mode, leaving the settings dialog open to it', async () => {
+    await loadShow(showView({ settings: { show_mode: true }, show: { show_mode_locked: true } }));
+    const { user } = await renderUi(Header);
+    await user.click(screen.getByRole('button', { name: 'Audio device: Speakers' }));
+    const menu = await popover();
+    expect(within(menu).getByText(/Show mode is locked/)).toBeInTheDocument();
+    for (const name of ['Host', 'Device', 'Buffer size', 'Channels'])
+      expect(within(menu).getByLabelText(name)).toBeDisabled();
+    await user.click(within(menu).getByRole('button', { name: 'All audio settings …' }));
+    expect(ui.settingsOpen).toBe(true);
+  });
+
   it('opens a failed device again from the audio menu', async () => {
     await loadShow(showView({ audio_error: 'Device busy' }));
     const { user } = await renderUi(Header);
