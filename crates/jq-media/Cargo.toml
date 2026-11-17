@@ -9,6 +9,8 @@ authors.workspace = true
 ebur128 = "0.1.11"
 jq-engine = { path = "../jq-engine" }
 jq-i18n = { path = "../jq-i18n" }
+# libopus, built from its bundled source (needs CMake): symphonia has no Opus decoder.
+opusic-sys = "0.7.7"
 rubato = "5.1.0"
 serde = { version = "1.0.229", features = ["derive"] }
 symphonia = { version = "0.6.1", features = ["all"] }

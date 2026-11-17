@@ -18,6 +18,16 @@ different in the app, not how the code changed). The Release workflow turns
   notebook speakers and other devices that switch off in silence no longer cut off the start of a cue.
 - WAV files that hold MP3 or MP2 audio (as broadcast software and some audio editors write them) play
   like any other file instead of being refused as an unsupported format.
+- "Add audio" also offers MP2, CAF and Ogg FLAC (.oga) files and the sound of MP4 and MOV videos.
+- WAV files larger than 4 GB (RF64/BW64, as field recorders and broadcast software write them) and
+  Wave64 files (.w64) play instead of being refused.
+- Opus files (.opus, and .ogg files holding Opus) play, also in 5.1.
+
+### Changed
+
+- A file in a format that cannot be played (WMA, AC-3, DTS, HE-AAC or surround AAC, WavPack and
+  others) is refused when it is added, naming the format, instead of failing only when the cue loads;
+  MIDI files are explained.
 
 ## 0.2.1 – 2026-11-15
 

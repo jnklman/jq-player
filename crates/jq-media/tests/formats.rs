@@ -25,19 +25,28 @@ struct Fixture {
     /// Frames a lossy decode may run longer or shorter than the signal:
     /// encoder delay and padding the file does not let the decoder remove.
     slack: usize,
+    /// Largest difference after a seek from decoding straight through.
+    seek: f32,
 }
 
 const fn lossless(file: &'static str, rate: u32, secs: f64, bits: i32) -> Fixture {
     // Half a step of the format, and some room for rounding on the way.
     let step = 1.0 / (1u64 << (bits - 1)) as f64;
-    Fixture { file, rate, secs, exact: Some(step), mono: false, slack: 2 }
+    Fixture { file, rate, secs, exact: Some(step), mono: false, slack: 2, seek: 1e-4 }
 }
 
 const fn lossy(file: &'static str, rate: u32) -> Fixture {
-    Fixture { file, rate, secs: 0.5, exact: None, mono: false, slack: 2048 }
+    Fixture { file, rate, secs: 0.5, exact: None, mono: false, slack: 2048, seek: 1e-4 }
 }
 
-const FIXTURES: [Fixture; 16] = [
+/// Opus predicts from the frames before, so a decoder started cold at a
+/// seek converges on the straight decode only slowly: after the preroll it
+/// is still off by about −56 dB, fading. The timing is exact.
+const fn opus(file: &'static str) -> Fixture {
+    Fixture { seek: 2e-3, ..lossy(file, 48_000) }
+}
+
+const FIXTURES: [Fixture; 26] = [
     lossless("pcm16.wav", 44_100, 0.25, 16),
     // 24 bit: WAVE_FORMAT_EXTENSIBLE.
     lossless("pcm24.wav", 44_100, 0.25, 24),
@@ -48,15 +57,29 @@ const FIXTURES: [Fixture; 16] = [
     lossless("surround.wav", 44_100, 0.25, 16),
     lossless("pcm16.aiff", 44_100, 0.25, 16),
     lossless("pcm24.aif", 48_000, 0.25, 24),
+    lossless("pcm24.caf", 48_000, 0.25, 24),
+    // Read by jq-media's `wav64`, as symphonia only knows RIFF.
+    lossless("rf64.wav", 48_000, 0.25, 24),
+    lossless("float32.w64", 44_100, 0.25, 24),
     lossless("flac16.flac", 44_100, 0.5, 16),
     lossless("flac24.flac", 96_000, 0.5, 24),
     lossless("alac.m4a", 44_100, 0.5, 16),
+    lossless("flac.oga", 44_100, 0.5, 16),
     lossy("aac.m4a", 44_100),
     lossy("adts.aac", 44_100),
     lossy("vorbis.ogg", 44_100),
+    // Decoded by jq-media's `opus` (libopus); the Ogg reader trims the pre-skip.
+    opus("opus.ogg"),
+    opus("opus.opus"),
+    // 5.1 in Vorbis channel order (L C R …): front left and right must come first.
+    opus("surround.opus"),
     lossy("cbr.mp3", 48_000),
     // ID3v2 with a title and a cover picture before the audio.
     lossy("tagged.mp3", 44_100),
+    lossy("mp2.mp2", 48_000),
+    // The sound of a video clip (H.264 picture, AAC sound).
+    lossy("video.mp4", 48_000),
+    lossy("video.mov", 48_000),
     // MP3 in WAV (format tag 0x0055): read by jq-media's `wav_mpeg`. Without
     // a LAME header nothing tells the delay and padding (two MP3 frames):
     // ffmpeg keeps them as well.
@@ -196,7 +219,7 @@ fn every_format_seeks_to_the_same_samples() {
             let reference = &straight[target * 2..(target + len) * 2];
             let worst = reference.iter().zip(&seeked).map(|(a, b)| (a - b).abs()).fold(0.0f32, f32::max);
             assert_eq!(seeked.len(), reference.len(), "{} at {target}", f.file);
-            assert!(worst < 1e-4, "{}: seek to {target} is off by {worst}", f.file);
+            assert!(worst < f.seek, "{}: seek to {target} is off by {worst}", f.file);
         }
     }
 }
@@ -227,48 +250,23 @@ fn every_format_has_a_waveform_and_a_loudness() {
     }
 }
 
-/// Refused by every reader, with a reason the operator understands.
-fn assert_refused(file: &str) {
-    let file = path(file);
-    let unsupported = "not a supported audio format";
-    assert_eq!(decode_file(&file, 48_000).unwrap_err().reason(), unsupported);
-    assert_eq!(
-        StreamDecoder::open(&file, Some(48_000)).err().map(|e| e.reason()).as_deref(),
-        Some(unsupported)
-    );
-    assert!(Peaks::build(&file, &|| true).is_err());
-    assert!(Loudness::measure(&file, &|| true).is_err());
-}
-
-/// `.ogg` may hold Opus instead of Vorbis; symphonia has no Opus decoder.
-/// The Ogg container is read, so the length is known: only playing fails.
-/// Once a decoder comes in, move the file into `FIXTURES` (`lossy`).
-#[test]
-fn opus_in_ogg_is_refused_with_a_reason() {
-    assert_refused("opus.ogg");
-    let secs = probe_duration(&path("opus.ogg")).unwrap().unwrap();
-    assert!((secs - 0.5).abs() < 0.05, "{secs}");
-}
-
-/// `.wav` may hold MP3 (format tag 0x0055). symphonia's WAV reader only
-/// knows PCM, float, A-law/µ-law and ADPCM, so jq-media reads the `data`
-/// chunk itself (`src/wav_mpeg.rs`, entered only when symphonia refuses).
-/// This asks symphonia directly. When it fails, symphonia reads these files
-/// itself: delete `wav_mpeg.rs`, its use in `open_format` and this test;
-/// `mp3-in.wav` in `FIXTURES` keeps checking that the files still play.
-#[test]
-fn symphonia_still_refuses_mp3_in_wav() {
+/// Whether symphonia on its own (its probe and its decoders, without what
+/// jq-media adds) opens `file` and makes a decoder for it.
+fn symphonia_alone_reads(file: &str) -> bool {
     use symphonia::core::codecs::audio::AudioDecoderOptions;
     use symphonia::core::formats::probe::Hint;
     use symphonia::core::formats::{FormatOptions, TrackType};
     use symphonia::core::io::MediaSourceStream;
     use symphonia::core::meta::MetadataOptions;
 
-    let file = std::fs::File::open(path("mp3-in.wav")).unwrap();
-    let mss = MediaSourceStream::new(Box::new(file), Default::default());
+    let path = path(file);
+    let source = std::fs::File::open(&path).unwrap();
+    let mss = MediaSourceStream::new(Box::new(source), Default::default());
     let mut hint = Hint::new();
-    hint.with_extension("wav");
-    let read = symphonia::default::get_probe()
+    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+        hint.with_extension(ext);
+    }
+    symphonia::default::get_probe()
         .probe(&hint, mss, FormatOptions::default(), MetadataOptions::default())
         .and_then(|format| {
             let params = format.default_track(TrackType::Audio).and_then(|t| t.codec_params.clone());
@@ -276,11 +274,64 @@ fn symphonia_still_refuses_mp3_in_wav() {
                 .and_then(|p| p.audio().cloned())
                 .ok_or(symphonia::core::errors::Error::Unsupported("no track"))?;
             symphonia::default::get_codecs().make_audio_decoder(&params, &AudioDecoderOptions::default())
-        });
+        })
+        .is_ok()
+}
+
+// The tests below fail once symphonia reads by itself what jq-media reads
+// in its own code: then that code is dead weight (or, for Opus, competes
+// with symphonia's decoder). Each says what to remove; the files stay in
+// `FIXTURES`, which keeps checking that they still play.
+
+/// The tests below would pass with a helper that never reads anything.
+#[test]
+fn symphonia_alone_reads_what_it_supports() {
+    for file in ["pcm16.wav", "vorbis.ogg", "aac.m4a", "cbr.mp3"] {
+        assert!(symphonia_alone_reads(file), "{file}");
+    }
+}
+
+/// `.wav` may hold MP3 (format tag 0x0055). symphonia's WAV reader only
+/// knows PCM, float, A-law/µ-law and ADPCM, so jq-media reads the `data`
+/// chunk itself (`src/wav_mpeg.rs`, entered only when symphonia refuses).
+/// When this fails: delete `wav_mpeg.rs`, its use in `open_format` and this test.
+#[test]
+fn symphonia_still_refuses_mp3_in_wav() {
     assert!(
-        read.is_err(),
+        !symphonia_alone_reads("mp3-in.wav"),
         "symphonia reads MP3 in WAV now: remove jq-media's own handling (see this test's comment)"
     );
+}
+
+/// symphonia's WAV reader only knows RIFF, so jq-media reads RF64/BW64 and
+/// Wave64 itself (`src/wav64.rs`, entered only when symphonia refuses).
+/// When this fails for both: delete `wav64.rs`, its use in `open_format` and
+/// this test (for one of them: only that part of `wav64.rs`). Check that
+/// symphonia takes the length of RF64 files over 4 GB from the `ds64` chunk.
+#[test]
+fn symphonia_still_refuses_rf64_and_wave64() {
+    for file in ["rf64.wav", "float32.w64"] {
+        assert!(
+            !symphonia_alone_reads(file),
+            "symphonia reads {file} now: remove jq-media's own handling (see this test's comment)"
+        );
+    }
+}
+
+/// symphonia reads Opus from Ogg but has no decoder for it, so jq-media
+/// brings one (`src/opus.rs`, libopus via `opusic-sys`, registered in
+/// `codecs`). When this fails: delete `opus.rs`, its registration, the
+/// `opusic-sys` dependency (and the CMake requirement in README.md and
+/// CLAUDE.md) and this test, after checking that symphonia's decoder passes
+/// `FIXTURES` (5.1 included) and applies the output gain.
+#[test]
+fn symphonia_still_has_no_opus_decoder() {
+    for file in ["opus.ogg", "surround.opus"] {
+        assert!(
+            !symphonia_alone_reads(file),
+            "symphonia decodes {file} now: remove jq-media's Opus decoder (see this test's comment)"
+        );
+    }
 }
 
 /// symphonia's MP4 reader ignores edit lists, so AAC in MP4 keeps the
@@ -292,4 +343,45 @@ fn symphonia_still_refuses_mp3_in_wav() {
 fn aac_in_mp4_keeps_the_encoder_delay() {
     let samples = decode_all("aac.m4a", 44_100);
     assert_eq!(samples.len() / 2, 22_050 + 1024 + 478);
+}
+
+/// Matroska (`.mka`) is not offered: symphonia's reader states no length and
+/// seeks to the wrong samples, and MP3 in it plays about 2000 frames long.
+/// When this fails, it may have learned the length: move `flac.mka` into
+/// `FIXTURES` (and `mka` into `app/src/lib/media.ts`) if the rest passes.
+#[test]
+fn matroska_still_has_no_length() {
+    assert_eq!(probe_duration(&path("flac.mka")).unwrap(), None);
+}
+
+/// Formats met in practice that jq-media cannot decode: refused by every
+/// reader, already when the file is added (`probe_duration`), naming the
+/// format, whether symphonia reads the container (AC-3 and 5.1 AAC in MP4)
+/// or not. When one plays after an upgrade, symphonia learned it: move the
+/// file into `FIXTURES` (its extension into `app/src/lib/media.ts`), and
+/// drop its name from `codec_name` or `recognize` in `src/lib.rs` if no
+/// other file needs it.
+#[test]
+fn unsupported_formats_are_refused_by_name() {
+    for (file, codec) in [
+        ("ac3.m4a", "AC-3 (Dolby Digital)"),
+        // symphonia's AAC decoder takes only AAC-LC in mono or stereo.
+        ("aac51.m4a", "HE-AAC or surround AAC"),
+        ("ac3.ac3", "AC-3 (Dolby Digital)"),
+        ("wma.wma", "WMA"),
+        ("wavpack.wv", "WavPack"),
+    ] {
+        let file = path(file);
+        let reason = format!("{codec} is not supported (convert the file to WAV or FLAC)");
+        let reasons = [
+            probe_duration(&file).err().map(|e| e.reason()),
+            decode_file(&file, 48_000).err().map(|e| e.reason()),
+            StreamDecoder::open(&file, Some(48_000)).err().map(|e| e.reason()),
+            Peaks::build(&file, &|| true).err().map(|e| e.reason()),
+            Loudness::measure(&file, &|| true).err().map(|e| e.reason()),
+        ];
+        for got in reasons {
+            assert_eq!(got.as_deref(), Some(reason.as_str()), "{}", file.display());
+        }
+    }
 }

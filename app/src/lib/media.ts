@@ -10,7 +10,23 @@ import { fmtMegabytes } from './format';
 import { t } from './i18n/index.svelte';
 import { ask, askClashes, attempt, ui } from './store.svelte';
 
-const AUDIO = ['wav', 'flac', 'mp3', 'ogg', 'm4a', 'aac', 'aif', 'aiff'];
+const AUDIO = [
+  'wav',
+  'w64',
+  'flac',
+  'mp3',
+  'mp2',
+  'ogg',
+  'oga',
+  'opus',
+  'm4a',
+  'aac',
+  'aif',
+  'aiff',
+  'caf',
+  'mp4',
+  'mov',
+];
 
 export interface MissingMediaUse {
   key: string;

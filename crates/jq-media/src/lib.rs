@@ -5,15 +5,21 @@
 //! ones are streamed in chunks (see [`stream`]).
 
 pub mod loudness;
+mod opus;
 pub mod peaks;
 pub mod stream;
+mod wav64;
 mod wav_mpeg;
 
 use std::fs::File;
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 
 use jq_engine::AudioBuffer;
 use jq_i18n::t;
+use symphonia::core::codecs::audio::well_known::*;
+use symphonia::core::codecs::audio::{AudioCodecId, AudioCodecParameters, AudioDecoder, AudioDecoderOptions};
+use symphonia::core::codecs::registry::CodecRegistry;
 use symphonia::core::errors::Error as SymError;
 use symphonia::core::formats::probe::Hint;
 use symphonia::core::formats::{FormatOptions, FormatReader, TrackType};
@@ -33,6 +39,15 @@ pub enum MediaError {
     NoAudioTrack {
         path: PathBuf,
     },
+    /// Audio in a format jq-media knows by name but cannot decode.
+    UnsupportedCodec {
+        path: PathBuf,
+        codec: &'static str,
+    },
+    /// A MIDI file: notes, no sound.
+    Midi {
+        path: PathBuf,
+    },
     Resample {
         path: PathBuf,
         message: String,
@@ -48,6 +63,8 @@ impl MediaError {
             Self::Io { source, .. } => source.to_string(),
             Self::Decode { source, .. } => describe(source),
             Self::NoAudioTrack { .. } => t!("media.no_audio_track"),
+            Self::UnsupportedCodec { codec, .. } => t!("media.unsupported_codec", codec = codec),
+            Self::Midi { .. } => t!("media.midi"),
             Self::Resample { message, .. } => t!("media.resample_failed", message = message),
             Self::Cancelled => t!("media.cancelled"),
         }
@@ -58,6 +75,8 @@ impl MediaError {
             Self::Io { path, .. }
             | Self::Decode { path, .. }
             | Self::NoAudioTrack { path }
+            | Self::UnsupportedCodec { path, .. }
+            | Self::Midi { path }
             | Self::Resample { path, .. } => Some(path),
             Self::Cancelled => None,
         }
@@ -175,9 +194,10 @@ fn peaks(samples: &[f32], channels: usize, buckets: usize) -> Vec<f32> {
         .collect()
 }
 
-/// Opens `path` with the container reader symphonia picks for it. A WAV
-/// file holding MPEG audio, which symphonia refuses, is read as the MPEG
-/// stream in its `data` chunk (see [`wav_mpeg`]).
+/// Opens `path` with the container reader symphonia picks for it. Of the
+/// files symphonia refuses, a WAV file holding MPEG audio is read as the
+/// MPEG stream in its `data` chunk (see [`wav_mpeg`]), and RF64, BW64 and
+/// Wave64 files by jq-media's own reader (see [`wav64`]).
 pub(crate) fn open_format(path: &Path) -> Result<Box<dyn FormatReader>, MediaError> {
     let io_err = |source| MediaError::Io { path: path.to_owned(), source };
     let decode_err = |source| MediaError::Decode { path: path.to_owned(), source };
@@ -196,21 +216,105 @@ pub(crate) fn open_format(path: &Path) -> Result<Box<dyn FormatReader>, MediaErr
     };
     let file = File::open(path).map_err(io_err)?;
     match probe(Box::new(file), path.extension().and_then(|e| e.to_str())) {
-        Err(refused @ SymError::Unsupported(_)) => match wav_mpeg::mpeg_data(path).map_err(io_err)? {
-            Some(data) => probe(Box::new(data), Some("mp3")).map_err(decode_err),
-            None => Err(decode_err(refused)),
-        },
+        Err(refused @ SymError::Unsupported(_)) => {
+            if let Some(data) = wav_mpeg::mpeg_data(path).map_err(io_err)? {
+                return probe(Box::new(data), Some("mp3")).map_err(decode_err);
+            }
+            match wav64::open(path).map_err(io_err)? {
+                Some(reader) => Ok(Box::new(reader)),
+                None => Err(recognize(path).map_err(io_err)?.unwrap_or_else(|| decode_err(refused))),
+            }
+        }
         result => result.map_err(decode_err),
     }
 }
 
+/// symphonia's decoders and the ones jq-media adds (Opus).
+pub(crate) fn codecs() -> &'static CodecRegistry {
+    static CODECS: LazyLock<CodecRegistry> = LazyLock::new(|| {
+        let mut registry = CodecRegistry::new();
+        symphonia::default::register_enabled_codecs(&mut registry);
+        registry.register_audio_decoder::<opus::OpusDecoder>();
+        registry
+    });
+    &CODECS
+}
+
+/// A decoder for `params` of the file `path`. A codec symphonia knows but
+/// cannot decode is named in the error.
+pub(crate) fn make_decoder(
+    path: &Path,
+    params: &AudioCodecParameters,
+) -> Result<Box<dyn AudioDecoder>, MediaError> {
+    codecs().make_audio_decoder(params, &AudioDecoderOptions::default()).map_err(|source| {
+        match (&source, codec_name(params.codec)) {
+            (SymError::Unsupported(_), Some(codec)) => {
+                MediaError::UnsupportedCodec { path: path.to_owned(), codec }
+            }
+            _ => MediaError::Decode { path: path.to_owned(), source },
+        }
+    })
+}
+
+/// The name of a codec jq-media cannot decode, as operators know it.
+fn codec_name(codec: AudioCodecId) -> Option<&'static str> {
+    Some(match codec {
+        // symphonia decodes AAC-LC in mono or stereo; it refuses the rest.
+        CODEC_ID_AAC => "HE-AAC or surround AAC",
+        CODEC_ID_AC3 => "AC-3 (Dolby Digital)",
+        CODEC_ID_EAC3 => "E-AC-3 (Dolby Digital Plus)",
+        CODEC_ID_AC4 => "AC-4",
+        CODEC_ID_TRUEHD => "Dolby TrueHD",
+        CODEC_ID_DCA => "DTS",
+        CODEC_ID_WMA => "WMA",
+        CODEC_ID_WAVPACK => "WavPack",
+        CODEC_ID_MONKEYS_AUDIO => "Monkey's Audio",
+        CODEC_ID_TTA => "TTA",
+        CODEC_ID_MUSEPACK => "Musepack",
+        CODEC_ID_SPEEX => "Speex",
+        CODEC_ID_ATRAC1 | CODEC_ID_ATRAC3 | CODEC_ID_ATRAC3PLUS | CODEC_ID_ATRAC9 => "ATRAC",
+        CODEC_ID_COOK | CODEC_ID_SIPR | CODEC_ID_RA10 | CODEC_ID_RA20 | CODEC_ID_RALF => "RealAudio",
+        _ => return None,
+    })
+}
+
+/// The error for a file no reader takes, if its first bytes tell what it
+/// is: a format met in practice that jq-media cannot read.
+fn recognize(path: &Path) -> std::io::Result<Option<MediaError>> {
+    use std::io::Read;
+    let mut head = [0u8; 16];
+    let n = File::open(path)?.read(&mut head)?;
+    let head = &head[..n];
+    // Windows Media (ASF): WMA, or a WMV video.
+    const ASF: [u8; 16] =
+        [0x30, 0x26, 0xb2, 0x75, 0x8e, 0x66, 0xcf, 0x11, 0xa6, 0xd9, 0x00, 0xaa, 0x00, 0x62, 0xce, 0x6c];
+    if head.starts_with(b"MThd") {
+        return Ok(Some(MediaError::Midi { path: path.to_owned() }));
+    }
+    let codec = if head == ASF {
+        "WMA"
+    } else if head.starts_with(&[0x0b, 0x77]) {
+        "AC-3 (Dolby Digital)"
+    } else if head.starts_with(&[0x7f, 0xfe, 0x80, 0x01]) {
+        "DTS"
+    } else if head.starts_with(b"wvpk") {
+        "WavPack"
+    } else if head.starts_with(b"MAC ") {
+        "Monkey's Audio"
+    } else {
+        return Ok(None);
+    };
+    Ok(Some(MediaError::UnsupportedCodec { path: path.to_owned(), codec }))
+}
+
 /// Reads the duration in seconds from the file header without decoding.
-/// `None` if the container does not state it.
+/// `None` if the container does not state it. Fails if the audio cannot
+/// be decoded, so a file is refused when it is added, not when it plays.
 pub fn probe_duration(path: &Path) -> Result<Option<f64>, MediaError> {
     let format = open_format(path)?;
-    let track = format
-        .default_track(TrackType::Audio)
-        .ok_or_else(|| MediaError::NoAudioTrack { path: path.to_owned() })?;
+    let no_track = || MediaError::NoAudioTrack { path: path.to_owned() };
+    let track = format.default_track(TrackType::Audio).ok_or_else(no_track)?;
+    make_decoder(path, track.codec_params.as_ref().and_then(|p| p.audio()).ok_or_else(no_track)?)?;
     let from_duration = track.time_base.zip(track.duration).and_then(|(tb, d)| tb.calc_duration(d));
     let from_frames = || {
         let rate = track.codec_params.as_ref()?.audio()?.sample_rate?;
@@ -388,6 +492,10 @@ mod tests {
         let error = load(&text, 48_000).unwrap_err();
         assert_eq!(error.to_string(), format!("{}: not a supported audio format", text.display()));
         assert_eq!(error.reason(), "not a supported audio format", "without the path");
+
+        let midi = dir.join("song.mid");
+        std::fs::write(&midi, b"MThd\x00\x00\x00\x06\x00\x01\x00\x01\x01\xe0").unwrap();
+        assert_eq!(load(&midi, 48_000).unwrap_err().reason(), "a MIDI file holds notes, not sound");
 
         assert_eq!(MediaError::Cancelled.to_string(), "cancelled");
         assert!(MediaError::Cancelled.source().is_none());

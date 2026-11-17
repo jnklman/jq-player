@@ -89,7 +89,8 @@
   `class=` with the `tw` tag from `app/src/lib/ui.ts`.
 - Linux needs `libasound2-dev` (cpal/midir: `jq-audio`, `jq-midi`, app) and the
   WebKitGTK packages for Tauri; `jq-engine`, `jq-media`, `jq-show`, `jq-core` build without them but need
-  clang and a C++ compiler (Signalsmith Stretch in `jq-stretch`, via bindgen).
+  clang and a C++ compiler (Signalsmith Stretch in `jq-stretch`, via bindgen) and CMake (libopus, built
+  by `opusic-sys` for `jq-media`; on Windows as well, on the `PATH`, e.g. the one in the VS Build Tools).
 - On Linux the audio hosts PipeWire, JACK and PulseAudio are additionally built in; for that
   `libjack-jackd2-dev`, `libpipewire-0.3-dev` and clang. ASIO (Windows) is the feature `asio`
   (ASIO SDK in `CPAL_ASIO_DIR`, LLVM). cpal picks the default host (Linux: PipeWire, PulseAudio,

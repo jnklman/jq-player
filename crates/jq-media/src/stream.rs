@@ -14,7 +14,7 @@ use rubato::{
     Async, FixedAsync, Indexing, Resampler, SincInterpolationParameters, SincInterpolationType,
     WindowFunction,
 };
-use symphonia::core::codecs::audio::{AudioDecoder, AudioDecoderOptions};
+use symphonia::core::codecs::audio::AudioDecoder;
 use symphonia::core::errors::Error as SymError;
 use symphonia::core::formats::{FormatReader, SeekMode, SeekTo, TrackType};
 use symphonia::core::units::{Time, TimeBase};
@@ -87,15 +87,12 @@ pub struct StreamDecoder {
 impl StreamDecoder {
     /// Opens `path`; `target_rate` `None` keeps the file's own rate.
     pub fn open(path: &Path, target_rate: Option<u32>) -> Result<Self, MediaError> {
-        let decode_err = |source| MediaError::Decode { path: path.to_owned(), source };
         let format = open_format(path)?;
         let no_track = || MediaError::NoAudioTrack { path: path.to_owned() };
         let track = format.default_track(TrackType::Audio).ok_or_else(no_track)?;
         let params = track.codec_params.as_ref().and_then(|p| p.audio()).ok_or_else(no_track)?;
         let source_rate = params.sample_rate.ok_or_else(no_track)?;
-        let decoder = symphonia::default::get_codecs()
-            .make_audio_decoder(params, &AudioDecoderOptions::default())
-            .map_err(decode_err)?;
+        let decoder = crate::make_decoder(path, params)?;
         let from_duration = track.time_base.zip(track.duration).and_then(|(tb, d)| tb.calc_duration(d));
         let duration = from_duration
             .map(|t| t.as_secs_f64())

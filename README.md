@@ -118,12 +118,12 @@ changed in the settings.
 Prerequisites: Rust ([rustup](https://rustup.rs)) and Node.js. On Linux additionally:
 
 ```sh
-sudo apt install libasound2-dev libjack-jackd2-dev libpipewire-0.3-dev clang pkg-config
+sudo apt install libasound2-dev libjack-jackd2-dev libpipewire-0.3-dev clang cmake pkg-config
 ```
 
 plus the [WebKitGTK packages for Tauri](https://tauri.app/start/prerequisites/#linux). On Windows:
-Rust with MSVC and LLVM; for ASIO also the [ASIO SDK](https://www.steinberg.net/asiosdk) in
-`CPAL_ASIO_DIR` and the feature `asio` (`npm run tauri build -- --features asio`).
+Rust with MSVC, LLVM and [CMake](https://cmake.org) on the `PATH` (it builds libopus); for ASIO
+also the [ASIO SDK](https://www.steinberg.net/asiosdk) in `CPAL_ASIO_DIR` and the feature `asio` (`npm run tauri build -- --features asio`).
 
 ```sh
 cargo test                     # Rust tests
