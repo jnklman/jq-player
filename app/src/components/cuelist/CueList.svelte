@@ -22,7 +22,7 @@
   import CueMenu from './CueMenu.svelte';
   import CueRow from './CueRow.svelte';
   import CueToolbar from './CueToolbar.svelte';
-  import { CUE_ROW_HEIGHT, cueGrid, cueRow, headRow, SCENE_ROW_HEIGHT } from './grid';
+  import { CUE_ROW_HEIGHT, cueGrid, cueRow, headRow, INCOMING_TIP, SCENE_ROW_HEIGHT, THROUGH_LINE } from './grid';
   import SceneRow from './SceneRow.svelte';
 
   const editing = $derived(mode() === 'edit');
@@ -139,9 +139,15 @@
         if (row.dataset.scene !== undefined) scenes.push({ row, top: y, height });
         y += height;
       }
-      scenes.forEach(({ row, height }, i) => {
+      // A marker away from its place is stuck (or being pushed out): the cue above it has gone under the header and
+      // the one below slides under the marker. The chain line through it (`--chain-cut` shortens it from the top)
+      // draws back with the arrow below and is gone when that arrow's head is covered, never hanging on its own.
+      scenes.forEach(({ row, top, height }, i) => {
         const next = scenes[i + 1]?.top ?? Infinity;
-        row.style.top = `${Math.min(LIST_HEADER_HEIGHT, next - height)}px`;
+        const stuck = Math.min(LIST_HEADER_HEIGHT, next - height);
+        row.style.top = `${stuck}px`;
+        const cut = Math.min(THROUGH_LINE, (Math.max(0, stuck - top) * THROUGH_LINE) / INCOMING_TIP);
+        row.style.setProperty('--chain-cut', `${cut}px`);
       });
     };
     push();

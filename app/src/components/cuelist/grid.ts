@@ -8,6 +8,12 @@ export const cueGrid = tw`grid min-w-175 grid-cols-[44px_28px_52px_minmax(0,1.4f
 export const CUE_ROW_HEIGHT = 48;
 export const SCENE_ROW_HEIGHT = 32;
 
+/** How far below a cue row's top the arrowhead of a chain coming in through a scene marker ends, in px
+ * (`CueRow`: drawn from 6 px above the top, the tip at 22 px with half the stroke). */
+export const INCOMING_TIP = 17;
+/** A scene marker's chain line reaches 7 px past its top and bottom, over the row lines. */
+export const THROUGH_LINE = SCENE_ROW_HEIGHT + 14;
+
 const row = tw`cursor-default border-b border-row-line py-1.5 focus:outline-hidden`;
 
 /** A row of the list, fixed height so the list never jumps. */

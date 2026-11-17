@@ -125,6 +125,43 @@ describe('CueList', () => {
     }
   });
 
+  it('pushes a stuck scene marker out with the next one and draws its chain line back meanwhile', async () => {
+    await list();
+    // jsdom lays nothing out: every row 40 px high, the rows starting `offset` px below the viewport's top.
+    let offset = 32;
+    const height = vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(40);
+    const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      return { top: this.dataset.cueRows === undefined ? 0 : offset } as DOMRect;
+    });
+    try {
+      const viewport = document.querySelector('[data-slot="scroll-area-viewport"]') as HTMLElement;
+      const scroll = async (to: number) => {
+        offset = to;
+        await fireEvent.scroll(viewport);
+      };
+      const cut = (id: string) => row(id).style.getPropertyValue('--chain-cut');
+      // Unscrolled, Act 2 sits in its place (152 px), its chain line whole.
+      await scroll(32);
+      expect(row('s2').style.top).toBe('32px');
+      expect(cut('s2')).toBe('0px');
+      // Act 2 stuck 8.5 px past its place, half way to covering the arrowhead below: half its line is left.
+      // Act 1, pushed up by it, has none.
+      await scroll(-96.5);
+      expect(row('s1').style.top).toBe('-16.5px');
+      expect(cut('s1')).toBe('46px');
+      expect(cut('s2')).toBe('23px');
+      await scroll(-200);
+      expect(cut('s2')).toBe('46px');
+      await scroll(32);
+      expect(cut('s2')).toBe('0px');
+    } finally {
+      height.mockRestore();
+      rect.mockRestore();
+    }
+  });
+
   it('selects with a click, adds with Ctrl and extends with Shift while editing', async () => {
     const { user } = await list();
     await user.click(row('a'));

@@ -13,7 +13,8 @@
   // A scene marker of the list: a heading across the row. Playback passes
   // over it, so it has no number, type or status; a chain running past it
   // is drawn through it. It sticks below the list's header until the next
-  // marker pushes it out (`top` set by the list), so its chain line stays inside the row.
+  // marker pushes it out (`top` set by the list), so its chain line stays inside the row. Stuck, that line draws
+  // back from the top (`--chain-cut`, set by the list) as the cue below slides under the marker.
   let {
     cue,
     through,
@@ -69,7 +70,7 @@
     {#if through}
       <span
         class={[
-          'pointer-events-none absolute -top-1.75 -bottom-1.75 left-[5.25px] w-[1.5px] bg-current',
+          'pointer-events-none absolute top-[calc(var(--chain-cut,0px)-7px)] -bottom-1.75 left-[5.25px] w-[1.5px] bg-current',
           through.waiting ? 'text-primary' : 'text-dim',
         ]}
       ></span>

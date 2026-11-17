@@ -31,6 +31,11 @@ different in the app, not how the code changed). The Release workflow turns
   others) is refused when it is added, naming the format, instead of failing only when the cue loads;
   MIDI files are explained.
 
+### Fixed
+
+- The chain line drawn through a scene marker no longer stays on screen while the marker sticks at the
+  top of the cue list after the chain has scrolled away.
+
 ## 0.2.1 – 2026-11-15
 
 ### Added
