@@ -743,17 +743,26 @@ impl Session {
                     .map(|e| Notice::Warning(t!("session.preview_error", error = e))),
             );
         }
+        // A device opened again may be another one: "Standardgerät" follows the system default.
+        let switched =
+            (self.output.refresh(), self.preview_output.as_mut().is_some_and(AudioOutput::refresh));
         let frames = self.output.callback_frames();
         let frames_changed = frames != self.frames_seen;
         self.frames_seen = frames;
         let lost = (self.output.lost(), self.preview_output.as_ref().and_then(AudioOutput::lost));
-        if lost == self.lost_seen {
+        if lost == self.lost_seen && switched == (false, false) {
             return frames_changed;
         }
         let preview = self.preview_output.as_ref().map_or("", |o| o.info().device.as_str());
-        for (label, device, before, now) in [
-            (t!("session.audio_output"), self.output.info().device.as_str(), &self.lost_seen.0, &lost.0),
-            (t!("session.preview_output"), preview, &self.lost_seen.1, &lost.1),
+        for (label, device, before, now, switched) in [
+            (
+                t!("session.audio_output"),
+                self.output.info().device.as_str(),
+                &self.lost_seen.0,
+                &lost.0,
+                switched.0,
+            ),
+            (t!("session.preview_output"), preview, &self.lost_seen.1, &lost.1, switched.1),
         ] {
             match (before, now) {
                 (None, Some(reason)) => notices.push(Notice::Error(t!(
@@ -765,6 +774,11 @@ impl Session {
                 (Some(_), None) => {
                     notices.push(Notice::Warning(t!("session.device_back", label = label, device = device)))
                 }
+                (None, None) if switched => notices.push(Notice::Warning(t!(
+                    "session.device_switched",
+                    label = label,
+                    device = device
+                ))),
                 _ => {}
             }
         }

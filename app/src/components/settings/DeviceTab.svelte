@@ -13,6 +13,7 @@
   import { ui } from '../../lib/store.svelte';
   import { check, hint } from '../../lib/ui';
   import SliderField from '../fields/SliderField.svelte';
+  import ReloadDevices from '../ReloadDevices.svelte';
   import SimpleSelect from '../SimpleSelect.svelte';
   import SettingGroup from './SettingGroup.svelte';
   import SettingRow from './SettingRow.svelte';
@@ -63,15 +64,18 @@
       />
     </SettingRow>
     <SettingRow label={t('midi_fields.device')} keywords={t('device.device_keywords')}>
-      <SimpleSelect
-        class="w-full max-w-90"
-        aria-label={t('midi_fields.device')}
-        value={draft.device ?? ''}
-        tip={setup.selectedDevice?.description}
-        disabled={setup.loading}
-        options={setup.deviceOptions}
-        onchange={(device) => (draft.device = device || null)}
-      />
+      <div class="flex w-full max-w-90 items-center gap-1">
+        <SimpleSelect
+          class="min-w-0 grow"
+          aria-label={t('midi_fields.device')}
+          value={draft.device ?? ''}
+          tip={setup.selectedDevice?.description}
+          disabled={setup.loading}
+          options={setup.deviceOptions}
+          onchange={(device) => (draft.device = device || null)}
+        />
+        <ReloadDevices {setup} />
+      </div>
     </SettingRow>
     <SettingRow label={t('device.channels')} keywords={t('device.channels_keywords')}>
       <div class="flex flex-wrap items-center gap-2.5">

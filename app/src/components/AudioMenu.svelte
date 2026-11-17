@@ -10,6 +10,7 @@
   import { positiveOrNull } from '../lib/settings';
   import { attemptChange, cuesRunning, ui } from '../lib/store.svelte';
   import { field, hint } from '../lib/ui';
+  import ReloadDevices from './ReloadDevices.svelte';
   import SimpleSelect from './SimpleSelect.svelte';
 
   // Content of the popover on the audio status in the header: the device settings of the settings dialog's
@@ -86,18 +87,21 @@
   </Label>
   <Label class={field}>
     {t('midi_fields.device')}
-    <SimpleSelect
-      class="w-full"
-      aria-label={t('midi_fields.device')}
-      value={draft.device ?? ''}
-      tip={setup.selectedDevice?.description}
-      disabled={locked || setup.loading}
-      options={setup.deviceOptions}
-      onchange={(device) => {
-        draft.device = device || null;
-        void apply();
-      }}
-    />
+    <div class="flex items-center gap-1">
+      <SimpleSelect
+        class="min-w-0 grow"
+        aria-label={t('midi_fields.device')}
+        value={draft.device ?? ''}
+        tip={setup.selectedDevice?.description}
+        disabled={locked || setup.loading}
+        options={setup.deviceOptions}
+        onchange={(device) => {
+          draft.device = device || null;
+          void apply();
+        }}
+      />
+      <ReloadDevices {setup} disabled={locked} />
+    </div>
   </Label>
   <div class="grid grid-cols-[6rem_minmax(0,1fr)] gap-2">
     <Label class={field}>

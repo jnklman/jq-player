@@ -15,6 +15,7 @@ use jq_engine::{Controller, EngineConfig, Mixer};
 use jq_i18n::t;
 use serde::Serialize;
 
+mod com;
 #[cfg(target_os = "linux")]
 mod pipewire_default;
 mod realtime;
@@ -176,6 +177,9 @@ struct Shared {
     error_budget: AtomicU32,
     /// Why the device is lost, while it is.
     lost: Mutex<Option<String>>,
+    /// The device as last opened again, until [`AudioOutput::refresh`]
+    /// takes it: "Standardgerät" may now be another one.
+    reopened: Mutex<Option<OutputInfo>>,
     /// Frames of the last callback; 0 before the first.
     callback_frames: AtomicU32,
     /// Peak of the keep-alive noise, linear, as `f32` bits; 0 = off (see
@@ -261,6 +265,7 @@ fn failure_text(code: u8) -> String {
         1 => t!("audio.failure.device_lost"),
         2 => t!("audio.failure.stream_invalidated"),
         3 => t!("audio.failure.host_lost"),
+        4 => t!("audio.failure.default_changed"),
         _ => t!("audio.failure.silent"),
     }
 }
@@ -296,6 +301,8 @@ struct Up {
     _stream: cpal::Stream,
     watch: Watch,
     _held: Held,
+    /// Id of the device it plays on.
+    device: String,
 }
 
 /// Devices our streams have open. ASIO loads one driver at a time, so while
@@ -422,6 +429,7 @@ impl AudioOutput {
     /// the output and the engine's controller.
     pub fn open(spec: &OutputSpec, max_voices: usize) -> Result<(Self, Controller), AudioError> {
         realtime::keep_full_speed();
+        com::ready();
         let shared = Arc::new(Shared::default());
         let (ready_tx, ready_rx) = mpsc::sync_channel(1);
         let (stop_tx, stop_rx) = mpsc::channel();
@@ -439,6 +447,7 @@ impl AudioOutput {
     /// The device `open` would use and how many channels it takes. Slow on
     /// ALSA (lists the cards), so only call when the device changes.
     pub fn probe(spec: &OutputSpec) -> Result<DeviceProbe, AudioError> {
+        com::ready();
         let (host, device) = resolve(spec)?;
         Ok(DeviceProbe { name: describe(&device).0, max_channels: capacity(&host, &device) })
     }
@@ -507,6 +516,20 @@ impl AudioOutput {
         self.shared.keep_alive.store(peak.to_bits(), Ordering::Relaxed);
     }
 
+    /// Takes the device the output opened again since the last call (the
+    /// system default may have changed meanwhile); returns whether `info`
+    /// changed. Call before [`Self::lost`], so a device back is named right.
+    pub fn refresh(&mut self) -> bool {
+        let reopened = self.shared.reopened.lock().ok().and_then(|mut r| r.take());
+        match reopened {
+            Some(info) if info != self.info => {
+                self.info = info;
+                true
+            }
+            _ => false,
+        }
+    }
+
     pub fn lost(&self) -> Option<String> {
         self.shared.lost.lock().ok()?.clone()
     }
@@ -540,6 +563,8 @@ fn supervise(
     ready: SyncSender<Result<(OutputInfo, Controller), AudioError>>,
     stop: Receiver<()>,
 ) {
+    // Before the device is resolved, so a change meanwhile is followed.
+    let changes_at_open = com::default_changes();
     let opened = prepare(&spec).and_then(|prepared| {
         let config = &prepared.config;
         let (controller, mixer) = jq_engine::engine(EngineConfig {
@@ -562,6 +587,13 @@ fn supervise(
             return;
         }
     };
+    // Without a device set, WASAPI opens the system default as the device it
+    // is (see `default_device`), so the output follows the default itself.
+    let follow = spec.device.is_none() && info.host == "WASAPI";
+    // Default changes taken so far; one seen is followed until it worked,
+    // tried again at `next_follow` if the new device does not open yet.
+    let mut changes_seen = changes_at_open;
+    let mut next_follow = Instant::now();
     // The engine keeps its sample rate and channels, so the stream must too.
     let pinned = OutputSpec {
         host: Some(info.host.clone()),
@@ -587,11 +619,49 @@ fn supervise(
         let null = NullThread::start(lent, info.sample_rate, info.channels);
         Link::Down { null, reason, retry: Instant::now() + RETRY_INTERVAL }
     };
+    // Plays the mixer on the prepared device; `reason` says why if it fails.
+    let reopen = |prepared: Prepared, reason: u8| match Lent::take(&home)
+        .map(|lent| start(&prepared, lent, &shared))
+    {
+        Some(Ok(up)) => {
+            // Before the device counts as back, so whoever sees it back
+            // also sees which device that is.
+            if let Ok(mut reopened) = shared.reopened.lock() {
+                *reopened = Some(prepared.info);
+            }
+            set_lost(&shared, None);
+            Link::Up(up)
+        }
+        // A failed start drops the lent mixer, so it is home again.
+        Some(Err(e)) => fall_back(reason, Some(e)),
+        None => fall_back(reason, None),
+    };
     let mut link = Link::Up(up);
     while let Err(RecvTimeoutError::Timeout) = stop.recv_timeout(CHECK_INTERVAL) {
         let now = Instant::now();
         link = match link {
             Link::Up(mut up) => match up.watch.failure(now) {
+                // The system default moved to another device: over to it,
+                // prepared first, so the old one plays until then.
+                None if follow && com::default_changes() != changes_seen && now >= next_follow => {
+                    let changes = com::default_changes();
+                    match prepare(&pinned) {
+                        Ok(prepared) if prepared.listing.id != up.device => {
+                            changes_seen = changes;
+                            drop(up);
+                            reopen(prepared, 4)
+                        }
+                        // Back on the device it plays on.
+                        Ok(_) => {
+                            changes_seen = changes;
+                            Link::Up(up)
+                        }
+                        Err(_) => {
+                            next_follow = now + RETRY_INTERVAL;
+                            Link::Up(up)
+                        }
+                    }
+                }
                 None => Link::Up(up),
                 Some(reason) => {
                     drop(up);
@@ -604,15 +674,7 @@ fn supervise(
                 Err(_) => Link::Down { null, reason, retry: now + RETRY_INTERVAL },
                 Ok(prepared) => {
                     drop(null);
-                    match Lent::take(&home).map(|lent| start(&prepared, lent, &shared)) {
-                        Some(Ok(up)) => {
-                            set_lost(&shared, None);
-                            Link::Up(up)
-                        }
-                        // A failed start drops the lent mixer, so it is home again.
-                        Some(Err(e)) => fall_back(reason, Some(e)),
-                        None => fall_back(reason, None),
-                    }
+                    reopen(prepared, reason)
                 }
             },
             Link::Gone { reason } => fall_back(reason, None),
@@ -693,7 +755,8 @@ fn start(prepared: &Prepared, lent: Lent, shared: &Arc<Shared>) -> Result<Up, Au
     };
     stream.play()?;
     let held = Held::new(prepared.listing.clone());
-    Ok(Up { _stream: stream, watch: Watch::new(pulse, Instant::now()), _held: held })
+    let device = prepared.listing.id.clone();
+    Ok(Up { _stream: stream, watch: Watch::new(pulse, Instant::now()), _held: held, device })
 }
 
 pub fn host_names() -> Vec<String> {
@@ -724,6 +787,7 @@ fn hosts() -> Vec<HostId> {
 }
 
 pub fn list_devices(host: Option<&str>) -> Result<Vec<DeviceInfo>, AudioError> {
+    com::ready();
     let host = pick_host(host)?;
     let mut devices: Vec<DeviceInfo> = listed_devices(&host)?
         .into_iter()
@@ -887,30 +951,34 @@ where
                 }
             }
         },
-        // Never block here: if the list is busy, the error is dropped.
-        // Some hosts call this on the audio thread: xruns (the storm case)
-        // are only counted, the rare other errors are formatted within a
-        // small budget that `take_errors` refills.
-        move |err: cpal::Error| {
-            let kind = err.kind();
-            let code = failure_code(kind);
-            if code != 0 {
-                pulse.failure.store(code, Ordering::Relaxed);
-            }
-            if matches!(kind, cpal::ErrorKind::Xrun) {
-                shared.xruns.fetch_add(1, Ordering::Relaxed);
-                return;
-            }
-            if shared.error_budget.fetch_add(1, Ordering::Relaxed) >= MAX_ERRORS as u32 {
-                return;
-            }
-            if let Ok(mut e) = shared.errors.try_lock() {
-                e.push(err.to_string());
-            }
-        },
+        move |err: cpal::Error| stream_error(&err, &pulse, &shared),
         None,
     )?;
     Ok(stream)
+}
+
+/// A stream's error callback. Never blocks: if the list is busy, the error is
+/// dropped. Some hosts call it on the audio thread: xruns (the storm case)
+/// are only counted, the rare other errors are formatted within a small
+/// budget that `take_errors` refills. An error that ends the stream is only
+/// marked: the device is then reported lost, which would say it twice.
+fn stream_error(err: &cpal::Error, pulse: &Pulse, shared: &Shared) {
+    let kind = err.kind();
+    let code = failure_code(kind);
+    if code != 0 {
+        pulse.failure.store(code, Ordering::Relaxed);
+        return;
+    }
+    if matches!(kind, cpal::ErrorKind::Xrun) {
+        shared.xruns.fetch_add(1, Ordering::Relaxed);
+        return;
+    }
+    if shared.error_budget.fetch_add(1, Ordering::Relaxed) >= MAX_ERRORS as u32 {
+        return;
+    }
+    if let Ok(mut e) = shared.errors.try_lock() {
+        e.push(err.to_string());
+    }
 }
 
 fn pick_host(name: Option<&str>) -> Result<Host, AudioError> {
@@ -971,7 +1039,7 @@ fn host_of(device: &str) -> Option<Host> {
 }
 
 fn pick_device(host: &Host, wanted: Option<&str>) -> Result<Device, AudioError> {
-    let Some(wanted) = wanted else { return host.default_output_device().ok_or(AudioError::NoDefaultDevice) };
+    let Some(wanted) = wanted else { return default_device(host) };
     // Any PCM by exact id, so a hand-written one in local.settings still works;
     // a description only among the listed ones, without opening the rest.
     if let Some(device) = host.devices()?.find(|d| device_id(d) == wanted) {
@@ -984,9 +1052,58 @@ fn pick_device(host: &Host, wanted: Option<&str>) -> Result<Device, AudioError> 
         .ok_or_else(|| AudioError::DeviceNotFound(wanted.into()))
 }
 
+/// The default output device. WASAPI's is the device it is now, not cpal's
+/// virtual one: cpal's notification callbacks for that one put threads of
+/// Windows' pool into an STA, and once the default has changed, activating
+/// it fails with RPC_E_CHANGED_MODE until restart (cpal issue #1402, open in
+/// 0.18.2; a process with an MTA, as with the webview, is affected). The
+/// concrete device opens the way a chosen one does, and the supervisor
+/// follows the default itself (`com::default_changes`).
+///
+/// Workaround: once a cpal release fixes #1402, return the virtual default
+/// here, drop the following in `supervise` and the notification client in
+/// `com`, and reopen a default output on `StreamInvalidated` at once.
+fn default_device(host: &Host) -> Result<Device, AudioError> {
+    let default = host.default_output_device().ok_or(AudioError::NoDefaultDevice)?;
+    if host.id().name() == "WASAPI" {
+        let id = device_id(&default);
+        if let Some(device) = host.devices()?.find(|d| device_id(d) == id) {
+            return Ok(device);
+        }
+    }
+    Ok(default)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_lost_device_is_marked_not_listed_as_an_error() {
+        let (pulse, shared) = (Pulse::default(), Shared::default());
+        stream_error(&cpal::ErrorKind::DeviceNotAvailable.into(), &pulse, &shared);
+        assert_eq!(pulse.failure.load(Ordering::Relaxed), 1);
+        assert!(shared.errors.lock().unwrap().is_empty());
+        // Other errors are listed and end nothing.
+        let pulse = Pulse::default();
+        stream_error(&cpal::ErrorKind::BackendError.into(), &pulse, &shared);
+        assert_eq!(pulse.failure.load(Ordering::Relaxed), 0);
+        assert_eq!(shared.errors.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn refresh_takes_the_device_opened_again() {
+        let (mut output, _controller) = AudioOutput::null(48_000, 2, 4);
+        assert!(!output.refresh());
+        let other = OutputInfo { device: "Headset".into(), ..output.info().clone() };
+        *output.shared.reopened.lock().unwrap() = Some(other.clone());
+        assert!(output.refresh());
+        assert_eq!(output.info(), &other);
+        // Taken once; the same device again changes nothing.
+        assert!(!output.refresh());
+        *output.shared.reopened.lock().unwrap() = Some(other);
+        assert!(!output.refresh());
+    }
 
     #[test]
     fn mixer_comes_home_from_the_null_thread() {

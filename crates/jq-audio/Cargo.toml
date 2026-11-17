@@ -20,9 +20,13 @@ cpal = { version = "0.18.2", features = ["jack", "pipewire", "pulseaudio"] }
 # Reads the default sink, see src/pipewire_default.rs.
 pipewire = "0.10"
 
-# MMCSS for the callback thread and no power throttling, see src/realtime.rs.
+# MMCSS for the callback thread and no power throttling (src/realtime.rs);
+# COM for the device enumerator (src/com.rs).
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading"] }
+# The version cpal uses, so nothing is built twice.
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Media_Audio", "Win32_System_Com", "Win32_UI_Shell_PropertiesSystem"] }
+windows-core = "0.62"
 
 # ASIO on Windows needs the ASIO SDK (CPAL_ASIO_DIR) and LLVM, so it is opt-in.
 [features]

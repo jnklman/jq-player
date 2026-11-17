@@ -26,6 +26,8 @@ different in the app, not how the code changed). The Release workflow turns
 - WAV files larger than 4 GB (RF64/BW64, as field recorders and broadcast software write them) and
   Wave64 files (.w64) play instead of being refused.
 - Opus files (.opus, and .ogg files holding Opus) play, also in 5.1.
+- A button next to the audio device list (Settings › Device and the header's audio menu) searches
+  for devices again.
 
 ### Changed
 
@@ -39,6 +41,13 @@ different in the app, not how the code changed). The Release workflow turns
 ### Fixed
 
 - Clicking a disabled input field no longer puts a blinking text cursor in it.
+- Windows: an audio device plugged in while the program runs is listed without restarting the program.
+- Windows: with "Default device", the output moves to the new system default device as soon as it
+  changes, and the header names the new device. If the device in use is disconnected, it is reported
+  as lost and the output moves on about a second later. Before, opening the default device could
+  fail with "the thread mode cannot be changed after it is set" until the program was restarted.
+- An audio device that is disconnected or stops working is reported in one message, not also with a
+  technical error such as "Failed to get current padding".
 - The chain line drawn through a scene marker no longer stays on screen while the marker sticks at the
   top of the cue list after the chain has scrolled away.
 

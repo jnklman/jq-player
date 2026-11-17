@@ -34,6 +34,11 @@ export class AudioSetup {
     this.loading = false;
   }
 
+  /** Lists the devices anew, e.g. after one was plugged in. */
+  reload() {
+    void this.load(this.draft().host);
+  }
+
   /** Another host: its default device, and its device list. */
   setHost(host: string) {
     this.draft().host = host || null;

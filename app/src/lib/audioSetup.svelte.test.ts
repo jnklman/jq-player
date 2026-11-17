@@ -54,6 +54,17 @@ describe('AudioSetup', () => {
     expect(audio.devices?.host).toBe('new');
   });
 
+  it('lists the devices of the draft host anew on reload', async () => {
+    const { audio, draft } = await setup({ host: 'ASIO' });
+    draft.device = 'new';
+    expect(audio.unknownDevice).toBe(true);
+    backend.on('audio_devices', ({ host }) => ({ hosts: [], host, devices: [device('new')] }));
+    audio.reload();
+    await settle();
+    expect(backend.invoked('audio_devices')).toEqual([{ host: 'ASIO' }, { host: 'ASIO' }]);
+    expect(audio.selectedDevice?.id).toBe('new');
+  });
+
   it('keeps an unknown device as its own option', async () => {
     const { audio, draft } = await setup({ device: 'desk' });
     expect(audio.selectedDevice?.id).toBe('desk');

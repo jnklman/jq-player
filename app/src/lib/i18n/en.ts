@@ -975,6 +975,8 @@ const en = {
   'device.device_keywords': 'interface sound card audio device Soundkarte Audiogerät',
   'device.searching': 'Searching for devices …',
   'device.not_found': '{name} (not found)',
+  'device.reload': 'Search for devices again',
+  'device.reload_tip': 'Search for devices again, e.g. after plugging one in',
   'device.channels': 'Channels',
   'device.channels_keywords': 'channels Kanäle',
   'device.default': 'Default',

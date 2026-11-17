@@ -976,6 +976,8 @@ const de: Record<MessageKey, string> = {
   'device.device_keywords': 'Interface Soundkarte Audiogerät sound card',
   'device.searching': 'Geräte werden gesucht …',
   'device.not_found': '{name} (nicht gefunden)',
+  'device.reload': 'Erneut nach Geräten suchen',
+  'device.reload_tip': 'Erneut nach Geräten suchen, z. B. nachdem eines angeschlossen wurde',
   'device.channels': 'Kanäle',
   'device.channels_keywords': 'Channels',
   'device.default': 'Standard',
