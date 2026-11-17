@@ -3,7 +3,8 @@
 // changes writes) the dialog's draft; the open device comes from the view.
 
 import { api, type AudioDevices, type LocalSettings, type ShowView } from './api';
-import { fmtNumber } from './i18n/index.svelte';
+import { fmtNumber, t } from './i18n/index.svelte';
+import { type Option, withMissing } from './options';
 import { attempt } from './store.svelte';
 
 /** Buffer sizes the backend takes (powers of two). */
@@ -80,6 +81,54 @@ export class AudioSetup {
       !current.audio_error;
     return same ? current.audio_frames : null;
   });
+
+  /** The hosts to choose from; one stored but no longer offered stays as its own option. */
+  readonly hostOptions = $derived.by<Option<string>[]>(() =>
+    withMissing(
+      [
+        { value: '', label: t('device.system_default') },
+        ...(this.devices?.hosts ?? []).map((host) => ({ value: host, label: host })),
+      ],
+      this.devices ? this.draft().host : null,
+      t('device.not_available', { name: this.draft().host ?? '' }),
+    ),
+  );
+
+  /** The devices of the chosen host. */
+  readonly deviceOptions = $derived.by<Option<string>[]>(() => {
+    const device = this.draft().device;
+    return [
+      { value: '', label: this.loading ? t('device.searching') : t('audio.default_device') },
+      ...(this.devices?.devices ?? []).map((info) => ({ value: info.id, label: info.name })),
+      ...(this.unknownDevice && device ? [{ value: device, label: t('device.not_found', { name: device }) }] : []),
+    ];
+  });
+
+  /** The buffer sizes the device takes, with their latency; '' is the default. */
+  readonly bufferOptions = $derived.by<Option<string>[]>(() => {
+    const frames = this.draft().buffer_frames;
+    return withMissing(
+      [
+        {
+          value: '',
+          label:
+            this.defaultFrames === null
+              ? t('device.default')
+              : t('device.default_frames', { frames: this.defaultFrames, latency: this.latency(this.defaultFrames) }),
+        },
+        ...this.bufferSizes.map((size) => ({ value: String(size), label: `${size} (${this.latency(size)})` })),
+      ],
+      frames === null ? null : String(frames),
+      t('device.unsupported', { frames: frames ?? 0 }),
+    );
+  });
+
+  /** The buffer select's value: none while the host sets the size. */
+  readonly bufferValue = $derived.by(() => (this.hostSetsBuffer ? '' : String(this.draft().buffer_frames ?? '')));
+
+  setBuffer(frames: string) {
+    this.draft().buffer_frames = frames ? Number(frames) : null;
+  }
 
   /** Milliseconds `frames` last at the open device's rate, e.g. "5,3 ms". */
   latency(frames: number): string {

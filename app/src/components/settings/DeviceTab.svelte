@@ -8,7 +8,6 @@
   import { fmtDb } from '../../lib/format';
   import { t } from '../../lib/i18n/index.svelte';
   import { liveNumber } from '../../lib/input';
-  import { withMissing } from '../../lib/options';
   import { KEEP_ALIVE_RANGE, positiveOrNull } from '../../lib/settings';
   import { settingsView } from '../../lib/settingsView.svelte';
   import { ui } from '../../lib/store.svelte';
@@ -23,7 +22,6 @@
   let { draft = $bindable(), setup }: { draft: LocalSettings; setup: AudioSetup } = $props();
 
   const view = $derived(ui.view!);
-  const devices = $derived(setup.devices);
   const settings = settingsView();
 </script>
 
@@ -60,14 +58,7 @@
         class="w-full max-w-90"
         aria-label={t('device.host')}
         value={draft.host ?? ''}
-        options={withMissing(
-          [
-            { value: '', label: t('device.system_default') },
-            ...(devices?.hosts ?? []).map((host) => ({ value: host, label: host })),
-          ],
-          devices ? draft.host : null,
-          t('device.not_available', { name: draft.host ?? '' }),
-        )}
+        options={setup.hostOptions}
         onchange={(host) => setup.setHost(host)}
       />
     </SettingRow>
@@ -78,13 +69,7 @@
         value={draft.device ?? ''}
         tip={setup.selectedDevice?.description}
         disabled={setup.loading}
-        options={[
-          { value: '', label: setup.loading ? t('device.searching') : t('audio.default_device') },
-          ...(devices?.devices ?? []).map((device) => ({ value: device.id, label: device.name })),
-          ...(setup.unknownDevice && draft.device
-            ? [{ value: draft.device, label: t('device.not_found', { name: draft.device }) }]
-            : []),
-        ]}
+        options={setup.deviceOptions}
         onchange={(device) => (draft.device = device || null)}
       />
     </SettingRow>
@@ -117,29 +102,10 @@
       <SimpleSelect
         class="w-full max-w-90"
         aria-label={t('device.buffer')}
-        value={setup.hostSetsBuffer ? '' : String(draft.buffer_frames ?? '')}
+        value={setup.bufferValue}
         disabled={setup.hostSetsBuffer}
-        options={withMissing(
-          [
-            {
-              value: '',
-              label:
-                setup.defaultFrames === null
-                  ? t('device.default')
-                  : t('device.default_frames', {
-                      frames: setup.defaultFrames,
-                      latency: setup.latency(setup.defaultFrames),
-                    }),
-            },
-            ...setup.bufferSizes.map((frames) => ({
-              value: String(frames),
-              label: `${frames} (${setup.latency(frames)})`,
-            })),
-          ],
-          draft.buffer_frames === null ? null : String(draft.buffer_frames),
-          t('device.unsupported', { frames: draft.buffer_frames ?? 0 }),
-        )}
-        onchange={(frames) => (draft.buffer_frames = frames ? Number(frames) : null)}
+        options={setup.bufferOptions}
+        onchange={(frames) => setup.setBuffer(frames)}
       />
       <span class={hint}>
         {setup.hostSetsBuffer ? t('device.jack_buffer') : t('device.buffer_hint')}

@@ -19,6 +19,7 @@
   import { attempt, type Mode, mode as currentMode, saveShow, ui } from '../lib/store.svelte';
   import { dragFill } from '../lib/ui';
   import AppMenu from './AppMenu.svelte';
+  import AudioMenu from './AudioMenu.svelte';
   import LayoutMenu from './layout/LayoutMenu.svelte';
   import ShowMenu from './ShowMenu.svelte';
   import Stopwatches from './Stopwatches.svelte';
@@ -30,6 +31,7 @@
   const keepAlive = $derived(view.keep_alive);
 
   let menuOpen = $state(false);
+  let audioOpen = $state(false);
 </script>
 
 <!-- Doubles as the title bar: everything but controls drags the window, double-click maximizes.
@@ -151,24 +153,45 @@
     <div class="grow"></div>
 
     <div class="flex flex-wrap items-center gap-3.5 text-xs text-muted-foreground">
-      <Tooltip
-        tip={view.audio_error ??
-          (view.audio_lost && t('header.audio_lost', { reason: view.audio_lost })) ??
-          `${view.audio.device_detail}\n${view.audio.host} · ${view.audio.sample_rate} Hz · ${t('header.channels', { count: view.audio.channels })} · ${view.audio.sample_format}`}
-        side="bottom"
-      >
-        {#snippet child({ props })}
-          <span {...props} class="flex max-w-80 min-w-0 items-center gap-1.5">
-            <span
-              class={['size-2 shrink-0 rounded-full', view.audio_error || view.audio_lost ? 'bg-stop-soft' : 'bg-go']}
-            ></span>
-            <span class="truncate">{shortDevice(view.audio.device)}</span>
-            <span class="shrink-0"
-              >· {fmtNumber(view.audio.sample_rate / 1000)} kHz · {view.audio.channels} {t('header.ch')}</span
-            >
-          </span>
-        {/snippet}
-      </Tooltip>
+      <Popover.Root bind:open={audioOpen}>
+        <Tooltip
+          tip={view.audio_error ??
+            (view.audio_lost && t('header.audio_lost', { reason: view.audio_lost })) ??
+            `${view.audio.device_detail}\n${view.audio.host} · ${view.audio.sample_rate} Hz · ${t('header.channels', { count: view.audio.channels })} · ${view.audio.sample_format}`}
+          side="bottom"
+        >
+          {#snippet child({ props: tipProps })}
+            <Popover.Trigger {...tipProps}>
+              {#snippet child({ props })}
+                <button
+                  {...props}
+                  class="flex max-w-80 min-w-0 items-center gap-1.5"
+                  aria-label={t('header.audio_device', { name: shortDevice(view.audio.device) })}
+                >
+                  <span
+                    class={[
+                      'size-2 shrink-0 rounded-full',
+                      view.audio_error || view.audio_lost ? 'bg-stop-soft' : 'bg-go',
+                    ]}
+                  ></span>
+                  <span class="truncate">{shortDevice(view.audio.device)}</span>
+                  <span class="shrink-0"
+                    >· {fmtNumber(view.audio.sample_rate / 1000)} kHz · {view.audio.channels} {t('header.ch')}</span
+                  >
+                </button>
+              {/snippet}
+            </Popover.Trigger>
+          {/snippet}
+        </Tooltip>
+        <Popover.Content
+          align="end"
+          sideOffset={8}
+          class="max-h-(--bits-popover-content-available-height) w-80 overflow-y-auto"
+          aria-label={t('header.audio_title')}
+        >
+          <AudioMenu onclose={() => (audioOpen = false)} />
+        </Popover.Content>
+      </Popover.Root>
       <Tooltip
         tip={keepAlive.state === 'failed'
           ? t('header.keep_awake_error', { error: keepAlive.error ?? '' })

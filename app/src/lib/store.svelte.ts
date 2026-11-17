@@ -555,6 +555,13 @@ export function isRunning(cue: Cue): boolean {
   return busy(cue.id) || (cue.type === 'group' && cue.cues.some(isRunning));
 }
 
+/** True while a cue plays, waits for its pre-wait or sits in a playlist gap: the audio device cannot be opened again
+ * (the backend's `Runner::is_idle`). Fade and wait cues alone do not count. */
+export function cuesRunning(): boolean {
+  const runtime = ui.runtime;
+  return !!runtime && (runtime.active.length > 0 || runtime.waiting.length > 0 || runtime.gaps.length > 0);
+}
+
 export function activeFor(id: CueId): ActiveState | undefined {
   return ui.runtime?.active.find((active) => active.cue === id);
 }

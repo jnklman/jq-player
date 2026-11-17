@@ -16,6 +16,8 @@ different in the app, not how the code changed). The Release workflow turns
 
 - "Keep device awake" (Settings › Device) plays an inaudible signal with an adjustable level, so
   notebook speakers and other devices that switch off in silence no longer cut off the start of a cue.
+- Clicking the audio device in the header opens a menu to change the host, device, channel count and
+  buffer size directly; each change takes effect at once.
 - Audio files dragged from Explorer or a file manager onto the cue list become sound cues where they
   are dropped (in edit mode), as if picked with "+ Sound".
 - WAV files that hold MP3 or MP2 audio (as broadcast software and some audio editors write them) play
@@ -33,6 +35,7 @@ different in the app, not how the code changed). The Release workflow turns
 
 ### Fixed
 
+- Clicking a disabled input field no longer puts a blinking text cursor in it.
 - The chain line drawn through a scene marker no longer stays on screen while the marker sticks at the
   top of the cue list after the chain has scrolled away.
 
