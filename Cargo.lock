@@ -2526,7 +2526,7 @@ dependencies = [
 
 [[package]]
 name = "jq-audio"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "cpal",
  "jq-engine",
@@ -2540,7 +2540,7 @@ dependencies = [
 
 [[package]]
 name = "jq-core"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "fastrand",
  "jq-engine",
@@ -2558,7 +2558,7 @@ dependencies = [
 
 [[package]]
 name = "jq-engine"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "jq-i18n",
  "jq-stretch",
@@ -2567,14 +2567,14 @@ dependencies = [
 
 [[package]]
 name = "jq-i18n"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "sys-locale",
 ]
 
 [[package]]
 name = "jq-media"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "ebur128",
  "jq-engine",
@@ -2587,7 +2587,7 @@ dependencies = [
 
 [[package]]
 name = "jq-midi"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "jq-i18n",
  "midir",
@@ -2595,7 +2595,7 @@ dependencies = [
 
 [[package]]
 name = "jq-player"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "gtk",
  "jq-audio",
@@ -2619,7 +2619,7 @@ dependencies = [
 
 [[package]]
 name = "jq-show"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "jq-i18n",
  "serde",
@@ -2629,7 +2629,7 @@ dependencies = [
 
 [[package]]
 name = "jq-stretch"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "signalsmith-stretch",
 ]

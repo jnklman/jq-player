@@ -12,6 +12,8 @@ different in the app, not how the code changed). The Release workflow turns
 
 ## Unreleased
 
+## 0.3.0 – 2026-11-17
+
 ### Added
 
 - "Keep device awake" (Settings › Device) plays an inaudible signal with an adjustable level, so
