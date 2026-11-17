@@ -79,7 +79,11 @@
 - `cargo test`, `cargo clippy --all-targets`, `cargo fmt`
 - UI: `cd app && npm run lint` (ESLint; `lint:fix` fixes), `npm run format` (Prettier, check only;
   `format:fix` writes and also sorts Tailwind classes), `npm run check` (types), `npm test` (Vitest),
-  `npm run app` (app in development mode). Mark class strings outside
+  `npm run app` (app in development mode), `npm run coverage` (report in `app/coverage/`). UI tests run in jsdom
+  against a fake backend (`app/src/test/backend.ts`: records every `invoke`, `backend.on`/`fail`/`onEdit` answer
+  commands, `backend.show`/`state`/`emit` send events); `test/fixtures.ts` builds cues and views, `loadShow` puts
+  a show into the store, `renderUi` mounts a component inside the tooltip provider, `test/operate.ts` operates
+  every control of a form once (`controls`, `operate`). Mark class strings outside
   `class=` with the `tw` tag from `app/src/lib/ui.ts`.
 - Linux needs `libasound2-dev` (cpal/midir: `jq-audio`, `jq-midi`, app) and the
   WebKitGTK packages for Tauri; `jq-engine`, `jq-media`, `jq-show`, `jq-core` build without them but need

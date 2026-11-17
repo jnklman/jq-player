@@ -20,7 +20,6 @@ export default defineConfig({
     }),
     svelte(),
   ],
-  resolve: { alias: { $lib: fileURLToPath(new URL('./src/lib', import.meta.url)) } },
   // Keep Rust errors visible and use the fixed port Tauri expects.
   clearScreen: false,
   server: {
@@ -31,6 +30,24 @@ export default defineConfig({
     watch: { ignored: ['**/src-tauri/**'] },
   },
   build: { target: 'es2022', chunkSizeWarningLimit: 1000 },
-  // Tests run in English, whatever the system language is.
-  test: { setupFiles: ['src/lib/test-setup.ts'] },
+  // Svelte's browser build, so components can be mounted in tests (jsdom).
+  resolve: {
+    alias: { $lib: fileURLToPath(new URL('./src/lib', import.meta.url)) },
+    conditions: process.env.VITEST ? ['browser'] : undefined,
+  },
+  test: {
+    environment: 'jsdom',
+    // Mocks the Tauri backend (`src/test/backend.ts`); tests run in English, whatever the system language is.
+    setupFiles: ['src/lib/test-setup.ts'],
+    // Component tests click through whole dialogs; instrumented for coverage and run side by side, some take over
+    // the default 5 s.
+    testTimeout: 30_000,
+    coverage: {
+      provider: 'v8',
+      include: ['src/**/*.{ts,svelte}'],
+      // shadcn-svelte components (generated), the language catalogs and the test helpers themselves.
+      exclude: ['src/lib/components/ui/**', 'src/lib/i18n/{en,de}.ts', 'src/test/**', 'src/**/*.test.ts', '**/*.d.ts'],
+      reporter: ['text-summary', 'html'],
+    },
+  },
 });
