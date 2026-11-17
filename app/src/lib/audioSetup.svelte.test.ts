@@ -72,6 +72,17 @@ describe('AudioSetup', () => {
     draft.device = 'unplugged';
     flushSync();
     expect(audio.unknownDevice).toBe(true);
+    expect(audio.deviceOptions.at(-1)).toEqual({ value: 'unplugged', label: 'unplugged (not found)' });
+  });
+
+  it('shows an unplugged device by the name it had when last open', async () => {
+    const id = 'wasapi:{0.0.0.00000000}.{1234}';
+    const { audio, draft, current } = await setup({ device: id });
+    current.settings.device_names = { [id]: 'Focusrite' };
+    expect(audio.missingLabel(id)).toBe('Focusrite (not found)');
+    draft.device = 'asio:{5678}';
+    flushSync();
+    expect(audio.deviceOptions.at(-1)).toEqual({ value: 'asio:{5678}', label: 'Unknown device (not found)' });
   });
 
   it('tells when the device will be reopened', async () => {

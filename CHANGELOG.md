@@ -41,6 +41,8 @@ different in the app, not how the code changed). The Release workflow turns
 
 ### Fixed
 
+- An audio or preview device that is unplugged shows in the device list by its name instead of a
+  cryptic id like "wasapi:{0.0.0.00000000}.{…}" (once it has been used since this update).
 - Clicking a disabled input field no longer puts a blinking text cursor in it.
 - Windows: an audio device plugged in while the program runs is listed without restarting the program.
 - Windows: with "Default device", the output moves to the new system default device as soon as it

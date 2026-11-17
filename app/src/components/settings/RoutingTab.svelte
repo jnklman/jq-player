@@ -88,7 +88,7 @@
           options={withMissing(
             (setup.devices?.devices ?? []).map((device) => ({ value: device.id, label: device.name })),
             draft.preview_device,
-            t('device.not_found', { name: draft.preview_device ?? '' }),
+            setup.missingLabel(draft.preview_device ?? ''),
           )}
           onchange={(device) => (draft.preview_device = device)}
         />

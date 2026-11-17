@@ -130,6 +130,7 @@ export function settings(extra: Partial<LocalSettings> = {}): LocalSettings {
     open_last: 'off',
     last_show: null,
     preview_device: null,
+    device_names: {},
     preview_channel: null,
     midi_port: null,
     midi: [],

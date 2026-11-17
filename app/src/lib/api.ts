@@ -596,6 +596,9 @@ export interface LocalSettings {
   last_show: string | null;
   /** Separate preview device (e.g. headphones); null with a preview_channel = main device. */
   preview_device: string | null;
+  /** Display names of `device` and `preview_device` by their stored value, from when they were last opened (an
+   * unplugged one shows by name); set by the backend, `setSettings` leaves it alone. */
+  device_names: Record<string, string>;
   /** First channel (1-based) of the preview pair; both null = no preview. */
   preview_channel: number | null;
   /** MIDI input (part of its name); null = no MIDI. */

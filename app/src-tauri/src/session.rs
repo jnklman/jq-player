@@ -1,6 +1,6 @@
 //! One open show: file, editor, runner, audio output and keep-alive.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, TryRecvError};
@@ -1341,6 +1341,7 @@ impl Session {
         }
         // Set by the backend on opening a show.
         settings.last_show = self.settings.last_show.clone();
+        settings.device_names = self.settings.device_names.clone();
         if settings.osc_listen == Some(0) {
             return Err(t!("session.setting.osc_port"));
         }
@@ -1647,6 +1648,30 @@ impl Session {
                 self.preview_error = Some(e);
             }
         }
+        self.remember_device_names();
+    }
+
+    /// Notes the names of the set devices that are open, keeping the last
+    /// known one of a device that is not, and forgets devices no longer set.
+    fn remember_device_names(&mut self) {
+        let main = self.audio_error.is_none().then_some(&self.output);
+        let set =
+            [(&self.settings.device, main), (&self.settings.preview_device, self.preview_output.as_ref())];
+        let names: BTreeMap<String, String> = set
+            .into_iter()
+            .filter_map(|(id, output)| {
+                let id = id.as_ref()?;
+                let name = match output {
+                    Some(output) => output.info().device.clone(),
+                    None => self.settings.device_names.get(id)?.clone(),
+                };
+                Some((id.clone(), name))
+            })
+            .collect();
+        if names != self.settings.device_names {
+            self.settings.device_names = names;
+            self.save_settings();
+        }
     }
 
     /// Listens for OSC on the configured port (closing the old one first).
@@ -1799,6 +1824,7 @@ impl Session {
         self.runner = runner;
         attach_osc_out(&mut self.runner, notices);
         self.connect_midi_out(notices);
+        self.remember_device_names();
     }
 
     fn new_runner(&self, controller: Controller) -> Runner {
@@ -3358,6 +3384,40 @@ mod tests {
             matches!(&failed[..], [Notice::Warning(e)] if e.starts_with("Setting not saved")),
             "{failed:?}"
         );
+        drop(session);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn an_unplugged_device_keeps_its_name() {
+        let dir = tempdir("device-names");
+        let (writer, _notices) = Writer::spawn();
+        let mut session = open_session(&dir, &writer);
+        let id = "wasapi:{0.0.0.00000000}.{1234}".to_string();
+        session.output = AudioOutput::null(48_000, 2, 1).0;
+        session.audio_error = None;
+        session.settings.device = Some(id.clone());
+        session.remember_device_names();
+        let name = session.output.info().device.clone();
+        assert_eq!(session.settings.device_names, BTreeMap::from([(id.clone(), name.clone())]));
+
+        // Not open (unplugged): the last known name stays, and is saved.
+        session.audio_error = Some(AudioError::DeviceNotFound(id.clone()));
+        session.remember_device_names();
+        assert_eq!(session.settings.device_names, BTreeMap::from([(id.clone(), name.clone())]));
+        writer.flush_all();
+        let saved = LocalSettings::load(&dir.join("settings.json"), "x").unwrap();
+        assert_eq!(saved.device_names, BTreeMap::from([(id, name)]));
+
+        // A device no longer set is forgotten; settings never set the names.
+        session.settings.device = Some("other".into());
+        session.remember_device_names();
+        assert!(session.settings.device_names.is_empty());
+        session.audio_error = None;
+        let mut settings = session.settings.clone();
+        settings.device_names.insert("x".into(), "y".into());
+        session.set_settings(settings, &mut Vec::new()).ok();
+        assert!(!session.settings.device_names.contains_key("x"));
         drop(session);
         std::fs::remove_dir_all(dir).unwrap();
     }

@@ -56,6 +56,10 @@ pub struct LocalSettings {
     /// Separate preview device (e.g. headphones); `None` with a
     /// `preview_channel` = a channel pair of the main device.
     pub preview_device: Option<String>,
+    /// Display names of `device` and `preview_device` by their stored value,
+    /// from when they were last opened, so one that is unplugged still shows
+    /// by name. Set by the backend, not by `set_settings`.
+    pub device_names: BTreeMap<String, String>,
     /// First channel (1-based) of the preview pair; both `None` = no preview.
     pub preview_channel: Option<usize>,
     /// MIDI input port (part of its name); `None` = no MIDI.
@@ -214,6 +218,7 @@ impl Default for LocalSettings {
             open_last: OpenLast::Off,
             last_show: None,
             preview_device: None,
+            device_names: BTreeMap::new(),
             preview_channel: None,
             midi_port: None,
             midi: Vec::new(),

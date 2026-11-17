@@ -7,6 +7,9 @@ import { fmtNumber, t } from './i18n/index.svelte';
 import { type Option, withMissing } from './options';
 import { attempt } from './store.svelte';
 
+/** A device id from the audio host (`wasapi:{0.0.0.00000000}.{…}`), not a name typed into the settings file. */
+const HOST_ID = /^[a-z]+:/;
+
 /** Buffer sizes the backend takes (powers of two). */
 const BUFFER_SIZES = [32, 64, 128, 256, 512, 1024, 2048, 4096];
 
@@ -53,6 +56,12 @@ export class AudioSetup {
   readonly unknownDevice = $derived.by(
     () => this.draft().device !== null && this.devices !== null && !this.selectedDevice,
   );
+
+  /** A stored device the list lacks (unplugged), by the name it had when last open: "Focusrite (not found)". */
+  missingLabel(device: string): string {
+    const known = this.view().settings.device_names[device];
+    return t('device.not_found', { name: known ?? (HOST_ID.test(device) ? t('device.unknown') : device) });
+  }
 
   /** The device will be reopened on apply. */
   readonly audioChanged = $derived.by(() => {
@@ -105,7 +114,7 @@ export class AudioSetup {
     return [
       { value: '', label: this.loading ? t('device.searching') : t('audio.default_device') },
       ...(this.devices?.devices ?? []).map((info) => ({ value: info.id, label: info.name })),
-      ...(this.unknownDevice && device ? [{ value: device, label: t('device.not_found', { name: device }) }] : []),
+      ...(this.unknownDevice && device ? [{ value: device, label: this.missingLabel(device) }] : []),
     ];
   });
 
