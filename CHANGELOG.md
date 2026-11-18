@@ -23,7 +23,8 @@ different in the app, not how the code changed). The Release workflow turns
   operating by accident and takes the global keys of a connected keyboard, or keys of its own set
   on the device (kept on the jQ Player computer, which can reset them). Devices the jQ Player
   computer allows to can preview a sound cue on themselves, sounding as the preview there (by
-  default only while no cue runs). Off by default; the address is shown with a QR code. The connection is not encrypted: use it only on a trusted network.
+  default only while no cue runs). Off by default; the address is shown with a QR code. The connection is not encrypted: use it only on a trusted network. The
+  settings say what to do when the firewall blocks it.
 
 ## 0.3.0 – 2026-11-17
 

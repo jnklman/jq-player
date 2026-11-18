@@ -105,6 +105,9 @@
     <SettingRow label={t('remote_tab.security')} keywords={t('remote_tab.security_keywords')}>
       <span class="{hint} pt-1.5">{t('remote_tab.security_hint')}</span>
     </SettingRow>
+    <SettingRow label={t('remote_tab.firewall')} keywords={t('remote_tab.firewall_keywords')}>
+      <span class="{hint} pt-1.5">{t('remote_tab.firewall_hint')}</span>
+    </SettingRow>
   </SettingGroup>
 
   {#if requests.length}

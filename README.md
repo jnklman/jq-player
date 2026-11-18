@@ -92,6 +92,25 @@ the show.
 
   A 0 argument (button release) is ignored for addresses without a value.
 
+- **Web remote** (Settings › Web remote, off by default): tablets, phones and other computers on
+  the show network open `http://<address>:<port>/` in a browser (shown with a QR code) and see
+  the next cue, the running cues, the cue list, the notes and the stopwatches. Nothing to install,
+  and nothing can be edited remotely.
+  - A new device asks to join by name. On the jQ Player computer it is let in to **watch** or to
+    **operate** (GO, stops, playhead, stopping cues, stopwatches); the role can be changed or the
+    device removed at any time, also in a locked show mode.
+  - The page says clearly when the connection is lost and freezes its controls. It has a lock
+    against operating by accident, and takes the global keys of a connected keyboard (or keys
+    of its own, set on the device). Esc always panics.
+  - Devices allowed to can **preview** a sound cue on themselves (headphones on the tablet). It sounds as the
+    preview on the jQ Player computer (range, level, speed, transposition, no fades) and by
+    default only while no cue runs.
+  - **Network:** the connection is plain HTTP, not encrypted; use it only on a trusted show network.
+    A device keeps its access by a cookie for the address, so give the jQ Player computer a fixed IP
+    address (or a DHCP reservation). On Windows, allow jQ Player for private networks when the
+    firewall asks, and set the show network to "Private". Over HTTP the page cannot keep the
+    device's screen on: raise the display timeout on the device instead.
+
 ### Default keys
 
 Space GO · Esc panic · F FADE ALL · Pause toggle pause all · K pause selected cue · P preview ·

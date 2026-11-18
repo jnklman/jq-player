@@ -1262,6 +1262,10 @@ const de: Record<MessageKey, string> = {
   'remote_tab.security_keywords': 'Verschlüsselung HTTPS Passwort Cookie encryption',
   'remote_tab.security_hint':
     'Unverschlüsselt (HTTP): nur in einem vertrauenswürdigen Show-Netz verwenden. Ein Gerät behält seinen Zugang über ein Cookie für diese Adresse; gib diesem Rechner eine feste IP-Adresse, sonst müssen die Geräte nach einem Wechsel erneut fragen.',
+  'remote_tab.firewall': 'Firewall',
+  'remote_tab.firewall_keywords': 'Firewall Netzwerk privat öffentlich nicht erreichbar Windows Defender network',
+  'remote_tab.firewall_hint':
+    'Können Geräte die Adresse nicht öffnen, blockiert womöglich die Firewall den jQ Player. Windows fragt einmal, wenn die Fernsteuerung startet: für private Netzwerke zulassen und das Show-Netz in den Windows-Einstellungen auf „Privat“ stellen (in einem „öffentlichen“ Netzwerk bleibt sie gesperrt). Die Geräte müssen im selben Netz sein wie dieser Rechner.',
   'remote_tab.requests': 'Anfragen',
   'remote_tab.let_view': 'Beobachten',
   'remote_tab.let_control': 'Bedienen',

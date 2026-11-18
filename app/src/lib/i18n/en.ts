@@ -1262,6 +1262,10 @@ const en = {
   'remote_tab.security_keywords': 'encryption HTTPS password cookie Verschlüsselung',
   'remote_tab.security_hint':
     'Not encrypted (HTTP): use it only on a trusted show network. A device keeps its access by a cookie for this address; give this computer a fixed IP address, or devices have to ask again when it changes.',
+  'remote_tab.firewall': 'Firewall',
+  'remote_tab.firewall_keywords': 'firewall network private public unreachable Windows Defender Netzwerk',
+  'remote_tab.firewall_hint':
+    'If devices cannot open the address, the firewall may be blocking jQ Player. Windows asks once when the remote starts: allow it for private networks, and set the show network to “Private” in the Windows settings (on a “Public” network it stays blocked). Devices must be on the same network as this computer.',
   'remote_tab.requests': 'Requests',
   'remote_tab.let_view': 'Watch',
   'remote_tab.let_control': 'Operate',
