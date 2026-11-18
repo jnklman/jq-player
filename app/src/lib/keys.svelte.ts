@@ -69,6 +69,33 @@ export const PANIC_KEY: Chord = { code: 'Escape', ctrl: false, shift: false, alt
 /** Esc, with or without Shift: always panic. */
 export const isPanicKey = (chord: Chord) => chord.code === PANIC_KEY.code && !chord.ctrl && !chord.alt;
 
+/**
+ * Whether a physical keyboard is probably there, so buttons show their keys. No browser says so; a device whose only
+ * pointer is a finger (phone, tablet, touch-only screen) counts as without one until a key is pressed outside a text
+ * field (where an on-screen keyboard types). See `trackKeyboard`.
+ */
+export const keyboard = $state({ present: keyboardLikely() });
+
+function keyboardLikely(): boolean {
+  try {
+    return !matchMedia('(pointer: coarse)').matches || matchMedia('(any-pointer: fine)').matches;
+  } catch {
+    return true;
+  }
+}
+
+/** Notices a physical keyboard by its first key press; call once per window. */
+export function trackKeyboard() {
+  if (keyboard.present) return;
+  const pressed = (e: KeyboardEvent) => {
+    const typing = (e.target as HTMLElement | null)?.closest?.('input, textarea, [contenteditable="true"]');
+    if (typing || !e.code || e.key === 'Unidentified') return;
+    keyboard.present = true;
+    window.removeEventListener('keydown', pressed, true);
+  };
+  window.addEventListener('keydown', pressed, true);
+}
+
 /** A key field is recording: the next press is its key, not a shortcut. */
 export const keyCapture = $state({ active: false });
 

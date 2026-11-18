@@ -8,7 +8,7 @@
   import { api } from '../lib/api';
   import { t } from '../lib/i18n/index.svelte';
   import { watchViews } from '../lib/stopwatches';
-  import { attempt, ui } from '../lib/store.svelte';
+  import { attempt, canControl, ui } from '../lib/store.svelte';
   import { empty } from '../lib/ui';
   import PanelFrame from './layout/PanelFrame.svelte';
 
@@ -38,16 +38,22 @@
             </div>
             <div class="flex gap-1.5">
               {#if watch.running}
-                <Button onclick={() => attempt(api.stopwatch(watch.id, 'stop'))}
+                <Button disabled={!canControl()} onclick={() => attempt(api.stopwatch(watch.id, 'stop'))}
                   ><Pause class="size-3.5" /> {t('stopwatch_action.stop')}</Button
                 >
               {:else}
-                <Button onclick={() => attempt(api.stopwatch(watch.id, 'start'))}
+                <Button disabled={!canControl()} onclick={() => attempt(api.stopwatch(watch.id, 'start'))}
                   ><Play class="size-3.5" /> {t('stopwatch_action.start')}</Button
                 >
               {/if}
-              <Button onclick={() => attempt(api.stopwatch(watch.id, 'restart'))}>{t('stopwatches.restart')}</Button>
-              <Button variant="ghost" onclick={() => attempt(api.stopwatch(watch.id, 'reset'))}>
+              <Button disabled={!canControl()} onclick={() => attempt(api.stopwatch(watch.id, 'restart'))}
+                >{t('stopwatches.restart')}</Button
+              >
+              <Button
+                variant="ghost"
+                disabled={!canControl()}
+                onclick={() => attempt(api.stopwatch(watch.id, 'reset'))}
+              >
                 <ArrowCounterClockwise class="size-3.5" />
                 {t('common.reset')}
               </Button>
@@ -58,9 +64,12 @@
     {:else}
       <div class={empty}>
         {t('stopwatches.none')}
-        <Button variant="link" class="min-h-0 p-0 text-[13px]" onclick={() => (ui.stopwatchesOpen = true)}
-          >{t('stopwatches.create')}</Button
-        >
+        <!-- Creating them is editing: not on the remote page. -->
+        {#if !ui.remote}<Button
+            variant="link"
+            class="min-h-0 p-0 text-[13px]"
+            onclick={() => (ui.stopwatchesOpen = true)}>{t('stopwatches.create')}</Button
+          >{/if}
       </div>
     {/if}
   </ScrollArea>

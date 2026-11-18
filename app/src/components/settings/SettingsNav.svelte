@@ -4,6 +4,7 @@
   import ArrowsSplit from '~icons/ph/arrows-split';
   import Broadcast from '~icons/ph/broadcast';
   import CursorClick from '~icons/ph/cursor-click';
+  import DeviceTablet from '~icons/ph/device-tablet';
   import Keyboard from '~icons/ph/keyboard';
   import MagnifyingGlass from '~icons/ph/magnifying-glass';
   import PianoKeys from '~icons/ph/piano-keys';
@@ -38,6 +39,7 @@
     keys: Keyboard,
     midi: PianoKeys,
     osc: Broadcast,
+    remote: DeviceTablet,
     ui: CursorClick,
     media: Waveform,
   };

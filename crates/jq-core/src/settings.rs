@@ -113,6 +113,29 @@ pub struct LocalSettings {
     pub keep_alive_signal: bool,
     /// Peak of that noise in dBFS (see [`KEEP_ALIVE_RANGE`]).
     pub keep_alive_level: f64,
+    /// The remote-control server for other devices on the network.
+    pub remote: RemoteSettings,
+}
+
+/// The remote-control server: devices on the network (a tablet at the
+/// desk, the stage manager's phone) watch the show and, if allowed, operate
+/// it in a browser. Which devices are allowed is kept apart from these
+/// settings (`remote-clients.json` in the config folder).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RemoteSettings {
+    pub enabled: bool,
+    /// TCP port of its web page and WebSocket, on every network interface.
+    pub port: u16,
+}
+
+/// Port of the remote-control server unless set otherwise.
+pub const DEFAULT_REMOTE_PORT: u16 = 8642;
+
+impl Default for RemoteSettings {
+    fn default() -> Self {
+        Self { enabled: false, port: DEFAULT_REMOTE_PORT }
+    }
 }
 
 /// Levels offered for the keep-alive noise, dBFS: from about one step of a
@@ -240,6 +263,7 @@ impl Default for LocalSettings {
             underrun_warning: false,
             keep_alive_signal: false,
             keep_alive_level: -80.0,
+            remote: RemoteSettings::default(),
         }
     }
 }

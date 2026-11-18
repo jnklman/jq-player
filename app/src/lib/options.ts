@@ -105,6 +105,12 @@ export const othersScopeOptions = options<OthersEffect['scope']>({
 });
 
 export const othersOptions = optionsOf<OthersEffect['effect']>(othersLabels);
+
+/** What a let-in device of the web remote may do (`RemoteRole` without "pending"). */
+export const remoteRoleOptions = options<'view' | 'control'>({
+  view: 'remote.role.view',
+  control: 'remote.role.control',
+});
 export const secondTriggerOptions = optionsOf<SecondTrigger['action']>(secondTriggerLabels);
 
 /** The show's outputs. */

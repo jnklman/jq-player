@@ -55,4 +55,6 @@ export function resetUi() {
   ui.justSaved = false;
   ui.notices = [];
   ui.update = null;
+  ui.remote = null;
+  ui.remoteStatus = null;
 }

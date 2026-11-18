@@ -21,7 +21,8 @@ pub use runner::{
     WaitingState,
 };
 pub use settings::{
-    EscapeMode, KEEP_ALIVE_RANGE, LocalSettings, OpenLast, SelectionMode, Startup, WatchMode, WheelMode,
+    DEFAULT_REMOTE_PORT, EscapeMode, KEEP_ALIVE_RANGE, LocalSettings, OpenLast, RemoteSettings,
+    SelectionMode, Startup, WatchMode, WheelMode,
 };
 pub use watch::{MediaWatcher, Stamps};
 

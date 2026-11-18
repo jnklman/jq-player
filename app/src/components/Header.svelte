@@ -4,6 +4,7 @@
   import Undo from '~icons/ph/arrow-u-up-left-bold';
   import Redo from '~icons/ph/arrow-u-up-right-bold';
   import CaretDown from '~icons/ph/caret-down-bold';
+  import DeviceTablet from '~icons/ph/device-tablet-bold';
   import FloppyDisk from '~icons/ph/floppy-disk-bold';
   import GearSix from '~icons/ph/gear-six-bold';
   import LockSimple from '~icons/ph/lock-simple-bold';
@@ -29,6 +30,11 @@
 
   const view = $derived(ui.view!);
   const keepAlive = $derived(view.keep_alive);
+
+  // The web remote's devices: shown while one is connected or asks to join.
+  const remoteClients = $derived(ui.remoteStatus?.clients ?? []);
+  const remoteConnected = $derived(remoteClients.filter((client) => client.connected > 0).length);
+  const remoteWaiting = $derived(remoteClients.filter((client) => client.role === 'pending').length);
 
   let menuOpen = $state(false);
   let audioOpen = $state(false);
@@ -149,6 +155,34 @@
     {/if}
 
     <Stopwatches />
+
+    {#if remoteConnected || remoteWaiting}
+      <Tooltip
+        tip={[
+          t('header.remote_connected', { count: remoteConnected }),
+          remoteWaiting ? t('header.remote_waiting', { count: remoteWaiting }) : '',
+        ]
+          .filter(Boolean)
+          .join('\n')}
+        side="bottom"
+      >
+        {#snippet child({ props })}
+          <button
+            {...props}
+            class={[
+              'flex min-h-7 items-center gap-1.5 rounded-md px-1.5 text-xs hover:bg-hover',
+              remoteWaiting ? 'text-fade-soft' : 'text-muted-foreground',
+            ]}
+            aria-label={t('header.remote_label')}
+            data-tauri-drag-region="false"
+            onclick={() => (ui.settingsOpen = true)}
+          >
+            <DeviceTablet class="size-4" />
+            {remoteConnected}{#if remoteWaiting}<span>+{remoteWaiting}</span>{/if}
+          </button>
+        {/snippet}
+      </Tooltip>
+    {/if}
 
     <div class="grow"></div>
 

@@ -1,12 +1,12 @@
 // Rules of the machine settings as the settings dialog edits them.
 
-import type { Chord, ControlAction, KeyBinding, LocalSettings, ShowView } from './api';
+import type { Chord, ControlAction, KeyBinding, LocalSettings, RemoteStatus, ShowView } from './api';
 import { type AudioSetup, fits } from './audioSetup.svelte';
 import { t } from './i18n/index.svelte';
 import { ACTION_NAMES, isFixed, keyText, sameChord } from './keys.svelte';
 
 /** The tabs of the settings dialog. */
-export type SettingsTab = 'device' | 'routing' | 'show' | 'keys' | 'midi' | 'osc' | 'ui' | 'media';
+export type SettingsTab = 'device' | 'routing' | 'show' | 'keys' | 'midi' | 'osc' | 'remote' | 'ui' | 'media';
 
 /** The tabs in the order of the dialog, grouped under a heading each. */
 export const SETTINGS_GROUPS: { title: string; tabs: { id: SettingsTab; title: string }[] }[] = [
@@ -65,6 +65,12 @@ export const SETTINGS_GROUPS: { title: string; tabs: { id: SettingsTab; title: s
           return t('settings.tab.osc');
         },
       },
+      {
+        id: 'remote',
+        get title() {
+          return t('settings.tab.remote');
+        },
+      },
     ],
   },
   {
@@ -102,6 +108,7 @@ const TAB_FIELDS: Record<SettingsTab, (keyof LocalSettings)[]> = {
   keys: ['keys', 'jump_back', 'jump_forward', 'jump_end', 'volume_step', 'pan_step', 'rate_step'],
   midi: ['midi_port', 'msc_device', 'midi_out'],
   osc: ['osc_listen', 'osc_hosts'],
+  remote: ['remote'],
   ui: ['language', 'open_last', 'wheel', 'escape', 'focus_warning', 'check_updates'],
   media: ['media_watch'],
 };
@@ -124,7 +131,12 @@ export function changedFields(draft: LocalSettings, initial: LocalSettings): Map
 }
 
 /** Tabs with a problem to show in the tab list: a device that failed, channels that do not fit, … */
-export function tabProblems(view: ShowView, draft: LocalSettings, setup: AudioSetup): Set<SettingsTab> {
+export function tabProblems(
+  view: ShowView,
+  draft: LocalSettings,
+  setup: AudioSetup,
+  remote: RemoteStatus | null = null,
+): Set<SettingsTab> {
   const problems = new Set<SettingsTab>();
   if (view.audio_error || setup.tooManyChannels) problems.add('device');
   const outputsFit = view.show.outputs.every((output) => fits(draft.outputs[output.id] ?? 1, setup.mainLimit));
@@ -132,6 +144,7 @@ export function tabProblems(view: ShowView, draft: LocalSettings, setup: AudioSe
   if (!outputsFit || !previewFits || setup.previewOverlaps || view.preview.error) problems.add('routing');
   if (view.midi.error || view.midi.out_error) problems.add('midi');
   if (view.osc.error) problems.add('osc');
+  if (remote?.error) problems.add('remote');
   return problems;
 }
 

@@ -12,6 +12,7 @@
   import MediaTab from './MediaTab.svelte';
   import MidiTab from './MidiTab.svelte';
   import OscTab from './OscTab.svelte';
+  import RemoteTab from './RemoteTab.svelte';
   import RoutingTab from './RoutingTab.svelte';
   import SettingsNav from './SettingsNav.svelte';
   import ShortcutsTab from './ShortcutsTab.svelte';
@@ -33,7 +34,7 @@
     () => draft,
     () => ui.view!,
   );
-  const problems = $derived(tabProblems(ui.view!, draft, setup));
+  const problems = $derived(tabProblems(ui.view!, draft, setup, ui.remoteStatus));
 
   const view = new SettingsView();
   provideSettingsView(view);
@@ -113,6 +114,7 @@
       <ShortcutsTab bind:draft {openMidiPort} />
       <MidiTab bind:draft />
       <OscTab bind:draft />
+      <RemoteTab bind:draft />
       <UiTab bind:draft />
       <MediaTab bind:draft />
       {#if view.searching && !view.found()}

@@ -263,6 +263,7 @@ session.setting.keep_alive_level = Der Pegel des Wachhalte-Signals liegt zwische
 session.setting.msc_device = MSC-Geräte-ID liegt zwischen 0 und 126
 session.setting.buffer = Puffergröße muss eine Zweierpotenz zwischen {min} und {max} sein
 session.setting.osc_port = OSC-Port muss zwischen 1 und 65535 liegen
+session.setting.remote_port = Port der Fernsteuerung muss zwischen 1 und 65535 liegen
 session.setting.channels_from_one = Kanäle werden ab 1 gezählt
 session.setting.min_channels = Mindestens 2 Kanäle einstellen
 session.setting.show_mode_locked = Der Show-Modus ist gesperrt – im Show-Menü entsperren
@@ -414,3 +415,16 @@ save_as.outside.other = {count} Dateien liegen außerhalb des Medienordners und 
 panels.locked = Panel-Fenster gesperrt
 panels.not_opened = Panel-Fenster nicht geöffnet: {panels}
 format.decimal = ,
+
+# Remote control (app)
+remote.not_allowed = Für dieses Gerät nicht erlaubt
+remote.bad_call = Ungültige Anfrage: {error}
+remote.crashed = interner Fehler
+remote.stopped = Die Fernsteuerung wurde beendet: {error}
+remote.listen_failed = Fernsteuerung auf Port {port} nicht möglich: {error}
+remote.too_many_requests = Zu viele Anfragen – in einer Minute noch einmal versuchen.
+remote.name_missing = Einen Namen für dieses Gerät eingeben.
+remote.bad_role = Ein Gerät kann beobachten oder bedienen.
+remote.unknown_client = Dieses Gerät ist nicht mehr in der Liste.
+remote.clients_not_saved = Die Geräte der Web-Fernsteuerung wurden nicht gespeichert: {error}
+remote.join_request = „{name}“ bittet um Fernzugriff (Einstellungen → Web-Fernsteuerung).

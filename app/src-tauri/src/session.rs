@@ -1345,6 +1345,9 @@ impl Session {
         if settings.osc_listen == Some(0) {
             return Err(t!("session.setting.osc_port"));
         }
+        if settings.remote.port == 0 {
+            return Err(t!("session.setting.remote_port"));
+        }
         if settings.outputs.values().any(|&c| c == 0) || settings.preview_channel == Some(0) {
             return Err(t!("session.setting.channels_from_one"));
         }
@@ -1471,6 +1474,10 @@ impl Session {
     /// disk here (layout, selection mode and the like change mid-show too).
     /// Only the newest of several queued states is written; a failure comes
     /// back as a notice from the writer.
+    pub fn settings(&self) -> &LocalSettings {
+        &self.settings
+    }
+
     fn save_settings(&self) {
         let (settings, path, show) =
             (self.settings.clone(), self.settings_path.clone(), self.file.show.id.to_string());

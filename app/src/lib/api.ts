@@ -15,15 +15,19 @@
 //             see `setPanelWindows`), `app_focus` (boolean),
 //             `commit_fields` (to every window before it or the program
 //             closes: commit the field being typed in, then `fieldsCommitted`).
-//             `notice`, `close_requested`, `open_requested` and the panel
-//             window events are meant for the main window only; panel
+//             `remote` (RemoteStatus).
+//             `notice`, `close_requested`, `open_requested`, `remote` and the
+//             panel window events are meant for the main window only; panel
 //             windows don't listen to them.
+// - Transport: `lib/transport.ts`. On the remote page (`src/remote`) the same commands and events go over a
+//             WebSocket; the server lets only `get_show`, `get_language`, `action` and `stopwatch` through, by the
+//             device's role (`app/src-tauri/src/remote/protocol.rs`), and sends `show`, `state` and
+//             `language_changed`.
 //
 // Types mirror the Rust serde types in crates/jq-show/src/model.rs,
 // crates/jq-core/src/runner.rs and app/src-tauri/src/session.rs.
 
-import { invoke } from '@tauri-apps/api/core';
-import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { invoke, listen, type UnlistenFn } from './transport';
 
 export type CueId = string;
 
@@ -654,6 +658,56 @@ export interface LocalSettings {
   layout: unknown;
   /** Set with `setSelectionMode`. */
   selection_mode: SelectionMode;
+  /** The remote control: a web page for other devices on the network (see `RemoteStatus`). */
+  remote: RemoteSettings;
+}
+
+/** The remote-control server; it runs without a show too, as last set. Port 1–65535 (`setSettings` refuses 0); a port
+ * taken by another program gives a warning and `RemoteStatus.error`. Default off, port 8642. */
+export interface RemoteSettings {
+  enabled: boolean;
+  port: number;
+}
+
+/** What a device may do: `pending` asked and sees nothing, `view` watches, `control` also operates (GO, stops,
+ * playhead, stopwatches; never edits, never the host's preview). */
+export type RemoteRole = 'pending' | 'view' | 'control';
+
+/** A device of the remote control: let in (`view`/`control`, kept across restarts) or asking (`pending`, until
+ * answered or the program ends). */
+export interface RemoteClient {
+  id: string;
+  name: string;
+  role: RemoteRole;
+  /** Open pages (one device may have it open twice). */
+  connected: number;
+  /** Network address of its last connection. */
+  address: string | null;
+  /** Milliseconds since 1970 of its last connection or request; null before one since the program started. */
+  last_seen: number | null;
+  /** A request named like a device let in before: probably that one with a new cookie (the host's address changed,
+   * browser data deleted). */
+  known_name: boolean;
+}
+
+/** An address of this machine the remote page is reached at. */
+export interface RemoteAddress {
+  /** Network interface ("Ethernet", "wlan0"). */
+  interface: string;
+  /** `http://<ip>:<port>/`. */
+  url: string;
+  /** The URL as a QR code: an SVG document (black on white). */
+  qr_svg: string;
+}
+
+/** The server and its devices (`getRemote`, then `remote` events). */
+export interface RemoteStatus {
+  /** Port it listens on, on every network interface; null = off. */
+  listening: number | null;
+  /** Why it does not listen although it should (port taken, stopped by an error). */
+  error: string | null;
+  /** Let-in devices first, then requests, each in the order they came. */
+  clients: RemoteClient[];
 }
 
 /** A panel window: a normal window, or an overlay that stays above other programs and is not in the taskbar. */
@@ -1431,6 +1485,15 @@ export const api = {
   appFocused: () => invoke<boolean>('app_focused'),
   /** Brings the main window to the front. */
   focusMain: () => invoke<void>('focus_main'),
+  /** The remote-control server and its devices; works without a show. */
+  getRemote: () => invoke<RemoteStatus>('get_remote'),
+  /** Lets a device in as `view` or `control`, or changes its role (also in show mode: it is part of operating). Its
+   * page follows at once. */
+  setRemoteClient: (id: string, role: 'view' | 'control') => invoke<void>('set_remote_client', { id, role }),
+  /** The addresses (IPv4) of this machine's network interfaces with the server's port; empty while it is off. */
+  remoteInfo: () => invoke<RemoteAddress[]>('remote_info'),
+  /** Removes a device or turns its request down; its pages are disconnected and it has to ask again. */
+  removeRemoteClient: (id: string) => invoke<void>('remove_remote_client', { id }),
   /** Output devices of `host` (default: system host); may take a moment. */
   audioDevices: (host?: string) => invoke<AudioDevices>('audio_devices', { host: host ?? null }),
 };
@@ -1438,35 +1501,33 @@ export const api = {
 export const events = {
   /** The language setting changed (`setSettings`); sent to all windows. */
   onLanguageChanged: (handler: (info: LanguageInfo) => void): Promise<UnlistenFn> =>
-    listen<LanguageInfo>('language_changed', (e) => handler(e.payload)),
+    listen<LanguageInfo>('language_changed', handler),
   /** To every window after every change; see `ShowEvent`. */
-  onShow: (handler: (event: ShowEvent) => void): Promise<UnlistenFn> =>
-    listen<ShowEvent>('show', (e) => handler(e.payload)),
+  onShow: (handler: (event: ShowEvent) => void): Promise<UnlistenFn> => listen<ShowEvent>('show', handler),
   /** Sent only when the state changed (up to 20 times a second), and with `getShow`. */
-  onState: (handler: (state: RuntimeState) => void): Promise<UnlistenFn> =>
-    listen<RuntimeState>('state', (e) => handler(e.payload)),
-  onNotice: (handler: (notice: Notice) => void): Promise<UnlistenFn> =>
-    listen<Notice>('notice', (e) => handler(e.payload)),
+  onState: (handler: (state: RuntimeState) => void): Promise<UnlistenFn> => listen<RuntimeState>('state', handler),
+  onNotice: (handler: (notice: Notice) => void): Promise<UnlistenFn> => listen<Notice>('notice', handler),
   onCloseRequested: (handler: (check: CloseCheck) => void): Promise<UnlistenFn> =>
-    listen<CloseCheck>('close_requested', (e) => handler(e.payload)),
+    listen<CloseCheck>('close_requested', handler),
   /** The start-up check (setting `check_updates`) found a newer release; sent once, never while installing. */
   onUpdateAvailable: (handler: (info: UpdateInfo) => void): Promise<UnlistenFn> =>
-    listen<UpdateInfo>('update_available', (e) => handler(e.payload)),
+    listen<UpdateInfo>('update_available', handler),
   /** Download progress of `installUpdate`; `total` is null if the server does not tell the size. */
   onUpdateProgress: (handler: (progress: UpdateProgress) => void): Promise<UnlistenFn> =>
-    listen<UpdateProgress>('update_progress', (e) => handler(e.payload)),
+    listen<UpdateProgress>('update_progress', handler),
   /** Open it like `openShow`, asking first; the backend opens nothing itself. */
-  onOpenRequested: (handler: (path: string) => void): Promise<UnlistenFn> =>
-    listen<string>('open_requested', (e) => handler(e.payload)),
+  onOpenRequested: (handler: (path: string) => void): Promise<UnlistenFn> => listen<string>('open_requested', handler),
   /** A panel window was moved or resized; may come many times a second while dragging. */
   onPanelWindowMoved: (handler: (rect: PanelWindowRect) => void): Promise<UnlistenFn> =>
-    listen<PanelWindowRect>('panel_window_moved', (e) => handler(e.payload)),
+    listen<PanelWindowRect>('panel_window_moved', handler),
   /** The operator closed a panel window (its × or Alt+F4); not sent when `setPanelWindows` closes it. */
   onPanelWindowClosed: (handler: (panel: string) => void): Promise<UnlistenFn> =>
-    listen<{ panel: string }>('panel_window_closed', (e) => handler(e.payload.panel)),
+    listen<{ panel: string }>('panel_window_closed', (closed) => handler(closed.panel)),
   /** To every window before the program or a panel window closes; answer with `fieldsCommitted`. */
   onCommitFields: (handler: () => void): Promise<UnlistenFn> => listen<null>('commit_fields', () => handler()),
+  /** The remote control changed: a device asked, connected, left or got another role, or the server started or
+   * stopped. Main window only. */
+  onRemote: (handler: (status: RemoteStatus) => void): Promise<UnlistenFn> => listen<RemoteStatus>('remote', handler),
   /** Whether any window of the app has the keyboard focus; sent once it settled (not while moving between them). */
-  onAppFocus: (handler: (focused: boolean) => void): Promise<UnlistenFn> =>
-    listen<boolean>('app_focus', (e) => handler(e.payload)),
+  onAppFocus: (handler: (focused: boolean) => void): Promise<UnlistenFn> => listen<boolean>('app_focus', handler),
 };

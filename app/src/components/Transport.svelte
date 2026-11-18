@@ -9,8 +9,8 @@
   import { controlStatus, isControl, typeColors, typeLabel } from '../lib/control';
   import { fmtSecs } from '../lib/format';
   import { t } from '../lib/i18n/index.svelte';
-  import { boundKeys } from '../lib/keys.svelte';
-  import { allCues, cueById, cues, previousOf, ui } from '../lib/store.svelte';
+  import { boundKeys, keyboard } from '../lib/keys.svelte';
+  import { allCues, canControl, cueById, cues, previousOf, ui } from '../lib/store.svelte';
   import { tw } from '../lib/ui';
   import PanelFrame from './layout/PanelFrame.svelte';
 
@@ -69,11 +69,13 @@
 
   // The keys as set in the settings. The pause button toggles, so a key that only pauses or only resumes counts
   // when it fits; the stop button stops at once, so without a key of its own it shows the panic key (Esc).
+  // None without a physical keyboard (a phone or tablet): there they would only take room.
   const keys = $derived(ui.view?.settings.keys ?? []);
-  const goKeys = $derived(boundKeys(keys, 'go'));
-  const fadeKeys = $derived(boundKeys(keys, 'fade_all'));
-  const pauseKeys = $derived(boundKeys(keys, 'toggle_pause_all', resumes ? 'resume_all' : 'pause_all'));
-  const stopKeys = $derived(boundKeys(keys, 'stop_all', 'panic'));
+  const shown = (text: string) => (keyboard.present ? text : '');
+  const goKeys = $derived(shown(boundKeys(keys, 'go')));
+  const fadeKeys = $derived(shown(boundKeys(keys, 'fade_all')));
+  const pauseKeys = $derived(shown(boundKeys(keys, 'toggle_pause_all', resumes ? 'resume_all' : 'pause_all')));
+  const stopKeys = $derived(shown(boundKeys(keys, 'stop_all', 'panic')));
 
   const sub = tw`text-xs font-medium tracking-normal`;
   // Equally wide; in a narrow panel the label wraps instead of overflowing. Stacked (portrait) they are lower, so
@@ -92,7 +94,7 @@
         variant="go"
         size="transport"
         class={['text-[34px] tracking-[2px] @[60rem]:min-w-50', rejected && 'ring-4 ring-stop-soft']}
-        disabled={!next}
+        disabled={!next || !canControl()}
         onclick={() => api.action({ action: 'go' })}
       >
         GO<span class={sub}>{rejected ? t('transport.too_fast') : goKeys || '\u00a0'}</span>
@@ -144,18 +146,31 @@
         </div>
       </div>
 
-      <Button variant="fade" size="transport" class={stopButton} onclick={() => api.action({ action: 'fade_all' })}>
+      <Button
+        variant="fade"
+        size="transport"
+        class={stopButton}
+        disabled={!canControl()}
+        onclick={() => api.action({ action: 'fade_all' })}
+      >
         {t('action.fade_all')}<span class={sub}>{fadeKeys ? `${fadeKeys} · ` : ''}{fmtSecs(fadeAll)}</span>
       </Button>
       <Button
         variant="pause"
         size="transport"
         class={stopButton}
+        disabled={!canControl()}
         onclick={() => api.action({ action: 'toggle_pause_all' })}
       >
         {resumes ? t('action.resume_all') : t('action.pause_all')}<span class={sub}>{pauseKeys || '\u00a0'}</span>
       </Button>
-      <Button variant="stop" size="transport" class={stopButton} onclick={() => api.action({ action: 'stop_all' })}>
+      <Button
+        variant="stop"
+        size="transport"
+        class={stopButton}
+        disabled={!canControl()}
+        onclick={() => api.action({ action: 'stop_all' })}
+      >
         {t('action.stop_all')}<span class={sub}>{stopKeys || '\u00a0'}</span>
       </Button>
     </div>

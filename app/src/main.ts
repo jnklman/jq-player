@@ -8,6 +8,7 @@ import App from './App.svelte';
 import PanelWindow from './components/layout/PanelWindow.svelte';
 import { api, events } from './lib/api';
 import { commitFields } from './lib/commit';
+import { trackKeyboard } from './lib/keys.svelte';
 import { openShowFile } from './lib/shows';
 import { init, initLanguage } from './lib/store.svelte';
 import { lockWebview } from './lib/webview';
@@ -21,6 +22,7 @@ trackMaximized();
 trackFocus();
 loadWindowSupport();
 dragByTouch();
+trackKeyboard();
 init(isMainWindow);
 // Before this window or the program closes, what is typed in a field reaches the show (and counts as unsaved).
 events.onCommitFields(() => void commitFields().finally(() => api.fieldsCommitted()));

@@ -6,7 +6,7 @@
   import { api, type FollowState } from '../../lib/api';
   import { fmtTime } from '../../lib/format';
   import { t } from '../../lib/i18n/index.svelte';
-  import { cueById } from '../../lib/store.svelte';
+  import { canControl, cueById } from '../../lib/store.svelte';
 
   // A cue a chain starts next, dimmed, with the time until then; its button breaks the chain off here.
   let { follow }: { follow: FollowState } = $props();
@@ -27,6 +27,7 @@
     tip={t('active.halt_tip', { number: cue?.number ?? '', after: after?.number ?? '' })}
     class={buttonVariants({ class: 'h-6 bg-transparent px-2 text-xs text-fg-2 hover:bg-hover' })}
     aria-label={t('active.halt_label', { number: cue?.number ?? '' })}
+    disabled={!canControl()}
     onclick={() => api.action({ action: 'cancel_follow', cue: follow.after })}
   >
     {t('active.halt')}

@@ -16,6 +16,14 @@
   }
 }
 
+/* Nor sink in when pressed (the transport buttons), e.g. on a remote device
+   that may only watch or whose controls are locked. */
+@custom-variant active {
+  &:active:not(:disabled, [data-disabled], [aria-disabled='true']) {
+    @slot;
+  }
+}
+
 /* Colours and type from the GUI mock-up (dark, for dim backstage light).
    Each colour becomes utilities like bg-panel, text-muted-foreground, border-line. */
 @theme {

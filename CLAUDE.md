@@ -74,6 +74,17 @@
   portable .exe (feature `portable`: config, cache and webview data in `jQ Player Data` next to the exe,
   see `app/src-tauri/src/paths.rs`; `install_update` refuses).
 
+- **Web remote** (`app/src-tauri/src/remote/`, `app/src/remote/`): a server on a thread and tokio runtime of its
+  own (`server.rs`, axum) serves `remote.html` (a second Vite entry) and a WebSocket. The show thread feeds it only
+  through `hub.rs` (`watch` channels: latest frame wins, nothing serialized without a client) and never waits for it;
+  calls go into the same request queue as Tauri's commands (`channel.rs`, `Backend`). What a role may call is a
+  whitelist in `protocol.rs`, checked on the server: never edits, never the host's preview. Devices and roles live
+  in `clients.rs` (`remote-clients.json` in the config folder, only token hashes); the token is an HttpOnly cookie,
+  WebSocket and join check `Origin`. The UI reaches the backend only through `lib/transport.ts` (Tauri by default,
+  the remote page's `socket.ts` with `useTransport`); the remote page must not import Tauri or window/edit modules
+  (ESLint `no-restricted-imports` for `src/remote`). Buttons of panels it reuses take `disabled={!canControl()}`
+  (always true in the app). In a development build the server takes the page from the Vite dev server.
+
 ## Commands
 
 - `cargo test`, `cargo clippy --all-targets`, `cargo fmt`, `cargo coverage` (alias in `.cargo/config.toml`

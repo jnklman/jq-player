@@ -55,6 +55,10 @@ describe('commands', () => {
       [() => api.focusMain(), 'focus_main', {}],
       [() => api.audioDevices(), 'audio_devices', { host: null }],
       [() => api.audioDevices('JACK'), 'audio_devices', { host: 'JACK' }],
+      [() => api.getRemote(), 'get_remote', {}],
+      [() => api.setRemoteClient('c1', 'control'), 'set_remote_client', { id: 'c1', role: 'control' }],
+      [() => api.removeRemoteClient('c1'), 'remove_remote_client', { id: 'c1' }],
+      [() => api.remoteInfo(), 'remote_info', {}],
     ];
     for (const [call, cmd, args] of calls) {
       backend.calls = [];

@@ -9,7 +9,7 @@
   import { fmtDb, fmtRunning, meterPercent, nearEnd } from '../../lib/format';
   import { fmtNumber, t } from '../../lib/i18n/index.svelte';
   import { rateLabel, transposeLabel } from '../../lib/speed';
-  import { cueById, ui } from '../../lib/store.svelte';
+  import { canControl, cueById, ui } from '../../lib/store.svelte';
   import { bar, tw } from '../../lib/ui';
   import CueButtons from './CueButtons.svelte';
   import NextItemButton from './NextItemButton.svelte';
@@ -105,6 +105,7 @@
         tip={t('active.jump_back_tip', { secs: back })}
         class={buttonVariants({ class: [jumpBtn, 'rounded-r-none'] })}
         aria-label={t('active.jump_back_label', { number: cue?.number ?? '', secs: back })}
+        disabled={!canControl()}
         onclick={() => api.action({ action: 'jump_back', cue: running.cue })}
         >−{back}
       </Tooltip>
@@ -112,6 +113,7 @@
         tip={t('active.jump_forward_tip', { secs: forward })}
         class={buttonVariants({ class: [jumpBtn, 'rounded-none border-x-0'] })}
         aria-label={t('active.jump_forward_label', { number: cue?.number ?? '', secs: forward })}
+        disabled={!canControl()}
         onclick={() => api.action({ action: 'jump_forward', cue: running.cue })}
       >
         +{forward}
@@ -120,6 +122,7 @@
         tip={t('active.jump_end_tip', { secs: toEnd })}
         class={buttonVariants({ class: [jumpBtn, 'rounded-l-none'] })}
         aria-label={t('active.jump_end_label', { number: cue?.number ?? '', secs: toEnd })}
+        disabled={!canControl()}
         onclick={() => api.action({ action: 'jump_end', cue: running.cue })}
       >
         {t('active.end')}

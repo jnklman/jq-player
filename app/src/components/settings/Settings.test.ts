@@ -195,6 +195,59 @@ describe('Media and MIDI tabs', () => {
     expect(within(dialog).getByText(/of at most 500 MB/)).not.toHaveTextContent(/200/);
   });
 
+  it('runs the web remote and lets devices in, changes their role and removes them', async () => {
+    backend.on('remote_info', () => [
+      { interface: 'Ethernet', url: 'http://10.0.0.5:8642/', qr_svg: '<svg xmlns="http://www.w3.org/2000/svg"/>' },
+    ]);
+    ui.remoteStatus = {
+      listening: 8642,
+      error: null,
+      clients: [
+        {
+          id: 'k',
+          name: 'FOH tablet',
+          role: 'view',
+          connected: 1,
+          address: '10.0.0.7:5000',
+          last_seen: 1,
+          known_name: false,
+        },
+        {
+          id: 'p',
+          name: 'Phone',
+          role: 'pending',
+          connected: 1,
+          address: '10.0.0.8:5000',
+          last_seen: 1,
+          known_name: false,
+        },
+      ],
+    };
+    const { dialog, user } = await open();
+    await openTab(user, dialog, 'remote');
+    expect(within(dialog).getByText('http://10.0.0.5:8642/')).toBeInTheDocument();
+    expect(within(dialog).getByRole('img', { name: 'QR code of http://10.0.0.5:8642/' })).toBeInTheDocument();
+    expect(within(dialog).getByText('listening on 8642')).toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole('button', { name: 'Operate' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Remove' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Decline' }));
+    expect(backend.invoked('set_remote_client')).toEqual([{ id: 'p', role: 'control' }]);
+    expect(backend.invoked('remove_remote_client')).toEqual([{ id: 'k' }, { id: 'p' }]);
+
+    await user.click(within(dialog).getByRole('checkbox', { name: /watch and operate the show/ }));
+    await user.click(within(dialog).getByRole('button', { name: 'Apply' }));
+    await settle();
+    expect(applied()?.remote).toEqual({ enabled: true, port: 8642 });
+  });
+
+  it('marks the web remote tab when its server could not start', async () => {
+    ui.remoteStatus = { listening: null, error: 'Port 8642 taken', clients: [] };
+    const { dialog, user } = await open();
+    await openTab(user, dialog, 'remote');
+    expect(within(dialog).getAllByText('Port 8642 taken').length).toBeGreaterThan(0);
+  });
+
   it('shows why MIDI ports failed, and leads to the shortcuts', async () => {
     const v = showView();
     v.midi = { ...v.midi, error: 'Input busy', out_error: 'Output busy' };

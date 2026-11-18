@@ -1,6 +1,7 @@
 import { screen } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 
+import { keyboard } from '../lib/keys.svelte';
 import { backend } from '../test/backend';
 import { active, control, runtime, sound, view } from '../test/fixtures';
 import { renderUi } from '../test/render';
@@ -29,6 +30,18 @@ describe('Transport', () => {
     ]);
     // Without a key of its own, the stop button shows the panic key.
     expect(screen.getByRole('button', { name: /STOP ALL/i })).toHaveTextContent('Esc');
+  });
+
+  it('shows no keys without a physical keyboard', async () => {
+    await loadShow(view([sound('a')]), runtime({ playhead: 'a' }));
+    keyboard.present = false;
+    try {
+      await renderUi(Transport);
+      expect(go()).not.toHaveTextContent('Space');
+      expect(screen.getByRole('button', { name: /STOP ALL/i })).not.toHaveTextContent('Esc');
+    } finally {
+      keyboard.present = true;
+    }
   });
 
   it('has no GO past the end of the list or without cues', async () => {

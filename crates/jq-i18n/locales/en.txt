@@ -263,6 +263,7 @@ session.setting.keep_alive_level = The level of the keep-alive signal is between
 session.setting.msc_device = The MSC device ID is between 0 and 126
 session.setting.buffer = The buffer size must be a power of two between {min} and {max}
 session.setting.osc_port = The OSC port must be between 1 and 65535
+session.setting.remote_port = The remote control port must be between 1 and 65535
 session.setting.channels_from_one = Channels are counted from 1
 session.setting.min_channels = Set at least 2 channels
 session.setting.show_mode_locked = Show mode is locked – unlock it in the show menu
@@ -414,3 +415,16 @@ save_as.outside.other = {count} files are outside the media folder and were not 
 panels.locked = Panel windows locked
 panels.not_opened = Panel windows not opened: {panels}
 format.decimal = .
+
+# Remote control (app)
+remote.not_allowed = Not allowed for this device
+remote.bad_call = Invalid request: {error}
+remote.crashed = internal error
+remote.stopped = The remote control stopped: {error}
+remote.listen_failed = Remote control on port {port} is not possible: {error}
+remote.too_many_requests = Too many requests to join – try again in a minute.
+remote.name_missing = Enter a name for this device.
+remote.bad_role = A device can watch or operate.
+remote.unknown_client = This device is no longer in the list.
+remote.clients_not_saved = The remote devices were not saved: {error}
+remote.join_request = “{name}” asks for remote access (Settings → Web remote).

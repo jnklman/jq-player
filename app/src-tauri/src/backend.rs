@@ -15,7 +15,9 @@ use serde::Serialize;
 use serde_json::value::RawValue;
 use tauri::{AppHandle, Emitter, Manager};
 
+use crate::channel::Backend;
 use crate::language;
+use crate::remote::{Hub, Remote};
 use crate::session::{EditOp, ImportState, LearnTarget, Session, ShowView};
 use crate::writer::{Key, Writer};
 
@@ -139,19 +141,42 @@ struct StateEvent<'a> {
     searching: bool,
 }
 
-/// `writes`: the notices of the [`Writer`] (failed background writes).
-pub fn spawn(app: AppHandle, writes: Receiver<Notice>) -> Sender<Request> {
+/// `writes`: the notices of the [`Writer`] (failed background writes);
+/// `remote`: makes the remote server's controller, given the way into this
+/// thread's queue.
+pub fn spawn(
+    app: AppHandle,
+    writes: Receiver<Notice>,
+    remote: impl FnOnce(Backend) -> Remote + Send + 'static,
+) -> Sender<Request> {
     let (tx, rx) = mpsc::channel();
     let midi_tx = tx.clone();
     std::thread::Builder::new()
         .name("jq-show".into())
-        .spawn(move || run(app, rx, midi_tx, writes))
+        .spawn(move || {
+            let remote = remote(Backend::new(midi_tx.clone()));
+            run(app, rx, midi_tx, writes, remote)
+        })
         .expect("spawn show thread");
     tx
 }
 
-fn run(app: AppHandle, rx: Receiver<Request>, midi_tx: Sender<Request>, writes: Receiver<Notice>) {
+fn run(
+    app: AppHandle,
+    rx: Receiver<Request>,
+    midi_tx: Sender<Request>,
+    writes: Receiver<Notice>,
+    mut remote: Remote,
+) {
     let mut session: Option<Session> = None;
+    // Runs without a show too (pages stay connected while another opens),
+    // as the machine's settings say until a show brings its own.
+    let mut startup_notices = Vec::new();
+    let general = LocalSettings::load_general(&settings_path(&app)).unwrap_or_default();
+    remote.apply(&general.remote, &mut startup_notices);
+    for n in startup_notices {
+        let _ = app.emit_to(crate::panel_windows::MAIN, EVENT_NOTICE, n);
+    }
     let mut last_state = Instant::now();
     // The state last sent; an unchanged one (a quiet show) is not sent
     // again, so the UI does not render 20 times a second for nothing. A
@@ -190,6 +215,9 @@ fn run(app: AppHandle, rx: Receiver<Request>, midi_tx: Sender<Request>, writes: 
                 catch_unwind(AssertUnwindSafe(|| handle(&app, &mut session, r, &midi_tx, &mut notices)));
             failed |= handled.is_err();
         }
+        if let Some(s) = session.as_ref() {
+            remote.apply(&s.settings().remote, &mut notices);
+        }
         let ticked = catch_unwind(AssertUnwindSafe(|| {
             let mut view_changed = false;
             state_pending = false;
@@ -210,7 +238,7 @@ fn run(app: AppHandle, rx: Receiver<Request>, midi_tx: Sender<Request>, writes: 
                     last_state = now;
                     let state = state_event(s, now);
                     if state != sent_state {
-                        let _ = app.emit(EVENT_STATE, &state);
+                        emit_state(&app, &state);
                         sent_state = state;
                     }
                 }
@@ -284,7 +312,7 @@ fn handle(
         Request::View(reply) => {
             // The UI asks on start (also after a reload), the state comes with it.
             if let Some(s) = session {
-                let _ = app.emit(EVENT_STATE, state_event(s, Instant::now()));
+                emit_state(app, &state_event(s, Instant::now()));
             }
             // Numbered like the last `show` event: a window takes whichever of the two is newer.
             let event = ShowEvent { revision: revision(), view: session.as_ref().map(|s| s.view()) };
@@ -424,6 +452,7 @@ fn handle(
                 // Not applied: the old language stays.
                 language::apply(&before.setting);
             } else if changed {
+                app.state::<Hub>().language(&after);
                 let _ = app.emit(language::EVENT_LANGUAGE_CHANGED, after);
             }
             let _ = reply.send(result);
@@ -560,14 +589,21 @@ fn show_event(revision: u64, view: impl Serialize) -> Result<Box<RawValue>, Stri
 /// view too.
 fn publish(app: &AppHandle, session: &Option<Session>) -> Result<serde_json::Value, String> {
     if let Some(s) = session {
-        let _ = app.emit(EVENT_STATE, state_event(s, Instant::now()));
+        emit_state(app, &state_event(s, Instant::now()));
     }
     let next = revision() + 1;
     let view: Option<ShowView> = session.as_ref().map(|s| s.view());
     let event = show_event(next, view)?;
     REVISION.store(next, Ordering::Relaxed);
     let _ = app.emit(EVENT_SHOW, &*event);
+    app.state::<Hub>().show(&event);
     Ok(next.into())
+}
+
+/// The runtime state to every window and to the remote clients.
+fn emit_state(app: &AppHandle, state: &serde_json::Value) {
+    let _ = app.emit(EVENT_STATE, state);
+    app.state::<Hub>().state(state);
 }
 
 #[cfg(test)]

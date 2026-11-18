@@ -15,6 +15,7 @@ import {
   type ImportClash,
   type Notice,
   type OnClash,
+  type RemoteStatus,
   type Revision,
   type RuntimeState,
   type SelectionMode,
@@ -65,6 +66,15 @@ export interface ClashQuestion {
 
 export interface ShownNotice extends Notice {
   id: number;
+}
+
+/** On the remote page (a browser on another device): what the host lets this device do and whether it is connected.
+ * Null in the app itself. */
+export interface RemoteState {
+  role: 'pending' | 'view' | 'control';
+  connected: boolean;
+  /** The operator locked the controls on this device (against a GO from a pocket). */
+  locked: boolean;
 }
 
 // The backend replaces these whole (a large show's view is several hundred
@@ -121,13 +131,35 @@ export const ui = $state({
   notices: [] as ShownNotice[],
   /** The newer release the start-up check found; the About dialog offers it without a new check. */
   update: null as UpdateInfo | null,
+  remote: null as RemoteState | null,
+  /** The remote-control server and its devices, as the host sees them (main window only). */
+  remoteStatus: null as RemoteStatus | null,
 });
 
+/** Whether the controls operate the show: always in the app; on the remote page only with the role "control", while
+ * connected and not locked on the device. */
+export function canControl(): boolean {
+  const remote = ui.remote;
+  return !remote || (remote.role === 'control' && remote.connected && !remote.locked);
+}
+
 // The revision of `ui.view` (see `Revision`).
-const revisions = new Revisions();
+let revisions = new Revisions();
 /** Longest wait for the `show` event of a command's change (it is sent before the reply, so it is normally there
  * already or comes within milliseconds); past it the caller goes on with the view it has. */
 const SHOWN_TIMEOUT = 2000;
+
+/** Forgets the revision shown, for a backend that counts from the start again (the remote page's host restarted):
+ * its views would all look older. Callers waiting for a revision go on at their timeout. */
+export function resetRevisions() {
+  revisions = new Revisions();
+}
+
+/** Asks for the current view (and state) again, e.g. after a connection was lost. */
+export async function reloadShow() {
+  const shown = await attempt(api.getShow());
+  if (shown) showView(shown);
+}
 
 /** Shows a view from the backend unless a newer one is shown already (a late `getShow` answer). */
 function showView({ revision, view: next }: ShowEvent) {
@@ -300,6 +332,10 @@ export async function init(main: boolean) {
 
 async function listenAsMain() {
   await events.onNotice(notify);
+  await events.onRemote((status) => {
+    ui.remoteStatus = status;
+  });
+  ui.remoteStatus = (await attempt(api.getRemote())) ?? null;
   await events.onUpdateAvailable((info) => {
     ui.update = info;
     notify({ level: 'warning', message: t('update.available_notice', { version: info.version }) });

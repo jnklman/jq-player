@@ -29,7 +29,17 @@ export default defineConfig({
     hmr: host ? { protocol: 'ws', host, port: 1421 } : undefined,
     watch: { ignored: ['**/src-tauri/**'] },
   },
-  build: { target: 'es2022', chunkSizeWarningLimit: 1000 },
+  build: {
+    target: 'es2022',
+    chunkSizeWarningLimit: 1000,
+    // The app's windows, and the remote page the app serves to other devices (`src/remote`).
+    rolldownOptions: {
+      input: {
+        index: fileURLToPath(new URL('./index.html', import.meta.url)),
+        remote: fileURLToPath(new URL('./remote.html', import.meta.url)),
+      },
+    },
+  },
   // Svelte's browser build, so components can be mounted in tests (jsdom).
   resolve: {
     alias: { $lib: fileURLToPath(new URL('./src/lib', import.meta.url)) },

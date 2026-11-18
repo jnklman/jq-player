@@ -43,4 +43,32 @@ export default defineConfig(
       'unused-imports/no-unused-vars': 'error',
     },
   },
+  {
+    // The remote page runs in a browser on another device: no Tauri, and nothing of the app that needs it (window
+    // handling, shortcuts with editing, files). It reaches the backend only through `lib/transport.ts`.
+    files: ['src/remote/**'],
+    ignores: ['src/remote/**/*.test.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            { group: ['@tauri-apps/*'], message: 'The remote page has no Tauri.' },
+            {
+              group: [
+                '**/lib/windows.svelte',
+                '**/lib/window.svelte',
+                '**/lib/shortcuts',
+                '**/lib/shows',
+                '**/lib/media',
+                '**/lib/fileDrop',
+                '**/lib/commands',
+              ],
+              message: 'Needs the app window or edits the show; not for the remote page.',
+            },
+          ],
+        },
+      ],
+    },
+  },
 );

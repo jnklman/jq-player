@@ -2,6 +2,7 @@
 //! (`backend`); see `app/src/lib/api.ts` for their TypeScript signatures.
 
 mod backend;
+mod channel;
 mod close;
 mod jobs;
 mod key_labels;
@@ -9,17 +10,19 @@ mod language;
 mod media;
 mod panel_windows;
 pub mod paths;
+mod remote;
 mod save_as;
 mod session;
 mod updates;
 mod writer;
 
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{self, Sender};
+use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use backend::Request;
+pub(crate) use channel::{Backend, REPLY_TIMEOUT};
 use jq_audio::DeviceInfo;
 use jq_core::{Action, LocalSettings, PeakCache, SelectionMode, Startup};
 use jq_show::{Cue, CueId, StopwatchAction};
@@ -40,41 +43,13 @@ const EVENT_OPEN_REQUESTED: &str = "open_requested";
 /// A show opened at startup that runs this long did not crash the app.
 const STARTUP_GRACE: Duration = Duration::from_secs(5);
 
-/// Requests that take longer than this are reported as failed.
-const REPLY_TIMEOUT: Duration = Duration::from_secs(30);
-
 /// Longest wait on exit for settings and autosave writes still queued; the
 /// window's close asks the operator before (see `close`), this is the last
 /// resort for other ways out.
 const EXIT_FLUSH_TIMEOUT: Duration = Duration::from_secs(5);
 
-struct Backend(Mutex<Sender<Request>>);
-
 /// The last show, if the start screen is to offer opening it.
 struct StartupOffer(Mutex<Option<PathBuf>>);
-
-impl Backend {
-    fn send(&self, request: Request) -> Result<(), String> {
-        self.0
-            .lock()
-            .map_err(|_| jq_i18n::t!("app.backend_locked"))?
-            .send(request)
-            .map_err(|_| jq_i18n::t!("app.thread_ended"))
-    }
-
-    /// Sends a request and waits for its reply off the async runtime.
-    async fn ask<T: Send + 'static>(
-        &self,
-        make: impl FnOnce(backend::Reply<T>) -> Request,
-    ) -> Result<T, String> {
-        let (tx, rx) = mpsc::channel();
-        self.send(make(tx))?;
-        tauri::async_runtime::spawn_blocking(move || rx.recv_timeout(REPLY_TIMEOUT))
-            .await
-            .map_err(|e| e.to_string())?
-            .map_err(|_| jq_i18n::t!("app.no_reply"))?
-    }
-}
 
 #[tauri::command]
 async fn open_show(backend: State<'_, Backend>, path: PathBuf) -> Result<serde_json::Value, String> {
@@ -376,6 +351,92 @@ async fn audio_devices(host: Option<String>) -> Result<AudioDevices, String> {
     .map_err(|e| e.to_string())?
 }
 
+/// Hub and device registry of the remote control (as Tauri state), and the
+/// controller of its server for the show thread.
+fn remote_setup(app: &AppHandle, writer: &writer::Writer) -> impl FnOnce(Backend) -> remote::Remote + use<> {
+    let hub = remote::Hub::default();
+    app.manage(hub.clone());
+    let file = paths::config_dir(app).unwrap_or_else(|| PathBuf::from(".")).join(remote::CLIENTS_FILE);
+    let changed = {
+        let app = app.clone();
+        move |status: &remote::RemoteStatus| {
+            let _ = app.emit_to(panel_windows::MAIN, remote::EVENT_REMOTE, status);
+        }
+    };
+    let store = {
+        let writer = writer.clone();
+        move |clients: Vec<remote::clients::StoredClient>| {
+            let path = file.clone();
+            writer.submit(Some(writer::Key::new(path.clone(), "remote")), move || {
+                remote::clients::save(&path, &clients)
+                    .map_err(|e| jq_i18n::t!("remote.clients_not_saved", error = e))
+            });
+        }
+    };
+    let notify: remote::Notify = {
+        let app = app.clone();
+        Arc::new(move |notice| {
+            let _ = app.emit_to(panel_windows::MAIN, backend::EVENT_NOTICE, notice);
+        })
+    };
+    let joined = {
+        let notify = notify.clone();
+        move |name: &str| notify(jq_core::Notice::Warning(jq_i18n::t!("remote.join_request", name = name)))
+    };
+    let stored =
+        remote::clients::load(&paths::config_dir(app).unwrap_or_default().join(remote::CLIENTS_FILE));
+    let registry = remote::Registry::new(stored, changed, store, joined);
+    app.manage(registry.clone());
+    let assets: remote::server::Assets = {
+        let app = app.clone();
+        Arc::new(move |path: &str| remote_asset(&app, path))
+    };
+    move |backend| {
+        let shared = remote::server::Shared {
+            backend,
+            hub,
+            registry,
+            assets,
+            instance: remote::clients::random_hex(8),
+            language: Arc::new(|| serde_json::to_value(language::current()).unwrap_or_default()),
+        };
+        remote::Remote::new(shared, notify)
+    }
+}
+
+/// A file of the remote page from the app's built-in web files; in a
+/// development build from the Vite dev server first, which has the current
+/// sources (and nothing is built in).
+fn remote_asset(app: &AppHandle, path: &str) -> Option<remote::server::Asset> {
+    #[cfg(debug_assertions)]
+    if let Some(asset) = dev_asset(path) {
+        return Some(asset);
+    }
+    let asset = app.asset_resolver().get(path.to_owned())?;
+    Some(remote::server::Asset { bytes: asset.bytes, mime: asset.mime_type })
+}
+
+/// GET `path` from the Vite dev server (`devUrl`), as plain HTTP/1.0.
+#[cfg(debug_assertions)]
+fn dev_asset(path: &str) -> Option<remote::server::Asset> {
+    use std::io::{Read, Write};
+    let mut stream = std::net::TcpStream::connect(("127.0.0.1", 1420)).ok()?;
+    stream.set_read_timeout(Some(Duration::from_secs(10))).ok()?;
+    write!(stream, "GET /{path} HTTP/1.0\r\nHost: localhost:1420\r\n\r\n").ok()?;
+    let mut response = Vec::new();
+    stream.read_to_end(&mut response).ok()?;
+    let split = response.windows(4).position(|w| w == b"\r\n\r\n")?;
+    let head = String::from_utf8_lossy(&response[..split]);
+    if !head.lines().next()?.contains(" 200") {
+        return None;
+    }
+    let mime = head
+        .lines()
+        .find_map(|line| line.split_once(':').filter(|(k, _)| k.eq_ignore_ascii_case("content-type")))
+        .map_or("application/octet-stream".to_owned(), |(_, v)| v.trim().to_owned());
+    Some(remote::server::Asset { bytes: response[split + 4..].to_vec(), mime })
+}
+
 /// The show file among command-line arguments (without the program name),
 /// resolved against the folder the program was started in.
 fn show_arg(args: impl IntoIterator<Item = String>, cwd: &Path) -> Option<PathBuf> {
@@ -493,7 +554,7 @@ pub fn run() {
             // Before the show thread, which queues its settings and autosave writes there.
             let (writer, writes) = writer::Writer::spawn();
             app.manage(writer.clone());
-            let tx = backend::spawn(app.handle().clone(), writes);
+            let tx = backend::spawn(app.handle().clone(), writes, remote_setup(app.handle(), &writer));
             // A show path on the command line (e.g. a show file opened in the file
             // manager) is opened right away: no show is open yet to ask about.
             let cwd = std::env::current_dir().unwrap_or_default();
@@ -542,7 +603,7 @@ pub fn run() {
                     .name("jq-startup-open".into())
                     .spawn(move || startup_open_failed(&app, path, opened))?;
             }
-            app.manage(Backend(Mutex::new(tx)));
+            app.manage(Backend::new(tx));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -587,6 +648,10 @@ pub fn run() {
             panel_windows::app_focused,
             panel_windows::focus_main,
             panel_windows::window_support,
+            remote::get_remote,
+            remote::set_remote_client,
+            remote::remove_remote_client,
+            remote::remote_info,
             close::close_ack,
             close::fields_committed,
             close::confirm_close,
