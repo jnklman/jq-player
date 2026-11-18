@@ -77,6 +77,13 @@
   const pauseKeys = $derived(shown(boundKeys(keys, 'toggle_pause_all', resumes ? 'resume_all' : 'pause_all')));
   const stopKeys = $derived(shown(boundKeys(keys, 'stop_all', 'panic')));
 
+  // With a keyboard an unbound button keeps an empty second line, so all labels line up; without one there are no
+  // keys at all, so the line is left out and the label sits in the middle.
+  const hint = (text: string) => text || (keyboard.present ? '\u00a0' : '');
+  const goHint = $derived(hint(rejected ? t('transport.too_fast') : goKeys));
+  const pauseHint = $derived(hint(pauseKeys));
+  const stopHint = $derived(hint(stopKeys));
+
   const sub = tw`text-xs font-medium tracking-normal`;
   // Equally wide; in a narrow panel the label wraps instead of overflowing. Stacked (portrait) they are lower, so
   // the panel doesn't take the whole height.
@@ -97,7 +104,7 @@
         disabled={!next || !canControl()}
         onclick={() => api.action({ action: 'go' })}
       >
-        GO<span class={sub}>{rejected ? t('transport.too_fast') : goKeys || '\u00a0'}</span>
+        GO{#if goHint}<span class={sub}>{goHint}</span>{/if}
       </Button>
 
       <!-- Fixed-height rows that never wrap, so stepping through cues doesn't shift the layout. -->
@@ -162,7 +169,8 @@
         disabled={!canControl()}
         onclick={() => api.action({ action: 'toggle_pause_all' })}
       >
-        {resumes ? t('action.resume_all') : t('action.pause_all')}<span class={sub}>{pauseKeys || '\u00a0'}</span>
+        {resumes ? t('action.resume_all') : t('action.pause_all')}{#if pauseHint}<span class={sub}>{pauseHint}</span
+          >{/if}
       </Button>
       <Button
         variant="stop"
@@ -171,7 +179,7 @@
         disabled={!canControl()}
         onclick={() => api.action({ action: 'stop_all' })}
       >
-        {t('action.stop_all')}<span class={sub}>{stopKeys || '\u00a0'}</span>
+        {t('action.stop_all')}{#if stopHint}<span class={sub}>{stopHint}</span>{/if}
       </Button>
     </div>
   </div>
