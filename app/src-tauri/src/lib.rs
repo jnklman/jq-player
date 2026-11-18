@@ -651,6 +651,7 @@ pub fn run() {
             remote::get_remote,
             remote::set_remote_client,
             remote::remove_remote_client,
+            remote::set_remote_keys,
             remote::remote_info,
             close::close_ack,
             close::fields_committed,

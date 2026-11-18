@@ -173,6 +173,12 @@ async fn a_device_is_let_in_to_watch_then_to_operate_then_removed() {
     assert!(f.actions.try_recv().is_err(), "the refused GO never reached the show thread");
     let edit = call(&mut socket, 5, "edit", serde_json::json!({ "op": { "op": "undo" } })).await;
     assert!(edit["err"].is_string(), "never editing");
+    let f1 = serde_json::json!({ "keys": [{ "chord": { "code": "F1" }, "action": "go" }] });
+    let reply = call(&mut socket, 6, "set_own_keys", f1).await;
+    assert_eq!(reply["ok"], serde_json::Value::Null);
+    let keys = next(&mut socket).await;
+    assert_eq!((&keys["type"], &keys["keys"][0]["chord"]["code"]), (&"keys".into(), &"F1".into()));
+    assert_eq!(f.registry.status().clients[0].keys.as_ref().map(Vec::len), Some(1));
 
     f.registry.remove(&id).unwrap();
     let closed = loop {

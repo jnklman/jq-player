@@ -91,7 +91,7 @@ function connect(me: Identity) {
   remote.name = me.name;
   remote.error = null;
   remote.phase = 'live';
-  ui.remote = { role: me.role, connected: false, locked: storedLock() };
+  ui.remote = { role: me.role, connected: false, locked: storedLock(), keys: null };
   socket?.start();
 }
 
@@ -132,6 +132,7 @@ function statusChanged(status: SocketStatus) {
     role: status.role ?? was?.role ?? 'pending',
     connected: status.connected,
     locked: was?.locked ?? false,
+    keys: status.keys,
   };
   // Let in just now.
   if (was?.role === 'pending' && status.role !== 'pending' && status.connected) void showUp(false);

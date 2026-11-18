@@ -59,6 +59,8 @@ describe('commands', () => {
       [() => api.setRemoteClient('c1', 'control'), 'set_remote_client', { id: 'c1', role: 'control' }],
       [() => api.removeRemoteClient('c1'), 'remove_remote_client', { id: 'c1' }],
       [() => api.remoteInfo(), 'remote_info', {}],
+      [() => api.setRemoteKeys('c1', null), 'set_remote_keys', { id: 'c1', keys: null }],
+      [() => api.setOwnKeys(null), 'set_own_keys', { keys: null }],
     ];
     for (const [call, cmd, args] of calls) {
       backend.calls = [];

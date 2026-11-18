@@ -253,13 +253,15 @@ async fn socket(
 /// One open page: sends what its role lets it see and runs its calls.
 async fn client(mut socket: WebSocket, shared: Arc<Shared>, found: Lookup, address: SocketAddr) {
     let _open = shared.registry.connect(&found.id, address.to_string());
-    let mut roles = found.role;
+    let (id, mut roles, mut keys) = (found.id, found.role, found.keys);
     let Some(mut role) = *roles.borrow_and_update() else { return };
     let mut feeds = shared.hub.subscribe();
     let (replies, mut replied) = mpsc::unbounded_channel::<String>();
     let mut ping = tokio::time::interval(PING_INTERVAL);
 
-    if !send(&mut socket, protocol::hello(&shared.instance, &found.id, &found.name, role)).await {
+    let hello =
+        protocol::hello(&shared.instance, &id, &found.name, role, keys.borrow_and_update().as_deref());
+    if !send(&mut socket, hello).await {
         return;
     }
     if role != Role::Pending && !send_latest(&mut socket, &mut feeds).await {
@@ -268,7 +270,7 @@ async fn client(mut socket: WebSocket, shared: Arc<Shared>, found: Lookup, addre
     loop {
         let frame: Option<String> = tokio::select! {
             message = socket.recv() => match message {
-                Some(Ok(Message::Text(text))) => call(&shared, role, &text, &replies),
+                Some(Ok(Message::Text(text))) => call(&shared, &id, role, &text, &replies),
                 Some(Ok(Message::Close(_))) | Some(Err(_)) | None => return,
                 Some(Ok(_)) => None,
             },
@@ -292,6 +294,7 @@ async fn client(mut socket: WebSocket, shared: Arc<Shared>, found: Lookup, addre
                 }
                 None
             }
+            Ok(()) = keys.changed() => Some(protocol::keys(keys.borrow_and_update().as_deref())),
             Some(reply) = replied.recv() => Some(reply),
             _ = ping.tick() => Some(protocol::PING.to_owned()),
         };
@@ -337,6 +340,7 @@ async fn send(socket: &mut WebSocket, frame: String) -> bool {
 /// show thread answers.
 fn call(
     shared: &Arc<Shared>,
+    client: &str,
     role: Role,
     text: &str,
     replies: &mpsc::UnboundedSender<String>,
@@ -355,6 +359,8 @@ fn call(
         // Fire-and-forget, as from the app's own buttons.
         Call::Action(action) => done(shared.backend.send(Request::Action(action))),
         Call::Stopwatch(watch, action) => done(shared.backend.send(Request::Stopwatch(watch, action))),
+        // Its open pages hear of it through the registry (a `keys` frame).
+        Call::SetOwnKeys(keys) => done(shared.registry.set_keys(client, keys)),
         Call::GetLanguage => Some(protocol::reply(id, Ok((shared.language)()))),
         Call::GetShow => {
             let backend = shared.backend.clone();

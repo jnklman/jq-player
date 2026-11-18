@@ -79,7 +79,8 @@
   through `hub.rs` (`watch` channels: latest frame wins, nothing serialized without a client) and never waits for it;
   calls go into the same request queue as Tauri's commands (`channel.rs`, `Backend`). What a role may call is a
   whitelist in `protocol.rs`, checked on the server: never edits, never the host's preview. Devices and roles live
-  in `clients.rs` (`remote-clients.json` in the config folder, only token hashes); the token is an HttpOnly cookie,
+  in `clients.rs` (`remote-clients.json` in the config folder, only token hashes, plus a device's own keys, set by
+  `set_own_keys` and limited to `REMOTE_ACTIONS`); the token is an HttpOnly cookie,
   WebSocket and join check `Origin`. The UI reaches the backend only through `lib/transport.ts` (Tauri by default,
   the remote page's `socket.ts` with `useTransport`); the remote page must not import Tauri or window/edit modules
   (ESLint `no-restricted-imports` for `src/remote`). Buttons of panels it reuses take `disabled={!canControl()}`

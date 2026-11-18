@@ -97,6 +97,16 @@ pub fn set_remote_client(registry: State<'_, Registry>, id: String, role: Role) 
     registry.set_role(&id, role)
 }
 
+/// Gives a device keys of its own, or (`null`) the host's again.
+#[tauri::command]
+pub fn set_remote_keys(
+    registry: State<'_, Registry>,
+    id: String,
+    keys: Option<Vec<jq_core::keys::KeyBinding>>,
+) -> Result<(), String> {
+    registry.set_keys(&id, keys)
+}
+
 /// Removes a device, or turns its request down.
 #[tauri::command]
 pub fn remove_remote_client(registry: State<'_, Registry>, id: String) -> Result<(), String> {

@@ -211,6 +211,7 @@ describe('Media and MIDI tabs', () => {
           address: '10.0.0.7:5000',
           last_seen: 1,
           known_name: false,
+          keys: [{ chord: { code: 'F1', ctrl: false, shift: false, alt: false, label: '' }, action: 'go' }],
         },
         {
           id: 'p',
@@ -220,6 +221,7 @@ describe('Media and MIDI tabs', () => {
           address: '10.0.0.8:5000',
           last_seen: 1,
           known_name: false,
+          keys: null,
         },
       ],
     };
@@ -228,6 +230,9 @@ describe('Media and MIDI tabs', () => {
     expect(within(dialog).getByText('http://10.0.0.5:8642/')).toBeInTheDocument();
     expect(within(dialog).getByRole('img', { name: 'QR code of http://10.0.0.5:8642/' })).toBeInTheDocument();
     expect(within(dialog).getByText('listening on 8642')).toBeInTheDocument();
+    expect(within(dialog).getByText(/^Own keys: .* F1$/)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: 'FOH tablet: use the host keys again' }));
+    expect(backend.invoked('set_remote_keys')).toEqual([{ id: 'k', keys: null }]);
 
     await user.click(within(dialog).getByRole('button', { name: 'Operate' }));
     await user.click(within(dialog).getByRole('button', { name: 'Remove' }));

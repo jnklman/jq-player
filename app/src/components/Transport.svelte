@@ -10,7 +10,7 @@
   import { fmtSecs } from '../lib/format';
   import { t } from '../lib/i18n/index.svelte';
   import { boundKeys, keyboard } from '../lib/keys.svelte';
-  import { allCues, canControl, cueById, cues, previousOf, ui } from '../lib/store.svelte';
+  import { allCues, canControl, cueById, cues, globalKeys, previousOf, ui } from '../lib/store.svelte';
   import { tw } from '../lib/ui';
   import PanelFrame from './layout/PanelFrame.svelte';
 
@@ -67,10 +67,10 @@
     return { text: `${typeLabel(next)} ${status.text}`, color: typeColors[next.type] };
   });
 
-  // The keys as set in the settings. The pause button toggles, so a key that only pauses or only resumes counts
+  // The keys as set in the settings (or for this remote device). The pause button toggles, so a key that only pauses or only resumes counts
   // when it fits; the stop button stops at once, so without a key of its own it shows the panic key (Esc).
   // None without a physical keyboard (a phone or tablet): there they would only take room.
-  const keys = $derived(ui.view?.settings.keys ?? []);
+  const keys = $derived(globalKeys());
   const shown = (text: string) => (keyboard.present ? text : '');
   const goKeys = $derived(shown(boundKeys(keys, 'go')));
   const fadeKeys = $derived(shown(boundKeys(keys, 'fade_all')));

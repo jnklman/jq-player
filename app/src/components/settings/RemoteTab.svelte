@@ -4,9 +4,10 @@
   import { Input } from '$lib/components/ui/input';
   import { Label } from '$lib/components/ui/label';
 
-  import { api, type LocalSettings, type RemoteAddress, type RemoteClient } from '../../lib/api';
+  import { api, type KeyBinding, type LocalSettings, type RemoteAddress, type RemoteClient } from '../../lib/api';
   import { t } from '../../lib/i18n/index.svelte';
   import { liveNumber } from '../../lib/input';
+  import { ACTION_NAMES, keyText } from '../../lib/keys.svelte';
   import { remoteRoleOptions } from '../../lib/options';
   import { positiveOrNull } from '../../lib/settings';
   import { attempt, ui } from '../../lib/store.svelte';
@@ -40,6 +41,13 @@
     if (client.connected) return t('remote_tab.connected', { count: client.connected });
     if (client.last_seen === null) return t('remote_tab.not_seen');
     return t('remote_tab.last_seen', { time: new Date(client.last_seen).toLocaleString() });
+  }
+
+  /** A device's own keys, e.g. "GO F1 · Stop all F2"; set on the device, reset here. */
+  function ownKeys(keys: KeyBinding[]): string {
+    if (!keys.length) return t('remote_tab.own_keys_none');
+    const list = keys.map((binding) => `${ACTION_NAMES[binding.action]} ${keyText(binding.chord)}`).join(' · ');
+    return t('remote_tab.own_keys', { keys: list });
   }
 </script>
 
@@ -128,11 +136,19 @@
             options={remoteRoleOptions}
             onchange={(role) => attempt(api.setRemoteClient(client.id, role))}
           />
+          {#if client.keys}
+            <Button
+              size="sm"
+              aria-label={t('remote_tab.host_keys_of', { name: client.name })}
+              onclick={() => attempt(api.setRemoteKeys(client.id, null))}>{t('remote_tab.host_keys')}</Button
+            >
+          {/if}
           <Button size="sm" variant="destructive" onclick={() => attempt(api.removeRemoteClient(client.id))}
             >{t('remote_tab.remove')}</Button
           >
         </div>
         <span class={[hint, client.connected && 'text-go']}>{seen(client)}</span>
+        {#if client.keys}<span class={hint}>{ownKeys(client.keys)}</span>{/if}
       </SettingRow>
     {:else}
       <p class="{hint} py-2.5">{t('remote_tab.no_devices')}</p>

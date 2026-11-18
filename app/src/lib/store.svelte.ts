@@ -13,6 +13,7 @@ import {
   type FadingState,
   type GapState,
   type ImportClash,
+  type KeyBinding,
   type Notice,
   type OnClash,
   type RemoteStatus,
@@ -75,6 +76,8 @@ export interface RemoteState {
   connected: boolean;
   /** The operator locked the controls on this device (against a GO from a pocket). */
   locked: boolean;
+  /** The device's own keys for the show's global actions, in place of the host's; null = the host's. */
+  keys: KeyBinding[] | null;
 }
 
 // The backend replaces these whole (a large show's view is several hundred
@@ -141,6 +144,11 @@ export const ui = $state({
 export function canControl(): boolean {
   const remote = ui.remote;
   return !remote || (remote.role === 'control' && remote.connected && !remote.locked);
+}
+
+/** The keys of the global actions here: the show's (`settings.keys`), on a remote device with keys of its own those. */
+export function globalKeys(): KeyBinding[] {
+  return ui.remote?.keys ?? ui.view?.settings.keys ?? [];
 }
 
 // The revision of `ui.view` (see `Revision`).

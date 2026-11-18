@@ -4,10 +4,10 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { canControl, type RemoteState, ui } from '$lib/store.svelte';
 
 import { backend } from '../test/backend';
-import { active, runtime, scene, sound, view } from '../test/fixtures';
+import { active, chord, runtime, scene, sound, view } from '../test/fixtures';
 import { renderUi } from '../test/render';
 import { loadShow, settle } from '../test/store';
-import { onRemoteKey } from './keys';
+import { hostKeys, onRemoteKey, withKey } from './keys';
 import { remote } from './remote.svelte';
 import RemoteApp from './RemoteApp.svelte';
 import RemoteCueList from './RemoteCueList.svelte';
@@ -18,7 +18,7 @@ import RemoteCueList from './RemoteCueList.svelte';
 const go = () => screen.getByRole('button', { name: /^GO/ });
 
 function as(role: RemoteState['role'], extra: Partial<RemoteState> = {}) {
-  ui.remote = { role, connected: true, locked: false, ...extra };
+  ui.remote = { role, connected: true, locked: false, keys: null, ...extra };
 }
 
 async function showLoaded() {
@@ -125,5 +125,61 @@ describe('remote keys', () => {
     expect(onRemoteKey(new KeyboardEvent('keydown', { code: 'KeyZ', key: 'z', ctrlKey: true }))).toBe(false);
     await settle();
     expect(backend.actions).toEqual([{ action: 'go' }, { action: 'panic' }]);
+  });
+});
+
+describe('own keys', () => {
+  beforeEach(() => {
+    remote.phase = 'live';
+  });
+
+  it('replace the host bindings on the device', async () => {
+    await showLoaded();
+    as('control', { keys: [{ chord: chord('F1'), action: 'stop_all' }] });
+    const key = (code: string) => new KeyboardEvent('keydown', { code, key: code, cancelable: true });
+    expect(onRemoteKey(key('Space')), "the host's GO key").toBe(false);
+    expect(onRemoteKey(key('F1'))).toBe(true);
+    expect(onRemoteKey(key('Escape')), 'Esc always panics').toBe(true);
+    await settle();
+    expect(backend.actions).toEqual([{ action: 'stop_all' }, { action: 'panic' }]);
+  });
+
+  it('start from the host keys the remote page carries out, and move a key to the action it is set for', async () => {
+    await showLoaded();
+    expect(hostKeys()).toEqual([{ chord: chord('Space', { label: ' ' }), action: 'go' }]);
+    let keys = withKey(hostKeys(), 'go', 1, chord('F1'));
+    expect(keys.map((binding) => binding.chord.code)).toEqual(['Space', 'F1']);
+    keys = withKey(keys, 'stop_all', 0, chord('F1'));
+    expect(keys).toEqual([
+      { chord: chord('Space', { label: ' ' }), action: 'go' },
+      { chord: chord('F1'), action: 'stop_all' },
+    ]);
+    expect(withKey(keys, 'go', 0, null)).toEqual([{ chord: chord('F1'), action: 'stop_all' }]);
+    expect(withKey(keys, 'go', 1, chord('Space', { label: ' ' })), 'the same key twice counts once').toHaveLength(2);
+  });
+
+  it('are set on the device and sent to the host', async () => {
+    await showLoaded();
+    as('control');
+    const { user } = await renderUi(RemoteApp);
+    await user.click(screen.getByRole('button', { name: 'Keys of this device' }));
+    const dialog = screen.getByRole('dialog');
+    const first = within(dialog).getByRole('button', { name: 'STOP ALL, first key' });
+    expect(first).toBeDisabled();
+    await user.click(within(dialog).getByRole('checkbox', { name: 'Own keys for this device' }));
+    await user.click(first);
+    await user.keyboard('[F2]');
+    await user.click(within(dialog).getByRole('button', { name: 'Save' }));
+    await settle();
+    expect(backend.invoked('set_own_keys')).toEqual([
+      {
+        keys: [
+          { chord: chord('Space', { label: ' ' }), action: 'go' },
+          expect.objectContaining({ chord: expect.objectContaining({ code: 'F2' }), action: 'stop_all' }),
+        ],
+      },
+    ]);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(backend.actions, 'recording a key is not operating').toEqual([]);
   });
 });

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { MediaQuery } from 'svelte/reactivity';
 
+  import Keyboard from '~icons/ph/keyboard-bold';
   import LockSimple from '~icons/ph/lock-simple-bold';
   import LockSimpleOpen from '~icons/ph/lock-simple-open-bold';
   import WifiSlash from '~icons/ph/wifi-slash-bold';
@@ -15,9 +16,11 @@
   import StopwatchesPanel from '../components/StopwatchesPanel.svelte';
   import Transport from '../components/Transport.svelte';
   import { i18n, t } from '../lib/i18n/index.svelte';
+  import { keyboard } from '../lib/keys.svelte';
   import { ui } from '../lib/store.svelte';
   import JoinView from './JoinView.svelte';
   import { onRemoteKey } from './keys';
+  import KeysDialog from './KeysDialog.svelte';
   import { remote, setLocked } from './remote.svelte';
   import RemoteCueList from './RemoteCueList.svelte';
 
@@ -38,6 +41,12 @@
   const role = $derived(ui.remote?.role ?? 'pending');
   const connected = $derived(ui.remote?.connected ?? false);
   const locked = $derived(ui.remote?.locked ?? false);
+  // The device's own keys: only where it operates and has a keyboard.
+  let keysOpen = $state(false);
+  const keysOffered = $derived(role === 'control' && connected && !!ui.view && keyboard.present);
+  $effect(() => {
+    if (!keysOffered) keysOpen = false;
+  });
 
   // Tailwind's `lg` and `md`; one layout is rendered, not three hidden ones following every state.
   const wide = new MediaQuery('(min-width: 64rem)');
@@ -70,6 +79,12 @@
           {connected ? t('remote.connected') : t('remote.disconnected_short')}
         </Badge>
         <Badge variant="outline" class="hidden sm:inline-flex">{t(`remote.role.${role}`)}</Badge>
+        {#if keysOffered}
+          <Button size="sm" variant="outline" aria-label={t('remote.keys_title')} onclick={() => (keysOpen = true)}>
+            <Keyboard class="size-3.5" />
+            <span class="hidden sm:inline">{t('remote.keys')}</span>
+          </Button>
+        {/if}
         {#if role === 'control'}
           <Button
             size="sm"
@@ -159,5 +174,6 @@
       </main>
     {/if}
   </div>
+  {#if keysOpen}<KeysDialog onclose={() => (keysOpen = false)} />{/if}
   <Notices />
 </Tooltip.Provider>

@@ -426,5 +426,6 @@ remote.too_many_requests = Too many requests to join – try again in a minute.
 remote.name_missing = Enter a name for this device.
 remote.bad_role = A device can watch or operate.
 remote.unknown_client = This device is no longer in the list.
+remote.key_action = Keys of a device can only be bound to the actions of the whole show, not to “{action}”.
 remote.clients_not_saved = The remote devices were not saved: {error}
 remote.join_request = “{name}” asks for remote access (Settings → Web remote).

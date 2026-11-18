@@ -426,5 +426,6 @@ remote.too_many_requests = Zu viele Anfragen – in einer Minute noch einmal ver
 remote.name_missing = Einen Namen für dieses Gerät eingeben.
 remote.bad_role = Ein Gerät kann beobachten oder bedienen.
 remote.unknown_client = Dieses Gerät ist nicht mehr in der Liste.
+remote.key_action = Tasten eines Geräts lassen sich nur Aktionen der ganzen Show zuweisen, nicht „{action}“.
 remote.clients_not_saved = Die Geräte der Web-Fernsteuerung wurden nicht gespeichert: {error}
 remote.join_request = „{name}“ bittet um Fernzugriff (Einstellungen → Web-Fernsteuerung).

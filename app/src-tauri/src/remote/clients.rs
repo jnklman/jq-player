@@ -1,6 +1,7 @@
 //! The devices that asked to join, and what each may do. A device asks with
 //! a name and gets a random token (as a cookie); the host lets it in to
-//! watch or to operate, changes that, or removes it. Let-in devices are
+//! watch or to operate, changes that, or removes it. A device that operates
+//! may bind keys of its own (else it has the host's). Let-in devices are
 //! kept (by the hash of their token, never the token itself) and known again
 //! after a restart; requests not answered yet are forgotten.
 
@@ -8,11 +9,12 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use jq_core::keys::KeyBinding;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::sync::watch;
 
-use super::protocol::Role;
+use super::protocol::{Role, check_remote_keys};
 
 /// At most this many join requests in [`JOIN_WINDOW`], and this many waiting
 /// for an answer: a stray script on the network must not flood the host.
@@ -31,6 +33,9 @@ pub struct StoredClient {
     pub token_hash: String,
     /// `View` or `Control`.
     pub role: Role,
+    /// Keys of its own for the show's global actions; `None` = the host's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keys: Option<Vec<KeyBinding>>,
 }
 
 /// A device as the host's settings list it (the `remote` event).
@@ -49,6 +54,8 @@ pub struct ClientInfo {
     /// again, with a new token (the host's address changed, cookies
     /// deleted).
     pub known_name: bool,
+    /// Its own keys (see [`StoredClient::keys`]).
+    pub keys: Option<Vec<KeyBinding>>,
 }
 
 /// The server's state and the devices, for the host (`remote` event and
@@ -69,6 +76,8 @@ pub struct Lookup {
     pub name: String,
     /// Its role now and later; `None` once it is removed.
     pub role: watch::Receiver<Option<Role>>,
+    /// Its own keys now and later.
+    pub keys: watch::Receiver<Option<Vec<KeyBinding>>>,
 }
 
 struct Entry {
@@ -78,12 +87,23 @@ struct Entry {
     address: Option<String>,
     last_seen: Option<u64>,
     role: watch::Sender<Option<Role>>,
+    keys: watch::Sender<Option<Vec<KeyBinding>>>,
 }
 
 impl Entry {
     fn new(stored: StoredClient, pending: bool) -> Self {
         let role = watch::Sender::new(Some(stored.role));
-        Self { stored, pending, connected: 0, address: None, last_seen: None, role }
+        let keys = watch::Sender::new(stored.keys.clone());
+        Self { stored, pending, connected: 0, address: None, last_seen: None, role, keys }
+    }
+
+    fn lookup(&self) -> Lookup {
+        Lookup {
+            id: self.stored.id.clone(),
+            name: self.stored.name.clone(),
+            role: self.role.subscribe(),
+            keys: self.keys.subscribe(),
+        }
     }
 }
 
@@ -192,11 +212,11 @@ impl Registry {
                 name: name.clone(),
                 token_hash: hash(&token),
                 role: Role::Pending,
+                keys: None,
             };
             let mut entry = Entry::new(stored, true);
             (entry.address, entry.last_seen) = (address, Some(now_ms()));
-            let lookup =
-                Lookup { id: entry.stored.id.clone(), name: name.clone(), role: entry.role.subscribe() };
+            let lookup = entry.lookup();
             inner.entries.push(entry);
             Ok((token, lookup))
         });
@@ -210,12 +230,7 @@ impl Registry {
     pub fn lookup(&self, token: &str) -> Option<Lookup> {
         let hash = hash(token);
         let inner = self.lock();
-        let entry = inner.entries.iter().find(|e| e.stored.token_hash == hash)?;
-        Some(Lookup {
-            id: entry.stored.id.clone(),
-            name: entry.stored.name.clone(),
-            role: entry.role.subscribe(),
-        })
+        inner.entries.iter().find(|e| e.stored.token_hash == hash).map(Entry::lookup)
     }
 
     /// A connection of device `id` opened from `address`; closing it is
@@ -244,6 +259,24 @@ impl Registry {
             entry.stored.role = role;
             entry.pending = false;
             entry.role.send_replace(Some(role));
+            Ok(())
+        })
+    }
+
+    /// Gives device `id` keys of its own, or (`None`) the host's again. Only
+    /// a let-in device: a request has no say yet.
+    pub fn set_keys(&self, id: &str, keys: Option<Vec<KeyBinding>>) -> Result<(), String> {
+        if let Some(keys) = &keys {
+            check_remote_keys(keys)?;
+        }
+        self.update(true, |inner| {
+            let entry = inner
+                .entries
+                .iter_mut()
+                .find(|e| e.stored.id == id && !e.pending)
+                .ok_or_else(|| jq_i18n::t!("remote.unknown_client"))?;
+            entry.stored.keys = keys.clone();
+            entry.keys.send_replace(keys);
             Ok(())
         })
     }
@@ -294,6 +327,7 @@ fn status(inner: &Inner) -> RemoteStatus {
         address: e.address.clone(),
         last_seen: e.last_seen,
         known_name: known(e),
+        keys: e.stored.keys.clone(),
     };
     let (requests, let_in): (Vec<&Entry>, Vec<&Entry>) = inner.entries.iter().partition(|e| e.pending);
     RemoteStatus {
@@ -427,11 +461,56 @@ mod tests {
     }
 
     #[test]
+    fn a_device_gets_keys_of_its_own() {
+        let kept = Arc::new(Mutex::new(Vec::new()));
+        let keep = kept.clone();
+        let registry = Registry::new(Vec::new(), |_| {}, move |c| *keep.lock().unwrap() = c, |_| {});
+        let (_, lookup) = registry.join("Tablet", None).unwrap();
+        let f1 = || {
+            vec![KeyBinding {
+                chord: jq_show::Chord::new("F1", ""),
+                action: jq_core::keys::ControlAction::Go,
+            }]
+        };
+        assert!(registry.set_keys(&lookup.id, Some(f1())).is_err(), "not let in yet");
+        registry.set_role(&lookup.id, Role::Control).unwrap();
+        registry.set_keys(&lookup.id, Some(f1())).unwrap();
+        assert_eq!(*lookup.keys.borrow(), Some(f1()), "its connection hears of it");
+        assert_eq!(kept.lock().unwrap()[0].keys, Some(f1()));
+        assert_eq!(registry.status().clients[0].keys, Some(f1()));
+        let preview = vec![KeyBinding {
+            chord: jq_show::Chord::new("F2", ""),
+            action: jq_core::keys::ControlAction::Preview,
+        }];
+        assert!(registry.set_keys(&lookup.id, Some(preview)).is_err());
+        registry.set_keys(&lookup.id, None).unwrap();
+        assert_eq!(*lookup.keys.borrow(), None);
+    }
+
+    #[test]
     fn kept_devices_survive_a_round_trip_on_disk() {
         let dir = std::env::temp_dir().join(format!("jq-remote-clients-{}", std::process::id()));
         let path = dir.join("remote-clients.json");
-        let clients =
-            vec![StoredClient { id: "a".into(), name: "A".into(), token_hash: "h".into(), role: Role::View }];
+        let keys = vec![KeyBinding {
+            chord: jq_show::Chord::new("F1", ""),
+            action: jq_core::keys::ControlAction::Go,
+        }];
+        let clients = vec![
+            StoredClient {
+                id: "a".into(),
+                name: "A".into(),
+                token_hash: "h".into(),
+                role: Role::View,
+                keys: None,
+            },
+            StoredClient {
+                id: "b".into(),
+                name: "B".into(),
+                token_hash: "i".into(),
+                role: Role::Control,
+                keys: Some(keys),
+            },
+        ];
         save(&path, &clients).unwrap();
         assert_eq!(load(&path), clients);
         assert!(load(&dir.join("missing.json")).is_empty());

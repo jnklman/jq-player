@@ -20,8 +20,8 @@
 //             panel window events are meant for the main window only; panel
 //             windows don't listen to them.
 // - Transport: `lib/transport.ts`. On the remote page (`src/remote`) the same commands and events go over a
-//             WebSocket; the server lets only `get_show`, `get_language`, `action` and `stopwatch` through, by the
-//             device's role (`app/src-tauri/src/remote/protocol.rs`), and sends `show`, `state` and
+//             WebSocket; the server lets only `get_show`, `get_language`, `action`, `stopwatch` and `set_own_keys`
+//             through, by the device's role (`app/src-tauri/src/remote/protocol.rs`), and sends `show`, `state` and
 //             `language_changed`.
 //
 // Types mirror the Rust serde types in crates/jq-show/src/model.rs,
@@ -688,6 +688,9 @@ export interface RemoteClient {
   /** A request named like a device let in before: probably that one with a new cookie (the host's address changed,
    * browser data deleted). */
   known_name: boolean;
+  /** Keys of its own for the show's global actions (in place of `settings.keys`, see `setOwnKeys`); null = the
+   * host's. */
+  keys: KeyBinding[] | null;
 }
 
 /** An address of this machine the remote page is reached at. */
@@ -1494,6 +1497,12 @@ export const api = {
   remoteInfo: () => invoke<RemoteAddress[]>('remote_info'),
   /** Removes a device or turns its request down; its pages are disconnected and it has to ask again. */
   removeRemoteClient: (id: string) => invoke<void>('remove_remote_client', { id }),
+  /** Gives a device keys of its own (see `setOwnKeys`), or with null the host's again. */
+  setRemoteKeys: (id: string, keys: KeyBinding[] | null) => invoke<void>('set_remote_keys', { id, keys }),
+  /** Remote page only, role `control`: the device's own keys, which replace the host's there; only for the show's
+   * global actions (`REMOTE_ACTIONS` in `src/remote/keys.ts`) and by the rules of `settings.keys`, else refused
+   * with the reason. null = the host's again. */
+  setOwnKeys: (keys: KeyBinding[] | null) => invoke<void>('set_own_keys', { keys }),
   /** Output devices of `host` (default: system host); may take a moment. */
   audioDevices: (host?: string) => invoke<AudioDevices>('audio_devices', { host: host ?? null }),
 };
