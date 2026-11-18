@@ -1246,7 +1246,6 @@ const en = {
   'remote.views': 'Views',
   'remote.to_playhead': 'To the playhead',
   'remote.set_next': 'Set as next',
-  'remote.start': 'Start',
   'settings.tab.remote': 'Web remote',
   'remote_tab.server': 'Server',
   'remote_tab.enabled': 'Web remote',

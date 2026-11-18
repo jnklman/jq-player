@@ -101,14 +101,11 @@ describe('RemoteCueList', () => {
 
     as('control');
     await settle();
+    expect(screen.queryByRole('button', { name: 'Start' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Set as next' }));
-    await user.click(screen.getByRole('button', { name: 'Start' }));
-    await user.click(within(screen.getByRole('listbox').parentElement!).getByRole('button', { name: 'Stop' }));
-    expect(backend.actions).toEqual([
-      { action: 'set_playhead', cue: 'b' },
-      { action: 'start_cue', cue: 'b' },
-      { action: 'stop_cue', cue: 'b' },
-    ]);
+    expect(backend.actions).toEqual([{ action: 'set_playhead', cue: 'b' }]);
+    expect(rows[1], 'the pick is let go').toHaveAttribute('aria-selected', 'false');
+    expect(screen.queryByRole('button', { name: 'Set as next' })).not.toBeInTheDocument();
   });
 });
 

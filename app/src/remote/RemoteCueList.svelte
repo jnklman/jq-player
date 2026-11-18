@@ -19,8 +19,8 @@
   import PreviewPlayer from './PreviewPlayer.svelte';
 
   // The cue list for a touch screen: two lines a cue, the playhead marked, following it unless the operator
-  // scrolls. Tapping a cue only picks it here (never on the host); what to do with it is in the bar below, only for
-  // a device that operates, so a stray tap starts nothing. A device the host lets preview plays a sound cue on itself
+  // scrolls. Tapping a cue only picks it here (never on the host); the bar below can put the playhead on it, only for
+  // a device that operates, so a stray tap starts nothing (starting is GO's job). A device the host lets preview plays a sound cue on itself
   // (rendered by the host, see `api.localPreview`), in a player under the bar.
 
   const list = $derived(cues());
@@ -85,9 +85,11 @@
     ];
   }
 
-  function act(action: 'set_playhead' | 'start_cue' | 'stop_cue') {
+  /** Puts the playhead on the picked cue; the pick has done its job and is let go (closing the bar). */
+  function setNext() {
     if (!picked) return;
-    void api.action({ action, cue: picked }).catch(() => {});
+    void api.action({ action: 'set_playhead', cue: picked }).catch(() => {});
+    picked = null;
   }
 </script>
 
@@ -183,13 +185,7 @@
         </Button>
       {/if}
       {#if operates}
-        <Button size="sm" disabled={!canControl()} onclick={() => act('set_playhead')}>{t('remote.set_next')}</Button>
-        <Button size="sm" variant="go" disabled={!canControl()} onclick={() => act('start_cue')}
-          >{t('remote.start')}</Button
-        >
-        <Button size="sm" variant="stop" disabled={!canControl()} onclick={() => act('stop_cue')}
-          >{t('type.stop')}</Button
-        >
+        <Button size="sm" disabled={!canControl()} onclick={setNext}>{t('remote.set_next')}</Button>
       {/if}
     </div>
   {/if}

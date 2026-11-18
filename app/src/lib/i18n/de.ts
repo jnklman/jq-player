@@ -1246,7 +1246,6 @@ const de: Record<MessageKey, string> = {
   'remote.views': 'Ansichten',
   'remote.to_playhead': 'Zum Playhead',
   'remote.set_next': 'Als nächste setzen',
-  'remote.start': 'Starten',
   'settings.tab.remote': 'Web-Fernsteuerung',
   'remote_tab.server': 'Server',
   'remote_tab.enabled': 'Web-Fernsteuerung',

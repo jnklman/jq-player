@@ -17,7 +17,7 @@ different in the app, not how the code changed). The Release workflow turns
 - Web remote (Settings › Web remote): tablets, phones and other computers on the show network open the
   show in a browser, without installing anything, and see the next cue, the running cues with their
   times, the cue list, the notes and the stopwatches. A new device asks to join by name; on the jQ
-  Player computer it is let in to watch or to operate (GO, stops, playhead, starting and stopping
+  Player computer it is let in to watch or to operate (GO, stops, playhead, stopping
   cues, stopwatches), and can be changed or removed at any time. Nothing can be edited remotely. The
   page adapts to phones and tablets, says clearly when the connection is lost, has a lock against
   operating by accident and takes the global keys of a connected keyboard, or keys of its own set
