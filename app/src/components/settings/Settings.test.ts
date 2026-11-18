@@ -212,6 +212,7 @@ describe('Media and MIDI tabs', () => {
           last_seen: 1,
           known_name: false,
           keys: [{ chord: { code: 'F1', ctrl: false, shift: false, alt: false, label: '' }, action: 'go' }],
+          preview: false,
         },
         {
           id: 'p',
@@ -222,6 +223,7 @@ describe('Media and MIDI tabs', () => {
           last_seen: 1,
           known_name: false,
           keys: null,
+          preview: false,
         },
       ],
     };
@@ -233,6 +235,9 @@ describe('Media and MIDI tabs', () => {
     expect(within(dialog).getByText(/^Own keys: .* F1$/)).toBeInTheDocument();
     await user.click(within(dialog).getByRole('button', { name: 'FOH tablet: use the host keys again' }));
     expect(backend.invoked('set_remote_keys')).toEqual([{ id: 'k', keys: null }]);
+    await user.click(within(dialog).getByRole('checkbox', { name: 'FOH tablet: may preview cues on the device' }));
+    expect(backend.invoked('set_remote_preview')).toEqual([{ id: 'k', allowed: true }]);
+    expect(within(dialog).getByRole('checkbox', { name: 'Only while no cue runs' })).toBeChecked();
 
     await user.click(within(dialog).getByRole('button', { name: 'Operate' }));
     await user.click(within(dialog).getByRole('button', { name: 'Remove' }));
@@ -243,7 +248,7 @@ describe('Media and MIDI tabs', () => {
     await user.click(within(dialog).getByRole('checkbox', { name: /watch and operate the show/ }));
     await user.click(within(dialog).getByRole('button', { name: 'Apply' }));
     await settle();
-    expect(applied()?.remote).toEqual({ enabled: true, port: 8642 });
+    expect(applied()?.remote).toEqual({ enabled: true, port: 8642, preview_idle_only: true });
   });
 
   it('marks the web remote tab when its server could not start', async () => {

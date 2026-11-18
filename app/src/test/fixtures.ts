@@ -157,7 +157,7 @@ export function settings(extra: Partial<LocalSettings> = {}): LocalSettings {
     audio_dir: null,
     layout: null,
     selection_mode: 'separate',
-    remote: { enabled: false, port: 8642 },
+    remote: { enabled: false, port: 8642, preview_idle_only: true },
     ...extra,
   };
 }

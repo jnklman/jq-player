@@ -17,8 +17,8 @@ pub use loader::{BufferCache, FileLoader, MediaLoader};
 pub use media_lock::MediaLock;
 pub use peaks::{PeakCache, Prewarmer};
 pub use runner::{
-    Action, ActiveState, Control, FollowState, Notice, PassState, RepeatState, Runner, State, StopwatchState,
-    WaitingState,
+    Action, ActiveState, Control, FollowState, Notice, PassState, PreviewSound, RepeatState, Runner, State,
+    StopwatchState, WaitingState,
 };
 pub use settings::{
     DEFAULT_REMOTE_PORT, EscapeMode, KEEP_ALIVE_RANGE, LocalSettings, OpenLast, RemoteSettings,

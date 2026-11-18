@@ -387,6 +387,10 @@ fn remote_setup(app: &AppHandle, writer: &writer::Writer) -> impl FnOnce(Backend
         remote::clients::load(&paths::config_dir(app).unwrap_or_default().join(remote::CLIENTS_FILE));
     let registry = remote::Registry::new(stored, changed, store, joined);
     app.manage(registry.clone());
+    // Rendered previews of remote devices, deleted when the program ends (`RunEvent::Exit`).
+    let cache = paths::cache_dir(app).unwrap_or_else(std::env::temp_dir);
+    let previews = Arc::new(remote::render::Previews::new(cache.join(remote::PREVIEWS_DIR)));
+    app.manage(previews.clone());
     let assets: remote::server::Assets = {
         let app = app.clone();
         Arc::new(move |path: &str| remote_asset(&app, path))
@@ -399,6 +403,7 @@ fn remote_setup(app: &AppHandle, writer: &writer::Writer) -> impl FnOnce(Backend
             assets,
             instance: remote::clients::random_hex(8),
             language: Arc::new(|| serde_json::to_value(language::current()).unwrap_or_default()),
+            previews,
         };
         remote::Remote::new(shared, notify)
     }
@@ -652,6 +657,7 @@ pub fn run() {
             remote::set_remote_client,
             remote::remove_remote_client,
             remote::set_remote_keys,
+            remote::set_remote_preview,
             remote::remote_info,
             close::close_ack,
             close::fields_committed,
@@ -662,12 +668,16 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
         .run(|app, event| {
-            // Whatever way the program ends, the queued writes go to disk first.
-            if let RunEvent::Exit = event
-                && let Some(writer) = app.try_state::<writer::Writer>()
-                && !writer.flush(EXIT_FLUSH_TIMEOUT)
-            {
-                eprintln!("writes still pending on exit");
+            if let RunEvent::Exit = event {
+                // Whatever way the program ends, the queued writes go to disk first.
+                if let Some(writer) = app.try_state::<writer::Writer>()
+                    && !writer.flush(EXIT_FLUSH_TIMEOUT)
+                {
+                    eprintln!("writes still pending on exit");
+                }
+                if let Some(previews) = app.try_state::<Arc<remote::render::Previews>>() {
+                    previews.clear();
+                }
             }
         });
 }

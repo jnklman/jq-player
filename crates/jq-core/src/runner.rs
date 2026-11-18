@@ -2990,6 +2990,27 @@ impl Runner {
         self.start_preview(id, Some(frame), until);
     }
 
+    /// How sound cue `id` is heard in a preview (see [`PreviewSound`]);
+    /// an error for another kind of cue or a placeholder.
+    pub fn preview_sound(&self, id: CueId) -> Result<PreviewSound, String> {
+        let Some(CueKind::Sound(s)) = self.show.cue(id).map(|c| &c.kind) else {
+            return Err(t!("runner.preview_not_sound"));
+        };
+        if s.is_placeholder() {
+            return Err(t!("runner.preview_placeholder"));
+        }
+        let (rate, pitch) = s.speed.factors();
+        Ok(PreviewSound {
+            path: jq_show::paths::resolve(&self.media_dir, &s.file),
+            start: s.start,
+            end: s.end,
+            gain: db_to_gain(self.level_db(s.volume_db, s.normalize_db.unwrap_or(0.0)) as f32),
+            pan: s.pan.clamp(-1.0, 1.0) as f32,
+            rate: rate as f32,
+            pitch: pitch as f32,
+        })
+    }
+
     /// Queues a sound cue for preview (from frame `from` to `until` or the
     /// file's end, or else its start–end); it starts once its file is loaded,
     /// so the show thread never waits for the disk.
@@ -3033,8 +3054,7 @@ impl Runner {
         if !self.cache.buffer(&p.path).is_some_and(|b| ready_at(b, p.start_frame)) {
             return;
         }
-        let (Some(CueKind::Sound(s)), Ok((buffer, _))) =
-            (self.show.cue(p.cue).map(|c| c.kind.clone()), self.cache.get_now(&p.path.clone()))
+        let (Ok(sound), Ok((buffer, _))) = (self.preview_sound(p.cue), self.cache.get_now(&p.path.clone()))
         else {
             self.preview = None;
             return;
@@ -3044,18 +3064,10 @@ impl Runner {
         let start = p.start_frame.min(buffer.frames());
         let end = match p.from {
             Some(_) => p.until.map_or(buffer.frames(), |until| until.min(buffer.frames())).max(start),
-            None => s.end.map_or(buffer.frames(), frames).min(buffer.frames()).max(start),
+            None => sound.end.map_or(buffer.frames(), frames).min(buffer.frames()).max(start),
         };
-        let mut params = VoiceParams::new(buffer);
-        params.start = start;
-        params.end = Some(end);
-        params.gain = db_to_gain(self.level_db(s.volume_db, s.normalize_db.unwrap_or(0.0)) as f32);
-        params.pan = s.pan.clamp(-1.0, 1.0) as f32;
-        params.output_channel = self.settings.preview_first_channel();
-        params.end_blend_frames = self.engine.frames(END_BLEND);
-        // Heard as in the show: at the cue's rate and pitch.
-        let (rate_factor, pitch_factor) = s.speed.factors();
-        (params.rate, params.pitch) = (rate_factor as f32, pitch_factor as f32);
+        let channel = self.settings.preview_first_channel();
+        let params = sound.voice(buffer, start, end, channel, self.engine.frames(END_BLEND));
         let engine = self.preview_engine.as_mut().unwrap_or(&mut self.engine);
         match engine.play(params) {
             Ok(voice) => {
@@ -3317,6 +3329,46 @@ impl Runner {
 
 /// Like [`AudioBuffer::is_ready_at`], but a frame past the end (nothing to
 /// play) counts as ready too.
+/// How a sound cue is heard in a preview: as in the show (its part of the
+/// file, level with normalization and the show's limits, balance, speed and
+/// pitch), without fades, ducking, loops or the effect of other cues. The
+/// host's preview plays it, and a remote device's (rendered offline,
+/// `app/src-tauri/src/remote/render.rs`), so both sound the same.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PreviewSound {
+    pub path: PathBuf,
+    /// Part of the file in seconds; `end` `None` = to its end.
+    pub start: f64,
+    pub end: Option<f64>,
+    /// Linear gain.
+    pub gain: f32,
+    pub pan: f32,
+    /// File frames per output frame, and frequency factor.
+    pub rate: f32,
+    pub pitch: f32,
+}
+
+impl PreviewSound {
+    /// The voice playing frames `start`–`end` of `buffer` into the stereo
+    /// pair at `output_channel`, blending out over `end_blend_frames`.
+    pub fn voice(
+        &self,
+        buffer: Arc<AudioBuffer>,
+        start: usize,
+        end: usize,
+        output_channel: usize,
+        end_blend_frames: u32,
+    ) -> VoiceParams {
+        let mut params = VoiceParams::new(buffer);
+        (params.start, params.end) = (start, Some(end));
+        (params.gain, params.pan) = (self.gain, self.pan);
+        params.output_channel = output_channel;
+        params.end_blend_frames = end_blend_frames;
+        (params.rate, params.pitch) = (self.rate, self.pitch);
+        params
+    }
+}
+
 fn ready_at(buffer: &AudioBuffer, frame: usize) -> bool {
     frame >= buffer.frames() || buffer.is_ready_at(frame)
 }

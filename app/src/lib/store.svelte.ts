@@ -78,6 +78,8 @@ export interface RemoteState {
   locked: boolean;
   /** The device's own keys for the show's global actions, in place of the host's; null = the host's. */
   keys: KeyBinding[] | null;
+  /** The host lets the device preview cues on itself (`api.localPreview`). */
+  preview: boolean;
 }
 
 // The backend replaces these whole (a large show's view is several hundred

@@ -11,12 +11,15 @@
     class: className,
     format = (value: number) => value.toLocaleString(),
     reset,
+    loaded,
     ...restProps
   }: WithoutChildrenOrChild<SliderPrimitive.RootProps> & {
     /** Tooltip text for a thumb's value. */
     format?: (value: number) => string;
     /** Value a double click puts a single slider back to. */
     reset?: number;
+    /** Part of the track that is there (0–1, from the start), shown lighter behind the range: a player's loaded part. */
+    loaded?: number;
   } = $props();
 
   let dragging = $state(false);
@@ -80,6 +83,13 @@ get along, so we shut typescript up by casting `value` to `never`.
         'relative grow overflow-hidden rounded-full bg-muted data-horizontal:h-1 data-horizontal:w-full data-vertical:h-full data-vertical:w-1',
       )}
     >
+      {#if loaded !== undefined}
+        <span
+          data-slot="slider-loaded"
+          class="absolute inset-y-0 left-0 bg-dim/50 transition-[width] duration-300"
+          style:width="{Math.min(Math.max(loaded, 0), 1) * 100}%"
+        ></span>
+      {/if}
       <SliderPrimitive.Range
         data-slot="slider-range"
         class={cn('absolute bg-primary select-none data-horizontal:h-full data-vertical:w-full')}

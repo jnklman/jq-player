@@ -1,17 +1,20 @@
 //! What the remote page and the server say to each other: JSON text frames
 //! over the WebSocket (see `app/src/remote/socket.ts` for the other side).
 //!
-//! Server → client: `hello {instance, client, name, role, keys}` once,
-//! `role {role}` when the host changes it, `keys {keys}` when the device's
-//! own keys change, `event {name, payload}` (`show`,
+//! Server → client: `hello {instance, client, name, role, keys, preview}`
+//! once, `role {role}` when the host changes it, `options {keys, preview}`
+//! when the device's own keys or its right to preview change, `event {name,
+//! payload}` (`show`,
 //! `state`, `language_changed`), `reply {id, ok | err}` and `ping` every
 //! second. Client → server: `call {id, cmd, args}`. Which commands a client
 //! may call depends on its role and is checked here, not in the page.
 
 use jq_core::Action;
 use jq_core::keys::{ControlAction, KeyBinding, check_keys};
-use jq_show::StopwatchAction;
+use jq_show::{CueId, StopwatchAction};
 use serde::{Deserialize, Serialize};
+
+use super::clients::DeviceOptions;
 
 /// What a device may do. Ordered: each role may do what the one before may.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -45,6 +48,8 @@ pub enum Call {
     Stopwatch(String, StopwatchAction),
     /// The device's own keys; `None` = the host's again.
     SetOwnKeys(Option<Vec<KeyBinding>>),
+    /// A preview of the cue on the device itself (if the host lets it).
+    LocalPreview(CueId),
 }
 
 /// The global actions a device's keys may trigger: those of the whole show,
@@ -83,6 +88,11 @@ struct StopwatchArgs {
 }
 
 #[derive(Deserialize)]
+struct CueArgs {
+    cue: CueId,
+}
+
+#[derive(Deserialize)]
 struct KeysArgs {
     keys: Option<Vec<KeyBinding>>,
 }
@@ -90,7 +100,7 @@ struct KeysArgs {
 /// The least role that may call `cmd`; `None` = no remote client may.
 pub fn required_role(cmd: &str) -> Option<Role> {
     match cmd {
-        "get_show" | "get_language" => Some(Role::View),
+        "get_show" | "get_language" | "local_preview" => Some(Role::View),
         "action" | "stopwatch" | "set_own_keys" => Some(Role::Control),
         _ => None,
     }
@@ -125,21 +135,27 @@ pub fn decode(role: Role, cmd: &str, args: serde_json::Value) -> Result<Call, St
             }
             Call::SetOwnKeys(keys)
         }
+        "local_preview" => {
+            let CueArgs { cue } = serde_json::from_value(args).map_err(bad)?;
+            Call::LocalPreview(cue)
+        }
         _ => return Err(jq_i18n::t!("remote.not_allowed")),
     })
 }
 
 /// A text frame of a server message.
-pub fn hello(instance: &str, client: &str, name: &str, role: Role, keys: Option<&[KeyBinding]>) -> String {
+pub fn hello(instance: &str, client: &str, name: &str, role: Role, options: &DeviceOptions) -> String {
     serde_json::json!({
-        "type": "hello", "instance": instance, "client": client, "name": name, "role": role, "keys": keys,
+        "type": "hello", "instance": instance, "client": client, "name": name, "role": role,
+        "keys": options.keys, "preview": options.preview,
     })
     .to_string()
 }
 
-/// The device's own keys changed (`null`: it uses the host's).
-pub fn keys(keys: Option<&[KeyBinding]>) -> String {
-    serde_json::json!({ "type": "keys", "keys": keys }).to_string()
+/// The device's own keys (`null`: it uses the host's) or its right to
+/// preview changed.
+pub fn options(options: &DeviceOptions) -> String {
+    serde_json::json!({ "type": "options", "keys": options.keys, "preview": options.preview }).to_string()
 }
 
 pub fn role(role: Role) -> String {
@@ -177,6 +193,7 @@ mod tests {
             ("action", go(), false, false, true),
             ("stopwatch", watch(), false, false, true),
             ("set_own_keys", json!({ "keys": null }), false, false, true),
+            ("local_preview", json!({ "cue": "00000000-0000-0000-0000-000000000000" }), false, true, true),
             ("set_settings", json!({}), false, false, false),
             ("edit", json!({ "op": { "op": "undo" } }), false, false, false),
             ("open_show", json!({ "path": "/x" }), false, false, false),

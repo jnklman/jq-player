@@ -40,6 +40,8 @@ sha2 = "0.10"
 # The addresses the remote page is reached at, and a QR code of each.
 if-addrs = "0.15"
 qrcode = { version = "0.14", default-features = false, features = ["svg"] }
+# A preview's WAV, sent while it is rendered (already in the tree via axum).
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
 
 [dev-dependencies]
 # A WebSocket client for the remote server's tests.

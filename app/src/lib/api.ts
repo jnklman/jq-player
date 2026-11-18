@@ -20,8 +20,8 @@
 //             panel window events are meant for the main window only; panel
 //             windows don't listen to them.
 // - Transport: `lib/transport.ts`. On the remote page (`src/remote`) the same commands and events go over a
-//             WebSocket; the server lets only `get_show`, `get_language`, `action`, `stopwatch` and `set_own_keys`
-//             through, by the device's role (`app/src-tauri/src/remote/protocol.rs`), and sends `show`, `state` and
+//             WebSocket; the server lets only `get_show`, `get_language`, `action`, `stopwatch`, `set_own_keys` and
+//             `local_preview` through, by the device's role (`app/src-tauri/src/remote/protocol.rs`), and sends `show`, `state` and
 //             `language_changed`.
 //
 // Types mirror the Rust serde types in crates/jq-show/src/model.rs,
@@ -667,6 +667,8 @@ export interface LocalSettings {
 export interface RemoteSettings {
   enabled: boolean;
   port: number;
+  /** Devices allowed to preview (`RemoteClient.preview`) may do so only while no cue runs. Default true. */
+  preview_idle_only: boolean;
 }
 
 /** What a device may do: `pending` asked and sees nothing, `view` watches, `control` also operates (GO, stops,
@@ -691,6 +693,29 @@ export interface RemoteClient {
   /** Keys of its own for the show's global actions (in place of `settings.keys`, see `setOwnKeys`); null = the
    * host's. */
   keys: KeyBinding[] | null;
+  /** May preview cues on the device (`localPreview`); off unless the host allows it. */
+  preview: boolean;
+}
+
+/** A cue's preview for a remote device, rendered as it is played (`localPreview`). */
+export interface LocalPreview {
+  id: string;
+  /** Of the WAV, on the remote server (`/media/<id>.wav`); the device's cookie goes along. */
+  url: string;
+  /** Seconds. */
+  duration: number;
+}
+
+/** How far a remote device's preview is rendered (`preview_progress`, every second of sound and at the end). The
+ * player can only move to what is rendered: a request past it waits. */
+export interface PreviewProgress {
+  /** Of the preview (`LocalPreview.id`). */
+  id: string;
+  /** Seconds from the start. */
+  rendered: number;
+  done: boolean;
+  /** It stopped with an error; the rest never comes. */
+  failed: boolean;
 }
 
 /** An address of this machine the remote page is reached at. */
@@ -1503,6 +1528,12 @@ export const api = {
    * global actions (`REMOTE_ACTIONS` in `src/remote/keys.ts`) and by the rules of `settings.keys`, else refused
    * with the reason. null = the host's again. */
   setOwnKeys: (keys: KeyBinding[] | null) => invoke<void>('set_own_keys', { keys }),
+  /** Lets a device preview cues on itself (`localPreview`), or no longer; who may, can also keep their sound. */
+  setRemotePreview: (id: string, allowed: boolean) => invoke<void>('set_remote_preview', { id, allowed }),
+  /** Remote page only, if the host lets the device preview (`RemoteClient.preview`): a sound cue rendered as the
+   * host's preview plays it (part, level, balance, speed, pitch; no fades, loops or other cues), at most 20 minutes.
+   * Refused while cues run if `RemoteSettings.preview_idle_only`. A new one replaces the device's last. */
+  localPreview: (cue: CueId) => invoke<LocalPreview>('local_preview', { cue }),
   /** Output devices of `host` (default: system host); may take a moment. */
   audioDevices: (host?: string) => invoke<AudioDevices>('audio_devices', { host: host ?? null }),
 };
@@ -1539,4 +1570,7 @@ export const events = {
   onRemote: (handler: (status: RemoteStatus) => void): Promise<UnlistenFn> => listen<RemoteStatus>('remote', handler),
   /** Whether any window of the app has the keyboard focus; sent once it settled (not while moving between them). */
   onAppFocus: (handler: (focused: boolean) => void): Promise<UnlistenFn> => listen<boolean>('app_focus', handler),
+  /** Remote page only: how far the device's preview is rendered. */
+  onPreviewProgress: (handler: (progress: PreviewProgress) => void): Promise<UnlistenFn> =>
+    listen<PreviewProgress>('preview_progress', handler),
 };

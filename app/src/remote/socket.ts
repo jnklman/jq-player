@@ -25,12 +25,22 @@ export interface SocketStatus {
   unknown: boolean;
   /** The device's own keys; null = the host's. */
   keys: KeyBinding[] | null;
+  /** The host lets the device preview cues. */
+  preview: boolean;
 }
 
 type ServerFrame =
-  | { type: 'hello'; instance: string; client: string; name: string; role: Role; keys: KeyBinding[] | null }
+  | {
+      type: 'hello';
+      instance: string;
+      client: string;
+      name: string;
+      role: Role;
+      keys: KeyBinding[] | null;
+      preview: boolean;
+    }
   | { type: 'role'; role: Role }
-  | { type: 'keys'; keys: KeyBinding[] | null }
+  | { type: 'options'; keys: KeyBinding[] | null; preview: boolean }
   | { type: 'event'; name: string; payload: unknown }
   | { type: 'reply'; id: number; ok?: unknown; err?: string }
   | { type: 'ping' };
@@ -63,7 +73,7 @@ interface Pending {
 }
 
 export class RemoteSocket implements Transport {
-  status: SocketStatus = { connected: false, role: null, unknown: false, keys: null };
+  status: SocketStatus = { connected: false, role: null, unknown: false, keys: null, preview: false };
   #options: SocketOptions;
   #socket: WebSocket | null = null;
   #handlers = new Map<string, Set<(payload: unknown) => void>>();
@@ -117,7 +127,8 @@ export class RemoteSocket implements Transport {
       next.connected === this.status.connected &&
       next.role === this.status.role &&
       next.unknown === this.status.unknown &&
-      next.keys === this.status.keys
+      next.keys === this.status.keys &&
+      next.preview === this.status.preview
     )
       return;
     this.status = next;
@@ -148,15 +159,21 @@ export class RemoteSocket implements Transport {
         const restarted = this.#instance !== null && this.#instance !== frame.instance;
         this.#instance = frame.instance;
         this.#retry = RETRY_FIRST;
-        this.#setStatus({ connected: true, role: frame.role, unknown: false, keys: frame.keys ?? null });
+        this.#setStatus({
+          connected: true,
+          role: frame.role,
+          unknown: false,
+          keys: frame.keys ?? null,
+          preview: frame.preview ?? false,
+        });
         this.#options.onHello(restarted);
         break;
       }
       case 'role':
         this.#setStatus({ role: frame.role });
         break;
-      case 'keys':
-        this.#setStatus({ keys: frame.keys ?? null });
+      case 'options':
+        this.#setStatus({ keys: frame.keys ?? null, preview: frame.preview ?? false });
         break;
       case 'event':
         this.#handlers.get(frame.name)?.forEach((handler) => handler(frame.payload));
@@ -202,7 +219,7 @@ export class RemoteSocket implements Transport {
     this.#setStatus({ connected: false });
     if (this.#stopped) return;
     if (removed) {
-      this.#setStatus({ role: null, unknown: true, keys: null });
+      this.#setStatus({ role: null, unknown: true, keys: null, preview: false });
       return;
     }
     clearTimeout(this.#retryTimer);
@@ -222,7 +239,7 @@ export class RemoteSocket implements Transport {
     }
     if (this.#stopped) return;
     if (!me) {
-      this.#setStatus({ role: null, unknown: true, keys: null });
+      this.#setStatus({ role: null, unknown: true, keys: null, preview: false });
       return;
     }
     this.#open();

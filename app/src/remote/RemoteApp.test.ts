@@ -1,5 +1,5 @@
 import { screen, within } from '@testing-library/svelte';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { canControl, type RemoteState, ui } from '$lib/store.svelte';
 
@@ -18,7 +18,7 @@ import RemoteCueList from './RemoteCueList.svelte';
 const go = () => screen.getByRole('button', { name: /^GO/ });
 
 function as(role: RemoteState['role'], extra: Partial<RemoteState> = {}) {
-  ui.remote = { role, connected: true, locked: false, keys: null, ...extra };
+  ui.remote = { role, connected: true, locked: false, keys: null, preview: false, ...extra };
 }
 
 async function showLoaded() {
@@ -109,6 +109,62 @@ describe('RemoteCueList', () => {
       { action: 'start_cue', cue: 'b' },
       { action: 'stop_cue', cue: 'b' },
     ]);
+  });
+});
+
+describe('local preview', () => {
+  it('plays a sound cue on the device only if the host lets it', async () => {
+    await showLoaded();
+    as('view');
+    backend.on('local_preview', () => ({ id: 'abc', url: '/media/abc.wav', duration: 2 }));
+    // jsdom has no media playback.
+    const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue();
+    const { user } = await renderUi(RemoteCueList);
+    await user.click(screen.getAllByRole('option')[1]);
+    expect(screen.queryByRole('button', { name: 'Preview' })).not.toBeInTheDocument();
+
+    as('view', { preview: true });
+    await settle();
+    await user.click(screen.getByRole('button', { name: 'Preview' }));
+    await settle();
+    expect(backend.invoked('local_preview')).toEqual([{ cue: 'b' }]);
+    const player = screen.getByRole('group', { name: 'Preview of 2 Thunder' });
+    expect(player.querySelector('audio')).toHaveAttribute('src', '/media/abc.wav');
+    expect(play, 'starts at once').toHaveBeenCalled();
+    expect(within(player).getByText('0:00 / 0:02')).toBeInTheDocument();
+    expect(within(player).getByText('rendering 0 %'), 'nothing heard of the host yet').toBeInTheDocument();
+    remote.progress = { id: 'abc', rendered: 2, done: true, failed: false };
+    await settle();
+    expect(within(player).queryByText(/rendering/)).not.toBeInTheDocument();
+    remote.progress = { id: 'abc', rendered: 1, done: false, failed: true };
+    await settle();
+    expect(within(player).getByText('Cannot be played')).toBeInTheDocument();
+    const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {});
+    as('view', { preview: true, connected: false });
+    await settle();
+    expect(pause, 'a covered player does not go on playing').toHaveBeenCalled();
+    pause.mockRestore();
+    as('view', { preview: true });
+    await settle();
+    expect(within(player).getByRole('slider')).toBeInTheDocument();
+    await user.click(within(player).getByRole('button', { name: 'Close preview' }));
+    expect(screen.queryByRole('group', { name: 'Preview of 2 Thunder' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Preview' }));
+    await settle();
+    screen
+      .getByRole('group', { name: 'Preview of 2 Thunder' })
+      .querySelector('audio')!
+      .dispatchEvent(new Event('ended'));
+    await settle();
+    expect(screen.queryByRole('group', { name: 'Preview of 2 Thunder' }), 'closes once played through').toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Preview' }));
+    await settle();
+    play.mockRestore();
+    expect(backend.actions, 'nothing happens on the host').toEqual([]);
+
+    as('view', { preview: false });
+    await settle();
+    expect(screen.queryByRole('group', { name: 'Preview of 2 Thunder' })).not.toBeInTheDocument();
   });
 });
 

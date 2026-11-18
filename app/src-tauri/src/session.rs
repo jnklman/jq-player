@@ -1478,6 +1478,17 @@ impl Session {
         &self.settings
     }
 
+    /// How cue `id` sounds in a remote device's preview, which the remote
+    /// server renders itself, and whether cues run (it then renders gently);
+    /// refused while cues run if the settings say so.
+    pub fn remote_preview(&self, id: CueId) -> Result<(jq_core::PreviewSound, bool), String> {
+        let busy = !self.runner.is_idle();
+        if self.settings.remote.preview_idle_only && busy {
+            return Err(t!("remote.preview_busy"));
+        }
+        Ok((self.runner.preview_sound(id)?, busy))
+    }
+
     fn save_settings(&self) {
         let (settings, path, show) =
             (self.settings.clone(), self.settings_path.clone(), self.file.show.id.to_string());

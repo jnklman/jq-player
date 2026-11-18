@@ -68,7 +68,7 @@ describe('RemoteSocket', () => {
     const { socket, statuses } = setup();
     await expect(socket.invoke('get_show')).rejects.toBe('offline');
     MockSocket.last.frame(hello());
-    expect(statuses.at(-1)).toEqual({ connected: true, role: 'view', unknown: false, keys: null });
+    expect(statuses.at(-1)).toEqual({ connected: true, role: 'view', unknown: false, keys: null, preview: false });
 
     const shown = socket.invoke('get_show');
     const refused = socket.invoke('action', { action: { action: 'go' } });
@@ -91,8 +91,8 @@ describe('RemoteSocket', () => {
     MockSocket.last.frame({ type: 'role', role: 'control' });
     expect(statuses.at(-1)?.role).toBe('control');
     const keys = [{ chord: { code: 'F1', ctrl: false, shift: false, alt: false, label: '' }, action: 'go' }];
-    MockSocket.last.frame({ type: 'keys', keys });
-    expect(statuses.at(-1)?.keys).toEqual(keys);
+    MockSocket.last.frame({ type: 'options', keys, preview: true });
+    expect(statuses.at(-1)).toMatchObject({ keys, preview: true });
   });
 
   it('counts the connection as lost when the pings stop, and reconnects', async () => {
@@ -132,7 +132,13 @@ describe('RemoteSocket', () => {
     const removed = setup();
     MockSocket.last.frame(hello());
     MockSocket.last.drop(4001);
-    expect(removed.statuses.at(-1)).toEqual({ connected: false, role: null, unknown: true, keys: null });
+    expect(removed.statuses.at(-1)).toEqual({
+      connected: false,
+      role: null,
+      unknown: true,
+      keys: null,
+      preview: false,
+    });
     await vi.advanceTimersByTimeAsync(10_000);
     expect(MockSocket.all).toHaveLength(1);
     expect(removed.whoAmI).not.toHaveBeenCalled();

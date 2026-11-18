@@ -21,8 +21,9 @@ different in the app, not how the code changed). The Release workflow turns
   cues, stopwatches), and can be changed or removed at any time. Nothing can be edited remotely. The
   page adapts to phones and tablets, says clearly when the connection is lost, has a lock against
   operating by accident and takes the global keys of a connected keyboard, or keys of its own set
-  on the device (kept on the jQ Player computer, which can reset them). Off by default; the
-  address is shown with a QR code. The connection is not encrypted: use it only on a trusted network.
+  on the device (kept on the jQ Player computer, which can reset them). Devices the jQ Player
+  computer allows to can preview a sound cue on themselves, sounding as the preview there (by
+  default only while no cue runs). Off by default; the address is shown with a QR code. The connection is not encrypted: use it only on a trusted network.
 
 ## 0.3.0 – 2026-11-17
 

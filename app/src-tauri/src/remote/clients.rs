@@ -1,7 +1,8 @@
 //! The devices that asked to join, and what each may do. A device asks with
 //! a name and gets a random token (as a cookie); the host lets it in to
 //! watch or to operate, changes that, or removes it. A device that operates
-//! may bind keys of its own (else it has the host's). Let-in devices are
+//! may bind keys of its own (else it has the host's), and the host may let
+//! a device preview cues (see `render.rs`). Let-in devices are
 //! kept (by the hash of their token, never the token itself) and known again
 //! after a restart; requests not answered yet are forgotten.
 
@@ -36,6 +37,25 @@ pub struct StoredClient {
     /// Keys of its own for the show's global actions; `None` = the host's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub keys: Option<Vec<KeyBinding>>,
+    /// May preview cues on the device (who may, can also save the files'
+    /// sound); off unless the host allows it.
+    #[serde(default)]
+    pub preview: bool,
+}
+
+/// What a let-in device has besides its role, as its pages see it.
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub struct DeviceOptions {
+    /// See [`StoredClient::keys`].
+    pub keys: Option<Vec<KeyBinding>>,
+    /// See [`StoredClient::preview`].
+    pub preview: bool,
+}
+
+impl StoredClient {
+    fn options(&self) -> DeviceOptions {
+        DeviceOptions { keys: self.keys.clone(), preview: self.preview }
+    }
 }
 
 /// A device as the host's settings list it (the `remote` event).
@@ -56,6 +76,8 @@ pub struct ClientInfo {
     pub known_name: bool,
     /// Its own keys (see [`StoredClient::keys`]).
     pub keys: Option<Vec<KeyBinding>>,
+    /// May preview cues (see [`StoredClient::preview`]).
+    pub preview: bool,
 }
 
 /// The server's state and the devices, for the host (`remote` event and
@@ -76,8 +98,8 @@ pub struct Lookup {
     pub name: String,
     /// Its role now and later; `None` once it is removed.
     pub role: watch::Receiver<Option<Role>>,
-    /// Its own keys now and later.
-    pub keys: watch::Receiver<Option<Vec<KeyBinding>>>,
+    /// Its own keys and whether it may preview, now and later.
+    pub options: watch::Receiver<DeviceOptions>,
 }
 
 struct Entry {
@@ -87,14 +109,14 @@ struct Entry {
     address: Option<String>,
     last_seen: Option<u64>,
     role: watch::Sender<Option<Role>>,
-    keys: watch::Sender<Option<Vec<KeyBinding>>>,
+    options: watch::Sender<DeviceOptions>,
 }
 
 impl Entry {
     fn new(stored: StoredClient, pending: bool) -> Self {
         let role = watch::Sender::new(Some(stored.role));
-        let keys = watch::Sender::new(stored.keys.clone());
-        Self { stored, pending, connected: 0, address: None, last_seen: None, role, keys }
+        let options = watch::Sender::new(stored.options());
+        Self { stored, pending, connected: 0, address: None, last_seen: None, role, options }
     }
 
     fn lookup(&self) -> Lookup {
@@ -102,7 +124,7 @@ impl Entry {
             id: self.stored.id.clone(),
             name: self.stored.name.clone(),
             role: self.role.subscribe(),
-            keys: self.keys.subscribe(),
+            options: self.options.subscribe(),
         }
     }
 }
@@ -213,6 +235,7 @@ impl Registry {
                 token_hash: hash(&token),
                 role: Role::Pending,
                 keys: None,
+                preview: false,
             };
             let mut entry = Entry::new(stored, true);
             (entry.address, entry.last_seen) = (address, Some(now_ms()));
@@ -269,14 +292,35 @@ impl Registry {
         if let Some(keys) = &keys {
             check_remote_keys(keys)?;
         }
+        self.change_let_in(id, |stored| stored.keys = keys)
+    }
+
+    /// Lets device `id` preview cues, or no longer.
+    pub fn set_preview(&self, id: &str, allowed: bool) -> Result<(), String> {
+        self.change_let_in(id, |stored| stored.preview = allowed)
+    }
+
+    /// Whether device `id` is let in and may preview cues.
+    pub fn may_preview(&self, id: &str) -> bool {
+        self.lock().entries.iter().any(|e| e.stored.id == id && !e.pending && e.stored.preview)
+    }
+
+    /// Changes a let-in device (a request has no say yet), keeps it and
+    /// tells its pages.
+    fn change_let_in(&self, id: &str, change: impl FnOnce(&mut StoredClient)) -> Result<(), String> {
         self.update(true, |inner| {
             let entry = inner
                 .entries
                 .iter_mut()
                 .find(|e| e.stored.id == id && !e.pending)
                 .ok_or_else(|| jq_i18n::t!("remote.unknown_client"))?;
-            entry.stored.keys = keys.clone();
-            entry.keys.send_replace(keys);
+            change(&mut entry.stored);
+            let now = entry.stored.options();
+            entry.options.send_if_modified(|options| {
+                let changed = *options != now;
+                *options = now;
+                changed
+            });
             Ok(())
         })
     }
@@ -328,6 +372,7 @@ fn status(inner: &Inner) -> RemoteStatus {
         last_seen: e.last_seen,
         known_name: known(e),
         keys: e.stored.keys.clone(),
+        preview: e.stored.preview,
     };
     let (requests, let_in): (Vec<&Entry>, Vec<&Entry>) = inner.entries.iter().partition(|e| e.pending);
     RemoteStatus {
@@ -475,7 +520,7 @@ mod tests {
         assert!(registry.set_keys(&lookup.id, Some(f1())).is_err(), "not let in yet");
         registry.set_role(&lookup.id, Role::Control).unwrap();
         registry.set_keys(&lookup.id, Some(f1())).unwrap();
-        assert_eq!(*lookup.keys.borrow(), Some(f1()), "its connection hears of it");
+        assert_eq!(lookup.options.borrow().keys, Some(f1()), "its connection hears of it");
         assert_eq!(kept.lock().unwrap()[0].keys, Some(f1()));
         assert_eq!(registry.status().clients[0].keys, Some(f1()));
         let preview = vec![KeyBinding {
@@ -484,7 +529,12 @@ mod tests {
         }];
         assert!(registry.set_keys(&lookup.id, Some(preview)).is_err());
         registry.set_keys(&lookup.id, None).unwrap();
-        assert_eq!(*lookup.keys.borrow(), None);
+        assert_eq!(lookup.options.borrow().keys, None);
+
+        assert!(!registry.may_preview(&lookup.id), "not unless the host allows it");
+        registry.set_preview(&lookup.id, true).unwrap();
+        assert!(registry.may_preview(&lookup.id) && lookup.options.borrow().preview);
+        assert!(kept.lock().unwrap()[0].preview);
     }
 
     #[test]
@@ -502,6 +552,7 @@ mod tests {
                 token_hash: "h".into(),
                 role: Role::View,
                 keys: None,
+                preview: false,
             },
             StoredClient {
                 id: "b".into(),
@@ -509,6 +560,7 @@ mod tests {
                 token_hash: "i".into(),
                 role: Role::Control,
                 keys: Some(keys),
+                preview: true,
             },
         ];
         save(&path, &clients).unwrap();

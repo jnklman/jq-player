@@ -61,6 +61,8 @@ describe('commands', () => {
       [() => api.remoteInfo(), 'remote_info', {}],
       [() => api.setRemoteKeys('c1', null), 'set_remote_keys', { id: 'c1', keys: null }],
       [() => api.setOwnKeys(null), 'set_own_keys', { keys: null }],
+      [() => api.setRemotePreview('c1', true), 'set_remote_preview', { id: 'c1', allowed: true }],
+      [() => api.localPreview('a'), 'local_preview', { cue: 'a' }],
     ];
     for (const [call, cmd, args] of calls) {
       backend.calls = [];
@@ -117,6 +119,7 @@ describe('events', () => {
       ['panel_window_moved', events.onPanelWindowMoved, { panel: 'p', x: 0, y: 0, width: 1, height: 1 }, undefined],
       ['panel_window_closed', events.onPanelWindowClosed, { panel: 'p' }, 'p'],
       ['app_focus', events.onAppFocus, false, undefined],
+      ['preview_progress', events.onPreviewProgress, { id: 'a', rendered: 1, done: false, failed: false }, undefined],
     ];
     for (const [event, on, payload, expected] of cases) {
       const handler = vi.fn();

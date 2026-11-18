@@ -10,6 +10,7 @@
 pub mod clients;
 pub mod hub;
 pub mod protocol;
+pub mod render;
 pub mod server;
 
 use std::sync::Arc;
@@ -29,6 +30,10 @@ pub const EVENT_REMOTE: &str = "remote";
 /// File of the let-in devices, in the app's config folder.
 pub const CLIENTS_FILE: &str = "remote-clients.json";
 
+/// Folder of the devices' rendered previews, in the app's cache folder;
+/// emptied when the program starts and ends.
+pub const PREVIEWS_DIR: &str = "remote-previews";
+
 /// Tells the host something (a notice in the main window).
 pub type Notify = Arc<dyn Fn(Notice) + Send + Sync>;
 
@@ -37,9 +42,9 @@ pub struct Remote {
     shared: Arc<Shared>,
     notify: Notify,
     server: Option<Server>,
-    /// The settings last applied: a server that failed to start is tried
-    /// again only once they change.
-    applied: Option<RemoteSettings>,
+    /// Whether it should run and on which port, as last applied: a server
+    /// that failed to start is tried again only once that changes.
+    applied: Option<(bool, u16)>,
 }
 
 impl Remote {
@@ -50,10 +55,11 @@ impl Remote {
     /// Starts, stops or moves the server as `settings` say. Cheap when
     /// nothing changed, so it is called after every batch of requests.
     pub fn apply(&mut self, settings: &RemoteSettings, notices: &mut Vec<Notice>) {
-        if self.applied.as_ref() == Some(settings) {
+        let wanted = (settings.enabled, settings.port);
+        if self.applied == Some(wanted) {
             return;
         }
-        self.applied = Some(*settings);
+        self.applied = Some(wanted);
         // The old one first, so a server on the same port can start.
         self.server = None;
         let registry = &self.shared.registry;
@@ -105,6 +111,13 @@ pub fn set_remote_keys(
     keys: Option<Vec<jq_core::keys::KeyBinding>>,
 ) -> Result<(), String> {
     registry.set_keys(&id, keys)
+}
+
+/// Lets a device preview cues on itself, or no longer (who may, can also
+/// keep the sound of the show's files).
+#[tauri::command]
+pub fn set_remote_preview(registry: State<'_, Registry>, id: String, allowed: bool) -> Result<(), String> {
+    registry.set_preview(&id, allowed)
 }
 
 /// Removes a device, or turns its request down.

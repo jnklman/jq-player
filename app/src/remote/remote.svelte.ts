@@ -2,6 +2,7 @@
 // feeds the same store the app uses (`lib/store.svelte.ts`). The panels read `ui.remote` (role, connection, lock) to
 // know whether their buttons operate the show (`canControl`).
 
+import { events, type PreviewProgress } from '../lib/api';
 import { t } from '../lib/i18n/index.svelte';
 import { init, initLanguage, reloadShow, resetRevisions, ui } from '../lib/store.svelte';
 import { useTransport } from '../lib/transport';
@@ -24,6 +25,8 @@ export const remote = $state({
   /** Why the last join request failed, or that the host removed the device. */
   error: null as string | null,
   joining: false,
+  /** How far the device's last preview is rendered (it may be done before its player shows). */
+  progress: null as PreviewProgress | null,
 });
 
 /** Where the lock of the controls is remembered on this device; a convenience, so it may be lost. */
@@ -70,6 +73,7 @@ export async function start(options: { WebSocket?: typeof WebSocket } = {}) {
     WebSocket: options.WebSocket,
   });
   useTransport(socket);
+  void events.onPreviewProgress((progress) => (remote.progress = progress));
   await identify();
 }
 
@@ -91,7 +95,7 @@ function connect(me: Identity) {
   remote.name = me.name;
   remote.error = null;
   remote.phase = 'live';
-  ui.remote = { role: me.role, connected: false, locked: storedLock(), keys: null };
+  ui.remote = { role: me.role, connected: false, locked: storedLock(), keys: null, preview: false };
   socket?.start();
 }
 
@@ -133,6 +137,7 @@ function statusChanged(status: SocketStatus) {
     connected: status.connected,
     locked: was?.locked ?? false,
     keys: status.keys,
+    preview: status.preview,
   };
   // Let in just now.
   if (was?.role === 'pending' && status.role !== 'pending' && status.connected) void showUp(false);

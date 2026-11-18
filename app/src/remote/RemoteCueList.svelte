@@ -2,6 +2,7 @@
   import { tick } from 'svelte';
 
   import CrosshairSimple from '~icons/ph/crosshair-simple-bold';
+  import Headphones from '~icons/ph/headphones-bold';
   import Play from '~icons/ph/play-fill';
   import Warning from '~icons/ph/warning-bold';
   import { Button } from '$lib/components/ui/button';
@@ -9,15 +10,18 @@
   import PanelFrame from '../components/layout/PanelFrame.svelte';
   import { api, type Cue, type CueId } from '../lib/api';
   import { typeColors, typeLabel } from '../lib/control';
+  import { isPlaceholder } from '../lib/cue';
   import { chainArrow, cueStatus, cueWarnings, rowRunning } from '../lib/cueStatus';
   import { t } from '../lib/i18n/index.svelte';
   import { plainText } from '../lib/richText';
-  import { canControl, cueById, cues, isRunning, ui } from '../lib/store.svelte';
+  import { attempt, canControl, cueById, cues, isRunning, ui } from '../lib/store.svelte';
   import { bar, empty } from '../lib/ui';
+  import PreviewPlayer from './PreviewPlayer.svelte';
 
   // The cue list for a touch screen: two lines a cue, the playhead marked, following it unless the operator
   // scrolls. Tapping a cue only picks it here (never on the host); what to do with it is in the bar below, only for
-  // a device that operates, so a stray tap starts nothing.
+  // a device that operates, so a stray tap starts nothing. A device the host lets preview plays a sound cue on itself
+  // (rendered by the host, see `api.localPreview`), in a player under the bar.
 
   const list = $derived(cues());
   const playhead = $derived(ui.runtime?.playhead ?? null);
@@ -30,6 +34,27 @@
     if (picked && !pickedCue) picked = null;
   });
   const operates = $derived(ui.remote?.role === 'control');
+
+  const mayPreview = $derived(ui.remote?.preview ?? false);
+  const previewable = $derived(pickedCue?.type === 'sound' && !isPlaceholder(pickedCue));
+  /** The cue being previewed here and its WAV. */
+  let listening = $state<{ cue: CueId; id: string; url: string; duration: number } | null>(null);
+  let asking = $state(false);
+  const listened = $derived(cueById(listening?.cue));
+  // The host took the leave back.
+  $effect(() => {
+    if (!mayPreview) listening = null;
+  });
+
+  async function listen() {
+    const cue = picked;
+    if (!cue) return;
+    asking = true;
+    const found = await attempt(api.localPreview(cue));
+    asking = false;
+    if (!found) return;
+    listening = { cue, id: found.id, url: found.url, duration: found.duration };
+  }
 
   let scroller = $state<HTMLElement>();
   /** The list keeps the playhead in view until the operator scrolls it. */
@@ -146,18 +171,39 @@
       <div class={empty}>{t('transport.no_cues')}</div>
     {/each}
   </div>
-  {#if pickedCue && operates}
+  {#if pickedCue && (operates || (mayPreview && previewable))}
     <div class="flex flex-wrap items-center gap-2 border-t border-line px-3 py-2">
       <span class="min-w-0 grow truncate text-[13px] font-semibold">
         <span class="font-mono">{pickedCue.number}</span>
         {pickedCue.title || t('group.untitled')}
       </span>
-      <Button size="sm" disabled={!canControl()} onclick={() => act('set_playhead')}>{t('remote.set_next')}</Button>
-      <Button size="sm" variant="go" disabled={!canControl()} onclick={() => act('start_cue')}
-        >{t('remote.start')}</Button
-      >
-      <Button size="sm" variant="stop" disabled={!canControl()} onclick={() => act('stop_cue')}>{t('type.stop')}</Button
-      >
+      {#if mayPreview && previewable}
+        <Button size="sm" variant="outline" disabled={asking || !ui.remote?.connected} onclick={listen}>
+          <Headphones class="size-3.5" />{t('remote.listen')}
+        </Button>
+      {/if}
+      {#if operates}
+        <Button size="sm" disabled={!canControl()} onclick={() => act('set_playhead')}>{t('remote.set_next')}</Button>
+        <Button size="sm" variant="go" disabled={!canControl()} onclick={() => act('start_cue')}
+          >{t('remote.start')}</Button
+        >
+        <Button size="sm" variant="stop" disabled={!canControl()} onclick={() => act('stop_cue')}
+          >{t('type.stop')}</Button
+        >
+      {/if}
     </div>
+  {/if}
+  {#if listening}
+    {@const name = listened ? `${listened.number} ${listened.title || t('group.untitled')}`.trim() : ''}
+    <!-- A new preview (also of the same cue) starts with a player of its own. -->
+    {#key listening.url}
+      <PreviewPlayer
+        id={listening.id}
+        url={listening.url}
+        duration={listening.duration}
+        {name}
+        onclose={() => (listening = null)}
+      />
+    {/key}
   {/if}
 </PanelFrame>

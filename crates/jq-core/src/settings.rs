@@ -127,6 +127,9 @@ pub struct RemoteSettings {
     pub enabled: bool,
     /// TCP port of its web page and WebSocket, on every network interface.
     pub port: u16,
+    /// Devices allowed to preview cues (each one by the host) may do so only
+    /// while no cue runs: rendering a preview takes CPU and disk.
+    pub preview_idle_only: bool,
 }
 
 /// Port of the remote-control server unless set otherwise.
@@ -134,7 +137,7 @@ pub const DEFAULT_REMOTE_PORT: u16 = 8642;
 
 impl Default for RemoteSettings {
     fn default() -> Self {
-        Self { enabled: false, port: DEFAULT_REMOTE_PORT }
+        Self { enabled: false, port: DEFAULT_REMOTE_PORT, preview_idle_only: true }
     }
 }
 

@@ -65,6 +65,9 @@ pub enum Request {
     },
     Save(Reply),
     View(Reply),
+    /// How a cue sounds in a remote device's preview (`remote/render.rs`),
+    /// and whether cues run.
+    RemotePreview(CueId, Reply<(jq_core::PreviewSound, bool)>),
     Action(Action),
     /// Starts, stops or resets a stopwatch of the show (no reply).
     Stopwatch(String, StopwatchAction),
@@ -400,6 +403,11 @@ fn handle(
                 None => no_show(),
             };
             let _ = reply.send(result);
+        }
+        Request::RemotePreview(id, reply) => {
+            let _ = reply.send(
+                session.as_ref().ok_or_else(|| jq_i18n::t!("app.no_show")).and_then(|s| s.remote_preview(id)),
+            );
         }
         Request::SaveAsPlan(reply) => {
             let _ = reply.send(

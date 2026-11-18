@@ -1,5 +1,6 @@
 //! The remote server: the remote page (`remote.html` from the app's own
-//! files), a join request over HTTP and a WebSocket per open page. It runs
+//! files), a join request over HTTP, a WebSocket per open page and the
+//! devices' previews (`/media/…`, see `render.rs`). It runs
 //! on a thread with a runtime of its own, apart from Tauri's and from the
 //! show thread, which it only reaches through the request queue; whatever
 //! goes wrong in here ends at most the server.
@@ -11,8 +12,9 @@ use std::sync::mpsc as std_mpsc;
 use std::time::Duration;
 
 use axum::Router;
+use axum::body::{Body, Bytes};
 use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
-use axum::extract::{ConnectInfo, State};
+use axum::extract::{ConnectInfo, Path, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -22,6 +24,7 @@ use tokio::sync::{mpsc, oneshot};
 use super::clients::{Lookup, Registry};
 use super::hub::{Frame, Hub};
 use super::protocol::{self, Call, ClientMessage, Role};
+use super::render::{Previews, Progress};
 use crate::backend::Request;
 use crate::channel::{Backend, REPLY_TIMEOUT};
 
@@ -37,6 +40,12 @@ const SEND_TIMEOUT: Duration = Duration::from_secs(10);
 const CLOSE_REMOVED: u16 = 4001;
 /// How long stopping waits for the server's thread to end.
 const STOP_WAIT: Duration = Duration::from_secs(1);
+/// How often previews nobody asks for any more are dropped.
+const SWEEP_INTERVAL: Duration = Duration::from_secs(30);
+/// Bytes of a preview sent at a time.
+const MEDIA_CHUNK: usize = 64 * 1024;
+/// Event telling a device how far its preview is rendered (`render::Report`).
+const PREVIEW_PROGRESS: &str = "preview_progress";
 
 /// A file of the remote page.
 pub struct Asset {
@@ -59,6 +68,9 @@ pub struct Shared {
     pub instance: String,
     /// The language setting and what it resolves to (`get_language`).
     pub language: Arc<dyn Fn() -> serde_json::Value + Send + Sync>,
+    /// The devices' previews, rendered on a thread of their own (also held
+    /// by the app, which clears them when it ends).
+    pub previews: Arc<Previews>,
 }
 
 /// A running server; dropping it stops it.
@@ -120,6 +132,15 @@ fn serve(
         tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(|e| e.to_string())?;
     runtime.block_on(async move {
         let listener = tokio::net::TcpListener::from_std(listener).map_err(|e| e.to_string())?;
+        let sweeping = shared.clone();
+        tokio::spawn(async move {
+            let mut sweep = tokio::time::interval(SWEEP_INTERVAL);
+            loop {
+                sweep.tick().await;
+                let registry = &sweeping.registry;
+                sweeping.previews.sweep(|client| registry.may_preview(client));
+            }
+        });
         let app = router(shared).into_make_service_with_connect_info::<SocketAddr>();
         tokio::select! {
             served = axum::serve(listener, app) => served.map_err(|e| e.to_string()),
@@ -135,6 +156,7 @@ fn router(shared: Arc<Shared>) -> Router {
         .route("/api/me", get(me))
         .route("/api/join", post(join))
         .route("/ws", get(socket))
+        .route("/media/{file}", get(media))
         .fallback(get(asset))
         .with_state(shared)
 }
@@ -253,14 +275,14 @@ async fn socket(
 /// One open page: sends what its role lets it see and runs its calls.
 async fn client(mut socket: WebSocket, shared: Arc<Shared>, found: Lookup, address: SocketAddr) {
     let _open = shared.registry.connect(&found.id, address.to_string());
-    let (id, mut roles, mut keys) = (found.id, found.role, found.keys);
+    let (id, mut roles, mut options) = (found.id, found.role, found.options);
     let Some(mut role) = *roles.borrow_and_update() else { return };
     let mut feeds = shared.hub.subscribe();
+    let mut previews = shared.previews.follow(&id);
     let (replies, mut replied) = mpsc::unbounded_channel::<String>();
     let mut ping = tokio::time::interval(PING_INTERVAL);
 
-    let hello =
-        protocol::hello(&shared.instance, &id, &found.name, role, keys.borrow_and_update().as_deref());
+    let hello = protocol::hello(&shared.instance, &id, &found.name, role, &options.borrow_and_update());
     if !send(&mut socket, hello).await {
         return;
     }
@@ -294,7 +316,11 @@ async fn client(mut socket: WebSocket, shared: Arc<Shared>, found: Lookup, addre
                 }
                 None
             }
-            Ok(()) = keys.changed() => Some(protocol::keys(keys.borrow_and_update().as_deref())),
+            Ok(()) = options.changed() => Some(protocol::options(&options.borrow_and_update())),
+            Ok(()) = previews.changed() => {
+                let report = previews.borrow_and_update().clone();
+                report.and_then(|r| serde_json::to_string(&r).ok()).map(|r| protocol::event(PREVIEW_PROGRESS, &r))
+            }
             Some(reply) = replied.recv() => Some(reply),
             _ = ping.tick() => Some(protocol::PING.to_owned()),
         };
@@ -362,6 +388,25 @@ fn call(
         // Its open pages hear of it through the registry (a `keys` frame).
         Call::SetOwnKeys(keys) => done(shared.registry.set_keys(client, keys)),
         Call::GetLanguage => Some(protocol::reply(id, Ok((shared.language)()))),
+        Call::LocalPreview(cue) => {
+            if !shared.registry.may_preview(client) {
+                return Some(protocol::reply(id, Err(jq_i18n::t!("remote.not_allowed"))));
+            }
+            let (shared, client, replies) = (shared.clone(), client.to_owned(), replies.clone());
+            // The show thread says how the cue sounds; the file is opened here, off the show thread.
+            tokio::task::spawn_blocking(move || {
+                let result = shared
+                    .backend
+                    .ask_blocking(|reply| Request::RemotePreview(cue, reply), REPLY_TIMEOUT)
+                    .and_then(|(sound, busy)| shared.previews.start(&client, sound, busy))
+                    .map(|render| {
+                        let url = format!("/media/{}.wav", render.id);
+                        serde_json::json!({ "id": render.id, "url": url, "duration": render.duration })
+                    });
+                let _ = replies.send(protocol::reply(id, result));
+            });
+            None
+        }
         Call::GetShow => {
             let backend = shared.backend.clone();
             let replies = replies.clone();
@@ -372,6 +417,90 @@ fn call(
             None
         }
     }
+}
+
+/// A device's preview (`/media/<id>.wav`), whole or the part a `Range`
+/// asks for; a part not rendered yet comes as it is rendered.
+async fn media(State(shared): State<Arc<Shared>>, Path(file): Path<String>, headers: HeaderMap) -> Response {
+    let Some(found) = token(&headers).and_then(|token| shared.registry.lookup(&token)) else {
+        return StatusCode::UNAUTHORIZED.into_response();
+    };
+    let render = file.strip_suffix(".wav").and_then(|id| shared.previews.get(id));
+    let Some(render) = render.filter(|r| r.client == found.id && shared.registry.may_preview(&found.id))
+    else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    render.touch();
+    let len = render.len;
+    let asked = headers.get(header::RANGE).and_then(|v| v.to_str().ok());
+    let (status, range) = match asked.map(|r| byte_range(r, len)) {
+        None => (StatusCode::OK, 0..len),
+        Some(Some(range)) => (StatusCode::PARTIAL_CONTENT, range),
+        Some(None) => {
+            let mut refused = StatusCode::RANGE_NOT_SATISFIABLE.into_response();
+            if let Ok(value) = HeaderValue::from_str(&format!("bytes */{len}")) {
+                refused.headers_mut().insert(header::CONTENT_RANGE, value);
+            }
+            return refused;
+        }
+    };
+    let end = range.end;
+    let chunks = futures_util::stream::unfold((range.start, render.progress()), move |(at, mut progress)| {
+        let render = render.clone();
+        async move {
+            if at >= end {
+                return None;
+            }
+            let want = (at + MEDIA_CHUNK).min(end);
+            loop {
+                let now = *progress.borrow_and_update();
+                match now {
+                    Progress::Ready(ready) if ready >= want => break,
+                    Progress::Ready(_) if progress.changed().await.is_ok() => {}
+                    // Failed or replaced: the player stops where it is.
+                    _ => return Some((Err(std::io::Error::other("preview ended")), (end, progress))),
+                }
+            }
+            render.touch();
+            let reading = render.clone();
+            let read = tokio::task::spawn_blocking(move || reading.read(at..want)).await;
+            match read {
+                Ok(Ok(bytes)) => Some((Ok(Bytes::from(bytes)), (want, progress))),
+                _ => Some((Err(std::io::Error::other("preview unreadable")), (end, progress))),
+            }
+        }
+    });
+    let mut response = (status, Body::from_stream(chunks)).into_response();
+    let set = response.headers_mut();
+    set.insert(header::CONTENT_TYPE, HeaderValue::from_static("audio/wav"));
+    set.insert(header::ACCEPT_RANGES, HeaderValue::from_static("bytes"));
+    set.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    if let Ok(length) = HeaderValue::from_str(&(range.end - range.start).to_string()) {
+        set.insert(header::CONTENT_LENGTH, length);
+    }
+    if status == StatusCode::PARTIAL_CONTENT
+        && let Ok(value) = HeaderValue::from_str(&format!("bytes {}-{}/{len}", range.start, range.end - 1))
+    {
+        set.insert(header::CONTENT_RANGE, value);
+    }
+    response
+}
+
+/// The bytes a `Range` header (`bytes=a-b`, `bytes=a-`, `bytes=-n`) asks
+/// for of `len`; `None` if it asks for none of them. Only the first range.
+fn byte_range(header: &str, len: usize) -> Option<std::ops::Range<usize>> {
+    let spec = header.trim().strip_prefix("bytes=")?.split(',').next()?.trim();
+    let (from, to) = spec.split_once('-')?;
+    let (from, to) = (from.trim(), to.trim());
+    let range = if from.is_empty() {
+        let suffix: usize = to.parse().ok()?;
+        len.saturating_sub(suffix)..len
+    } else {
+        let start: usize = from.parse().ok()?;
+        let end = if to.is_empty() { len } else { to.parse::<usize>().ok()?.saturating_add(1).min(len) };
+        start..end
+    };
+    (range.start < range.end).then_some(range)
 }
 
 /// The device's token from its cookie.

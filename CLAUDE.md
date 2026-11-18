@@ -84,7 +84,11 @@
   WebSocket and join check `Origin`. The UI reaches the backend only through `lib/transport.ts` (Tauri by default,
   the remote page's `socket.ts` with `useTransport`); the remote page must not import Tauri or window/edit modules
   (ESLint `no-restricted-imports` for `src/remote`). Buttons of panels it reuses take `disabled={!canControl()}`
-  (always true in the app). In a development build the server takes the page from the Vite dev server.
+  (always true in the app). A device's own preview (`render.rs`): the show thread only says how the cue sounds
+  (`PreviewSound`, the same as the host's preview); a thread of the server opens the file itself, renders it with an
+  offline engine into a WAV file (cache folder, `remote-previews`, emptied at start and on `RunEvent::Exit`) and
+  serves it (`/media/<id>.wav`, ranges) while rendering. In a development
+  build the server takes the page from the Vite dev server.
 
 ## Commands
 

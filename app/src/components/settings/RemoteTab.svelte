@@ -95,6 +95,13 @@
         </div>
       </SettingRow>
     {/if}
+    <SettingRow label={t('remote_tab.preview')} keywords={t('remote_tab.preview_keywords')}>
+      <Label class="{check} pt-1.5">
+        <Checkbox bind:checked={draft.remote.preview_idle_only} />
+        {t('remote_tab.preview_idle_only')}
+      </Label>
+      <span class={hint}>{t('remote_tab.preview_hint')}</span>
+    </SettingRow>
     <SettingRow label={t('remote_tab.security')} keywords={t('remote_tab.security_keywords')}>
       <span class="{hint} pt-1.5">{t('remote_tab.security_hint')}</span>
     </SettingRow>
@@ -136,6 +143,14 @@
             options={remoteRoleOptions}
             onchange={(role) => attempt(api.setRemoteClient(client.id, role))}
           />
+          <Label class={check}>
+            <Checkbox
+              checked={client.preview}
+              aria-label={t('remote_tab.preview_of', { name: client.name })}
+              onCheckedChange={(allowed) => attempt(api.setRemotePreview(client.id, allowed))}
+            />
+            {t('remote_tab.preview_allow')}
+          </Label>
           {#if client.keys}
             <Button
               size="sm"

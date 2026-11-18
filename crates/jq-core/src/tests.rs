@@ -1281,6 +1281,27 @@ fn preview_plays_without_touching_the_show() {
 }
 
 #[test]
+fn a_preview_sounds_as_the_cue_in_the_show() {
+    let mut song = with_speed(sound("1", "len2000.wav"), 50.0, true, 3.0);
+    if let CueKind::Sound(s) = &mut song.kind {
+        (s.start, s.end, s.pan, s.volume_db) = (0.5, Some(1.5), 2.0, -6.0);
+    }
+    let (id, other) = (song.id, wait("2", 1.0));
+    let other_id = other.id;
+    let rig = Rig::new(vec![song, other]);
+    let sound = rig.runner.preview_sound(id).unwrap();
+    assert_eq!((sound.start, sound.end, sound.pan), (0.5, Some(1.5), 1.0), "pan clamped");
+    assert!(sound.path.ends_with("len2000.wav"));
+    assert!((sound.gain - jq_engine::db_to_gain(-6.0)).abs() < 1e-4);
+    assert_eq!(sound.rate, 0.5);
+    assert!((sound.pitch - 2f32.powf(3.0 / 12.0)).abs() < 1e-4, "{}", sound.pitch);
+    let buffer = Arc::new(AudioBuffer::from_interleaved_stereo(48_000, vec![0.0; 96_000 * 2]));
+    let voice = sound.voice(buffer, 24_000, 72_000, 2, 480);
+    assert_eq!((voice.start, voice.end, voice.output_channel, voice.rate), (24_000, Some(72_000), 2, 0.5));
+    assert!(rig.runner.preview_sound(other_id).is_err(), "not a sound cue");
+}
+
+#[test]
 fn preview_toggles_and_switches_cues() {
     let (a, b) = (sound("1", "len2000.wav"), sound("2", "len2000.wav"));
     let (ida, idb) = (a.id, b.id);
