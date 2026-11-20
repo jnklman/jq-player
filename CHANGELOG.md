@@ -12,6 +12,8 @@ different in the app, not how the code changed). The Release workflow turns
 
 ## Unreleased
 
+## 0.3.1 – 2026-11-20
+
 ### Fixed
 
 - The cue list no longer shows the not-allowed cursor outside edit mode, e.g. over its scrollbar.
