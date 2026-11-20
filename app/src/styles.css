@@ -213,9 +213,11 @@
      except inside a tooltip wrapper (`Tooltip` with a `child` span), which
      needs the hover itself to explain why the control is disabled: there the
      wrapper shows the cursor. Only controls: a disabled <fieldset> (a locked
-     inspector or dialog) is `:disabled` too, but only the controls in it are. */
+     inspector or dialog) is `:disabled` too, but only the controls in it are;
+     a disabled context menu trigger (the cue list outside editing) is an area
+     whose children, scrollbars included, would inherit the cursor. */
   :is(button, input, select, textarea):disabled,
-  [data-disabled]:not(fieldset),
+  [data-disabled]:not(fieldset, [data-slot='context-menu-trigger']),
   [aria-disabled='true'],
   [data-slot='tooltip-trigger']:has(:is(button, input, select, textarea):disabled, [data-disabled]) {
     @apply cursor-not-allowed!;
