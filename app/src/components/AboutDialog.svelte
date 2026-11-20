@@ -180,9 +180,9 @@
                 >
                   <span class="min-w-0 truncate font-medium">{pkg.name}</span>
                   <span class="shrink-0 font-mono text-[11px] text-muted-foreground">{pkg.version}</span>
-                  <span class="ml-auto shrink-0 pl-3 text-xs text-muted-foreground"
-                    >{pkg.license ?? t('about.unknown_license')}</span
-                  >
+                  <span class="ml-auto shrink-0 pl-3 text-xs text-muted-foreground">
+                    {pkg.license ?? t('about.unknown_license')}
+                  </span>
                 </button>
                 {#if open}
                   <div class="flex flex-col gap-2 bg-background/40 px-4 py-2">

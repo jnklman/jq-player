@@ -82,8 +82,9 @@
           </span>
         {/if}
         {#if info?.case_mismatch}
-          <span class="text-xs text-stop-soft">{t('inspector.notice.case_mismatch', { name: info.case_mismatch })}</span
-          >
+          <span class="text-xs text-stop-soft">
+            {t('inspector.notice.case_mismatch', { name: info.case_mismatch })}
+          </span>
         {/if}
         {#if !info?.missing && !info?.importing}
           <Waveform
@@ -170,16 +171,20 @@
             size="icon-sm"
             class="shrink-0 text-base"
             aria-label={t('sound_main.vamp_remove', { number: i + 1 })}
-            onclick={() => edit.set({ vamps: cue.vamps.filter((_, index) => index !== i) })}><XMark /></Button
+            onclick={() => edit.set({ vamps: cue.vamps.filter((_, index) => index !== i) })}
           >
+            <XMark />
+          </Button>
         </div>
       {/each}
       <Button
         size="sm"
         class="self-start"
         disabled={!newVamp}
-        onclick={() => newVamp && edit.set({ vamps: [...cue.vamps, newVamp] })}>{t('sound_main.add_vamp')}</Button
+        onclick={() => newVamp && edit.set({ vamps: [...cue.vamps, newVamp] })}
       >
+        {t('sound_main.add_vamp')}
+      </Button>
       <span class={hint}>{t('sound_main.vamp_hint')}</span>
     </FieldRow>
     <FieldRow label={t('sound_main.marks')}>

@@ -230,8 +230,10 @@
       class={buttonVariants({ size: 'icon' })}
       disabled={!cues().length}
       aria-label={t('cuemenu.renumber')}
-      onclick={renumber}><ListNumbers /></Tooltip
+      onclick={renumber}
     >
+      <ListNumbers />
+    </Tooltip>
 
     {@render divider()}
     {@render trailing()}

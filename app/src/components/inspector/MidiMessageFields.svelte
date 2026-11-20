@@ -120,6 +120,8 @@
     size="icon-sm"
     class="shrink-0 text-base"
     aria-label={t('midi_fields.remove', { number: index + 1 })}
-    onclick={onremove}><XMark /></Button
+    onclick={onremove}
   >
+    <XMark />
+  </Button>
 </div>

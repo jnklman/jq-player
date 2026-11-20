@@ -31,7 +31,8 @@
       size="sm"
       class="self-start"
       onclick={() => edit.set({ messages: [...cue.messages, midiMessageOf('program_change', cue.messages.at(-1))] })}
-      >{t('midi_fields.add')}</Button
     >
+      {t('midi_fields.add')}
+    </Button>
   </FieldRow>
 </FieldGroup>

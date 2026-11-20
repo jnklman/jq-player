@@ -90,8 +90,10 @@
           class={[
             'pointer-events-none pr-0.5 font-sans text-xs text-dim [grid-area:1/1]',
             !restProps.disabled && 'group-focus-within:invisible',
-          ]}>{unit}</span
+          ]}
         >
+          {unit}
+        </span>
       {/if}
       {#if !restProps.disabled}
         <span

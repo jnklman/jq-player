@@ -116,19 +116,19 @@
 
   <ContextMenu.Separator />
   <ContextMenu.Item disabled={selected.length === 0} onSelect={() => copyCues()}>
-    <Copy class="text-muted-foreground" />{t('cuemenu.copy')}<ContextMenu.Shortcut
-      >{t('key.ctrl')} + C</ContextMenu.Shortcut
-    >
+    <Copy class="text-muted-foreground" />{t('cuemenu.copy')}<ContextMenu.Shortcut>
+      {t('key.ctrl')} + C
+    </ContextMenu.Shortcut>
   </ContextMenu.Item>
   <ContextMenu.Item disabled={selected.length === 0} onSelect={() => cutCues()}>
-    <Scissors class="text-muted-foreground" />{t('cuemenu.cut')}<ContextMenu.Shortcut
-      >{t('key.ctrl')} + X</ContextMenu.Shortcut
-    >
+    <Scissors class="text-muted-foreground" />{t('cuemenu.cut')}<ContextMenu.Shortcut>
+      {t('key.ctrl')} + X
+    </ContextMenu.Shortcut>
   </ContextMenu.Item>
   <ContextMenu.Item disabled={!view.can_paste} onSelect={() => pasteCues()}>
-    <Clipboard class="text-muted-foreground" />{t('cuemenu.paste')}<ContextMenu.Shortcut
-      >{t('key.ctrl')} + V</ContextMenu.Shortcut
-    >
+    <Clipboard class="text-muted-foreground" />{t('cuemenu.paste')}<ContextMenu.Shortcut>
+      {t('key.ctrl')} + V
+    </ContextMenu.Shortcut>
   </ContextMenu.Item>
   <ContextMenu.Item inset disabled={!view.can_paste || selected.length === 0} onSelect={() => pasteOverCues()}>
     {t('cuemenu.paste_replace')}
@@ -175,9 +175,9 @@
 
   <ContextMenu.Separator />
   <ContextMenu.Item disabled={!cues().length} onSelect={selectEveryCue}>
-    <Checks class="text-muted-foreground" />{t('cuemenu.select_all')}<ContextMenu.Shortcut
-      >{t('key.ctrl')} + A</ContextMenu.Shortcut
-    >
+    <Checks class="text-muted-foreground" />{t('cuemenu.select_all')}<ContextMenu.Shortcut>
+      {t('key.ctrl')} + A
+    </ContextMenu.Shortcut>
   </ContextMenu.Item>
   <ContextMenu.Item disabled={!cues().length} onSelect={renumber}>
     <ListNumbers class="text-muted-foreground" />{t('cuemenu.renumber')}

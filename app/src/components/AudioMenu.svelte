@@ -74,9 +74,9 @@
         })}{/if}
     </span>
     {#if view.audio_lost}
-      <span class="text-xs whitespace-pre-line text-stop-soft"
-        >{t('header.audio_lost', { reason: view.audio_lost })}</span
-      >
+      <span class="text-xs whitespace-pre-line text-stop-soft">
+        {t('header.audio_lost', { reason: view.audio_lost })}
+      </span>
     {/if}
   {/if}
 </div>

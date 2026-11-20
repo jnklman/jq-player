@@ -44,8 +44,8 @@
   onapply={async () => !!(await edit({ op: 'set_devices', devices: $state.snapshot(devices) }))}
   {onclose}
 >
-  <ScrollArea
-    ><fieldset class="m-0 flex min-w-0 flex-col gap-3 border-0 p-4" disabled={locked}>
+  <ScrollArea>
+    <fieldset class="m-0 flex min-w-0 flex-col gap-3 border-0 p-4" disabled={locked}>
       <p class="{hint} m-0">{t('devices.text')}</p>
       {#each devices as device, i (device.id)}
         <div class="grid grid-cols-[2fr_2fr_1fr_auto] items-end gap-2">
@@ -57,13 +57,15 @@
             size="icon-sm"
             class="text-base"
             aria-label={t('devices.remove', { name: device.name })}
-            onclick={() => devices.splice(i, 1)}><XMark /></Button
+            onclick={() => devices.splice(i, 1)}
           >
+            <XMark />
+          </Button>
         </div>
       {:else}
         <p class="{hint} m-0">{t('devices.none')}</p>
       {/each}
       <Button class="self-start" onclick={add}>{t('devices.add')}</Button>
-    </fieldset></ScrollArea
-  >
+    </fieldset>
+  </ScrollArea>
 </EditDialog>

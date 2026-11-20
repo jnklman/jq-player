@@ -78,11 +78,12 @@
   </span>
   <span class={['flex text-[15px]', done ? 'text-dim' : 'text-fg-2']}><FilmSlate /></span>
   <span class="col-span-5 flex min-w-0 items-baseline gap-3">
-    <span class={['truncate text-[15px] font-bold tracking-wide', done && 'text-muted-foreground']}
-      >{cue.title || t('scene.untitled')}</span
-    >
-    {#if cue.notes}<span class="truncate text-xs text-muted-foreground">{plainText(cue.notes.split('\n')[0])}</span
-      >{/if}
+    <span class={['truncate text-[15px] font-bold tracking-wide', done && 'text-muted-foreground']}>
+      {cue.title || t('scene.untitled')}
+    </span>
+    {#if cue.notes}<span class="truncate text-xs text-muted-foreground">
+        {plainText(cue.notes.split('\n')[0])}
+      </span>{/if}
   </span>
   <Tooltip tip={t('cuerow.drag')}>
     {#snippet child({ props })}

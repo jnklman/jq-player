@@ -103,15 +103,15 @@
         class="order-first flex min-w-0 flex-col justify-center gap-1.5 rounded-xl border border-input bg-secondary px-4.5 py-3.5 @[40rem]:col-span-4 @[60rem]:order-none @[60rem]:col-span-1"
       >
         <div class="flex h-5 min-w-0 items-center gap-2">
-          <span class="shrink-0 text-[11px] font-semibold tracking-[1px] text-muted-foreground uppercase"
-            >{t('transport.next_cue')}</span
-          >
+          <span class="shrink-0 text-[11px] font-semibold tracking-[1px] text-muted-foreground uppercase">
+            {t('transport.next_cue')}
+          </span>
           {#if controls}
             <Tooltip tip={controls.text}>
               {#snippet child({ props })}
-                <Badge {...props} variant="outline" class="block min-w-0 truncate {controls.color}"
-                  >{controls.text}</Badge
-                >
+                <Badge {...props} variant="outline" class="block min-w-0 truncate {controls.color}">
+                  {controls.text}
+                </Badge>
               {/snippet}
             </Tooltip>
           {/if}
@@ -128,9 +128,9 @@
             <span class="shrink-0 font-mono text-[28px] font-semibold text-primary">{next.number}</span>
             <Tooltip tip={next.title}>
               {#snippet child({ props })}
-                <span {...props} class="min-w-0 truncate text-2xl font-semibold"
-                  >{next.title || t('group.untitled')}</span
-                >
+                <span {...props} class="min-w-0 truncate text-2xl font-semibold">
+                  {next.title || t('group.untitled')}
+                </span>
               {/snippet}
             </Tooltip>
           {:else}

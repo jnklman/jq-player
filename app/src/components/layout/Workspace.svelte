@@ -170,9 +170,9 @@
     <span class="text-muted-foreground">
       {t('layout.edit_hint')}
     </span>
-    <Button variant="default" size="sm" class="rounded-full" onclick={() => (layout.editing = false)}
-      >{t('common.done')}</Button
-    >
+    <Button variant="default" size="sm" class="rounded-full" onclick={() => (layout.editing = false)}>
+      {t('common.done')}
+    </Button>
   </div>
 {/if}
 

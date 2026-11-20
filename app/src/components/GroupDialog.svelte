@@ -96,9 +96,9 @@
           {group?.mode === 'all' ? t('status.simultaneous') : t('status.sequential')}
         </span>
       </Dialog.Title>
-      <Dialog.Close class={buttonVariants({ variant: 'ghost', size: 'icon-sm' })} aria-label={t('common.close')}
-        ><XMark /></Dialog.Close
-      >
+      <Dialog.Close class={buttonVariants({ variant: 'ghost', size: 'icon-sm' })} aria-label={t('common.close')}>
+        <XMark />
+      </Dialog.Close>
     </Dialog.Header>
     <div class="flex min-h-0 flex-1 gap-4 p-4">
       <section class="flex w-80 shrink-0 flex-col gap-2" aria-label={t('group.cues_label')}>
@@ -128,8 +128,10 @@
             <Button
               aria-label={t('group.move_down')}
               disabled={index < 0 || index >= children.length - 1}
-              onclick={() => move(1)}><CaretDown /></Button
+              onclick={() => move(1)}
             >
+              <CaretDown />
+            </Button>
             <Button disabled={!selected} onclick={duplicate}>{t('group.duplicate')}</Button>
             <Button variant="destructive" disabled={!selected} onclick={remove}>{t('common.delete')}</Button>
           </div>

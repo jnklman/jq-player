@@ -302,7 +302,8 @@
           if (selectionMode() !== 'linked' && !target.closest('[data-cue], [data-slot="scroll-area-scrollbar"]'))
             select(null);
         }}
-        ><div class="relative pb-3">
+      >
+        <div class="relative pb-3">
           <div
             class={[
               cueGrid,
@@ -376,8 +377,8 @@
               </span>
             </div>
           {/if}
-        </div></ScrollArea
-      >
+        </div>
+      </ScrollArea>
       {#if fileDrag}
         <div
           data-drop-zone
@@ -387,8 +388,10 @@
             class={[
               'rounded-full bg-primary px-3 py-1 text-xs font-semibold text-primary-foreground shadow-lg transition-opacity',
               dropLine !== null && 'opacity-60',
-            ]}>{t('cuelist.drop_hint')}</span
+            ]}
           >
+            {t('cuelist.drop_hint')}
+          </span>
         </div>
       {/if}
     </ContextMenu.Trigger>

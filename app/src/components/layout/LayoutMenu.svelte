@@ -51,9 +51,9 @@
   </Tooltip>
   <DropdownMenu.Content align="end">
     <!-- Edit and show mode each have their own layout, panel windows included. -->
-    <DropdownMenu.Label
-      >{t('layout.panels')} · {mode() === 'show' ? t('layout.show_mode') : t('layout.editing')}</DropdownMenu.Label
-    >
+    <DropdownMenu.Label>
+      {t('layout.panels')} · {mode() === 'show' ? t('layout.show_mode') : t('layout.editing')}
+    </DropdownMenu.Label>
     {#each panels as def (def.id)}
       {@const placement = shown(def.id)}
       {@const stays = !layout.canLeave(def.id)}

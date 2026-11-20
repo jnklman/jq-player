@@ -10,8 +10,8 @@
 
 <Tooltip tip={fmtMidi(trigger)}>
   {#snippet child({ props })}
-    <span {...props} class="min-w-0 truncate font-mono text-[11.5px] text-fg-2" aria-label={fmtMidi(trigger)}
-      >{fmtMidiShort(trigger)}</span
-    >
+    <span {...props} class="min-w-0 truncate font-mono text-[11.5px] text-fg-2" aria-label={fmtMidi(trigger)}>
+      {fmtMidiShort(trigger)}
+    </span>
   {/snippet}
 </Tooltip>

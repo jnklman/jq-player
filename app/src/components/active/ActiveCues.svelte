@@ -28,13 +28,13 @@
 </script>
 
 {#snippet count()}
-  <span class={hint}
-    >{t('active.count_active', { count: counts.active })}{counts.gaps
+  <span class={hint}>
+    {t('active.count_active', { count: counts.active })}{counts.gaps
       ? ` · ${t('active.count_gaps', { count: counts.gaps })}`
       : ''}{counts.preWaits ? ` · ${t('active.count_pre_wait', { count: counts.preWaits })}` : ''}{counts.following
       ? ` · ${t('active.count_following', { count: counts.following })}`
-      : ''}</span
-  >
+      : ''}
+  </span>
 {/snippet}
 
 <PanelFrame title={t('active.title')} actions={count}>

@@ -40,8 +40,8 @@
   onapply={async () => !!(await edit({ op: 'set_outputs', outputs: $state.snapshot(outputs) }))}
   {onclose}
 >
-  <ScrollArea
-    ><fieldset class="m-0 flex min-w-0 flex-col gap-3 border-0 p-4" disabled={locked}>
+  <ScrollArea>
+    <fieldset class="m-0 flex min-w-0 flex-col gap-3 border-0 p-4" disabled={locked}>
       <p class="{hint} m-0">{t('outputs.text')}</p>
       {#each outputs as output, i (output.id)}
         <div class="grid grid-cols-[1fr_auto] items-end gap-2">
@@ -56,14 +56,16 @@
                   class="text-base"
                   aria-label={t('outputs.remove', { name: output.name })}
                   disabled={output.id === 'main'}
-                  onclick={() => outputs.splice(i, 1)}><XMark /></Button
+                  onclick={() => outputs.splice(i, 1)}
                 >
+                  <XMark />
+                </Button>
               </span>
             {/snippet}
           </Tooltip>
         </div>
       {/each}
       <Button class="self-start" onclick={add}>{t('outputs.add')}</Button>
-    </fieldset></ScrollArea
-  >
+    </fieldset>
+  </ScrollArea>
 </EditDialog>

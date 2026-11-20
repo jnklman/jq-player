@@ -53,17 +53,19 @@
             size="icon-sm"
             class={timing.length > 0 ? 'text-stop-soft' : changed ? 'text-primary' : undefined}
             aria-label={t('overrides.settings_of', { number: index + 1 })}
-            disabled={edit.locked}><SlidersHorizontal /></Button
+            disabled={edit.locked}
           >
+            <SlidersHorizontal />
+          </Button>
         {/snippet}
       </Popover.Trigger>
     {/snippet}
   </Tooltip>
   <Popover.Content align="end" class="flex w-72 flex-col gap-3">
     <div class="flex flex-col gap-0.5">
-      <span class="truncate text-[13px] font-semibold"
-        >{t('overrides.item', { number: index + 1, file: file.split(/[\\/]/).at(-1) ?? '' })}</span
-      >
+      <span class="truncate text-[13px] font-semibold">
+        {t('overrides.item', { number: index + 1, file: file.split(/[\\/]/).at(-1) ?? '' })}
+      </span>
       <span class="text-xs text-muted-foreground">{t('overrides.empty_hint')}</span>
     </div>
     <div class="grid grid-cols-2 gap-x-3 gap-y-2">
@@ -164,8 +166,8 @@
         />
       </label>
     </div>
-    <Button size="sm" variant="outline" class="self-end" disabled={!changed} onclick={() => set(null)}
-      >{t('overrides.like_playlist')}</Button
-    >
+    <Button size="sm" variant="outline" class="self-end" disabled={!changed} onclick={() => set(null)}>
+      {t('overrides.like_playlist')}
+    </Button>
   </Popover.Content>
 </Popover.Root>

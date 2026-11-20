@@ -155,8 +155,10 @@
           class={[
             'absolute top-1/2 left-2.5 -translate-y-1/2 rounded border bg-panel px-1 text-[10px] leading-4 font-semibold whitespace-nowrap',
             arrowWaiting ? 'border-primary text-primary' : 'border-line-strong text-fg-2',
-          ]}>{arrow}</span
+          ]}
         >
+          {arrow}
+        </span>
       </span>
     {/if}
   </span>
@@ -210,8 +212,9 @@
         {@render badge(t('cuerow.midi_trigger', { trigger: fmtMidi(cue.midi_trigger) }), MidiIcon)}
       {/if}
     </span>
-    {#if cue.notes}<span class="truncate text-xs text-muted-foreground">{plainText(cue.notes.split('\n')[0])}</span
-      >{/if}
+    {#if cue.notes}<span class="truncate text-xs text-muted-foreground">
+        {plainText(cue.notes.split('\n')[0])}
+      </span>{/if}
   </span>
   <span class="truncate text-[13px] text-fg-2">{cue.script_ref}</span>
   <span class="text-xs font-semibold {typeColors[cue.type]}">{typeLabel(cue)}</span>

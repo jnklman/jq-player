@@ -64,8 +64,10 @@
                 variant="ghost"
                 size="icon-sm"
                 aria-label={t('playlist.replace_item', { number: i + 1 })}
-                onclick={() => replacePlaylistFile(cue, i)}><Swap /></Button
+                onclick={() => replacePlaylistFile(cue, i)}
               >
+                <Swap />
+              </Button>
             {/snippet}
           </Tooltip>
           <Button
@@ -73,22 +75,28 @@
             size="icon-sm"
             aria-label={t('playlist.item_up', { number: i + 1 })}
             disabled={i === 0}
-            onclick={() => moveFile(cue, i, -1)}><CaretUp /></Button
+            onclick={() => moveFile(cue, i, -1)}
           >
+            <CaretUp />
+          </Button>
           <Button
             variant="ghost"
             size="icon-sm"
             aria-label={t('playlist.item_down', { number: i + 1 })}
             disabled={i === cue.items.length - 1}
-            onclick={() => moveFile(cue, i, 1)}><CaretDown /></Button
+            onclick={() => moveFile(cue, i, 1)}
           >
+            <CaretDown />
+          </Button>
           <Button
             variant="ghost"
             size="icon-sm"
             class="shrink-0 text-base"
             aria-label={t('playlist.remove_item', { number: i + 1 })}
-            onclick={() => edit.set({ items: cue.items.filter((_, j) => j !== i) })}><XMark /></Button
+            onclick={() => edit.set({ items: cue.items.filter((_, j) => j !== i) })}
           >
+            <XMark />
+          </Button>
         </div>
       {/each}
       <Button size="sm" class="self-start" onclick={() => addToPlaylist(cue.id)}>{t('playlist.add_item')}</Button>

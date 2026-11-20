@@ -204,33 +204,47 @@
           tip={t('wave.from_start_tip')}
           class={buttonVariants()}
           disabled={!previewSet}
-          onclick={() => playFrom(shown.start)}><SkipBack class="size-3.5" /> {t('wave.from_start')}</Tooltip
+          onclick={() => playFrom(shown.start)}
         >
+          <SkipBack class="size-3.5" />
+          {t('wave.from_start')}
+        </Tooltip>
         <Tooltip
           tip={t('wave.before_end_tip', { secs: END_LEAD })}
           class={buttonVariants()}
           disabled={!previewSet || duration <= 0}
-          onclick={() => playFrom(end - END_LEAD)}><SkipForward class="size-3.5" /> {t('shortcuts.before_end')}</Tooltip
+          onclick={() => playFrom(end - END_LEAD)}
         >
+          <SkipForward class="size-3.5" />
+          {t('shortcuts.before_end')}
+        </Tooltip>
         <Tooltip
           tip={t('wave.range_tip')}
           class={buttonVariants({ variant: 'ghost' })}
           disabled={!previewSet || duration <= 0}
           onclick={() => api.previewAt(cueId, shown.start, end)}
-          ><SpeakerHigh class="size-4" /> {t('wave.range')}</Tooltip
         >
+          <SpeakerHigh class="size-4" />
+          {t('wave.range')}
+        </Tooltip>
         <Tooltip
           tip={t('wave.trim_start_tip')}
           class="{buttonVariants()} ml-3"
           disabled={locked || trimming || duration <= 0}
-          onclick={() => trim('start')}><TrimStart class="size-3.5" /> {t('wave.trim_start')}</Tooltip
+          onclick={() => trim('start')}
         >
+          <TrimStart class="size-3.5" />
+          {t('wave.trim_start')}
+        </Tooltip>
         <Tooltip
           tip={t('wave.trim_end_tip')}
           class={buttonVariants()}
           disabled={locked || trimming || duration <= 0}
-          onclick={() => trim('end')}><TrimEnd class="size-3.5" /> {t('wave.trim_end')}</Tooltip
+          onclick={() => trim('end')}
         >
+          <TrimEnd class="size-3.5" />
+          {t('wave.trim_end')}
+        </Tooltip>
         <span class="ml-3 font-mono text-[13px] text-fg-2 tabular-nums">
           {#if playhead != null}<span class="text-go">▶ {fmtPosition(playhead)}</span>
           {:else if cursor != null}{t('wave.cursor', { time: fmtPosition(cursor) })}
@@ -242,22 +256,28 @@
             class={zoomButton}
             aria-label={t('wave.zoom_out')}
             disabled={zoom <= 1}
-            onclick={() => timeline?.setZoom(zoom / 2)}><ZoomOut /></Tooltip
+            onclick={() => timeline?.setZoom(zoom / 2)}
           >
+            <ZoomOut />
+          </Tooltip>
           <Tooltip
             tip={t('wave.zoom_in')}
             class={zoomButton}
             aria-label={t('wave.zoom_in')}
             disabled={zoom >= maxZoom}
-            onclick={() => timeline?.setZoom(zoom * 2)}><ZoomIn /></Tooltip
+            onclick={() => timeline?.setZoom(zoom * 2)}
           >
+            <ZoomIn />
+          </Tooltip>
           <Tooltip
             tip={t('wave.whole_file')}
             class={zoomButton}
             aria-label={t('wave.whole_file')}
             disabled={zoom <= 1}
-            onclick={() => timeline?.setZoom(1)}><ZoomAll /></Tooltip
+            onclick={() => timeline?.setZoom(1)}
           >
+            <ZoomAll />
+          </Tooltip>
         </span>
       </div>
 

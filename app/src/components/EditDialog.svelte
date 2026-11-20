@@ -97,9 +97,9 @@
       <Dialog.Title>
         {#if typeof title === 'string'}{title}{:else}{@render title()}{/if}
       </Dialog.Title>
-      <Dialog.Close class={buttonVariants({ variant: 'ghost', size: 'icon-sm' })} aria-label={t('common.close')}
-        ><XMark /></Dialog.Close
-      >
+      <Dialog.Close class={buttonVariants({ variant: 'ghost', size: 'icon-sm' })} aria-label={t('common.close')}>
+        <XMark />
+      </Dialog.Close>
     </Dialog.Header>
     {@render children()}
     <Dialog.Footer>
@@ -109,9 +109,13 @@
       <Tooltip tip={valid ? undefined : invalidTip}>
         {#snippet child({ props })}
           <span {...props} class="inline-flex">
-            <Button variant="default" disabled={saving || locked || !valid || (!closeOnApply && !dirty)} onclick={apply}
-              >{applyLabel ?? t('common.apply')}</Button
+            <Button
+              variant="default"
+              disabled={saving || locked || !valid || (!closeOnApply && !dirty)}
+              onclick={apply}
             >
+              {applyLabel ?? t('common.apply')}
+            </Button>
           </span>
         {/snippet}
       </Tooltip>

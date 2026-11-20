@@ -400,8 +400,10 @@
       {#each ticks.times as time (time)}
         <span
           class="absolute top-0 h-5 border-l border-line-strong pl-1 font-mono text-[10px] leading-5 text-muted-foreground"
-          style:left={px(time)}>{rulerLabel(time, ticks.step)}</span
+          style:left={px(time)}
         >
+          {rulerLabel(time, ticks.step)}
+        </span>
       {/each}
 
       {#each shown.vamps as vamp, i (i)}
@@ -410,9 +412,9 @@
           style:left={px(vamp.start)}
           style:width="{Math.max(0, vamp.end - vamp.start) * pxPerSec}px"
         ></span>
-        <span class="absolute top-5 ml-1.5 text-[10px] text-vamp-soft" style:left={px(vamp.start)}
-          >{t('sound_main.vamp', { number: i + 1 })}</span
-        >
+        <span class="absolute top-5 ml-1.5 text-[10px] text-vamp-soft" style:left={px(vamp.start)}>
+          {t('sound_main.vamp', { number: i + 1 })}
+        </span>
       {/each}
       <!-- Outside start–end is dimmed. -->
       <span class="absolute top-5 bottom-0 left-0 bg-black/55" style:width={px(shown.start)}></span>
@@ -437,9 +439,9 @@
           onpointerdown={(e) => grab(e, { kind: 'start' })}
         >
           <span class="mx-auto block h-full w-0.5 bg-go"></span>
-          <span class="absolute bottom-1 left-2 rounded-sm bg-go px-1 text-[10px] text-go-fg"
-            >{t('check.field.start')}</span
-          >
+          <span class="absolute bottom-1 left-2 rounded-sm bg-go px-1 text-[10px] text-go-fg">
+            {t('check.field.start')}
+          </span>
         </Tooltip>
         <Tooltip
           tabindex={-1}
@@ -450,9 +452,9 @@
           onpointerdown={(e) => grab(e, { kind: 'end' })}
         >
           <span class="mx-auto block h-full w-0.5 bg-stop-soft"></span>
-          <span class="absolute right-2 bottom-1 rounded-sm bg-stop-soft px-1 text-[10px] text-stop-fg"
-            >{t('overrides.end')}</span
-          >
+          <span class="absolute right-2 bottom-1 rounded-sm bg-stop-soft px-1 text-[10px] text-stop-fg">
+            {t('overrides.end')}
+          </span>
         </Tooltip>
         {#each shown.vamps as vamp, i (i)}
           <Tooltip
@@ -480,8 +482,9 @@
             tip={t('wave.mark_at', { time: fmtPosition(mark) })}
             aria-label={t('wave.mark', { number: i + 1 })}
             onpointerdown={(e) => grab(e, { kind: 'mark', index: i })}
-            ><span class="mx-auto block size-2.5 rotate-45 bg-primary"></span></Tooltip
           >
+            <span class="mx-auto block size-2.5 rotate-45 bg-primary"></span>
+          </Tooltip>
         {/each}
         <!-- Fade handles last, so they win over start and end where they meet. -->
         <Tooltip
@@ -491,8 +494,9 @@
           tip={t('wave.drag_fade_in')}
           aria-label={t('check.field.fade_in')}
           onpointerdown={(e) => grab(e, { kind: 'fade_in' })}
-          ><span class="block size-2.5 rounded-sm bg-fade"></span></Tooltip
         >
+          <span class="block size-2.5 rounded-sm bg-fade"></span>
+        </Tooltip>
         {#if shown.end_fade}
           <Tooltip
             tabindex={-1}
@@ -501,8 +505,9 @@
             tip={t('wave.drag_fade_out')}
             aria-label={t('check.field.fade_out')}
             onpointerdown={(e) => grab(e, { kind: 'fade_out' })}
-            ><span class="block size-2.5 rounded-sm bg-fade"></span></Tooltip
           >
+            <span class="block size-2.5 rounded-sm bg-fade"></span>
+          </Tooltip>
         {/if}
       {/if}
     </div>

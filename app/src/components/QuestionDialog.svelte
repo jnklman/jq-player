@@ -47,8 +47,10 @@
         <Button
           bind:ref={() => buttons[i] ?? null, (el) => (buttons[i] = el)}
           variant={choice.danger ? 'destructive' : choice.focus ? 'default' : 'outline'}
-          onclick={() => question.answer(choice.value)}>{choice.label}</Button
+          onclick={() => question.answer(choice.value)}
         >
+          {choice.label}
+        </Button>
       {/each}
     </AlertDialog.Footer>
   </AlertDialog.Content>

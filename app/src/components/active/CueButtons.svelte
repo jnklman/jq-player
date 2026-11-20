@@ -20,17 +20,22 @@
   <Button
     class="{small} border-fade-line text-fade"
     aria-label={t('active.fade_cue', { number: number ?? '' })}
-    onclick={() => api.action({ action: 'fade_cue', cue })}>{t('type.fade')}</Button
+    onclick={() => api.action({ action: 'fade_cue', cue })}
   >
+    {t('type.fade')}
+  </Button>
 {/if}
 <Button
   class="{small} min-w-17 border-pause-line text-pause-soft"
   aria-label={t(paused ? 'active.resume_cue' : 'active.pause_cue', { number: number ?? '' })}
   onclick={() => api.action({ action: 'toggle_pause_cue', cue })}
-  >{paused ? t('active.resume') : t('control.pause')}</Button
 >
+  {paused ? t('active.resume') : t('control.pause')}
+</Button>
 <Button
   class="{small} border-stop-line text-stop-soft"
   aria-label={t('active.stop_cue', { number: number ?? '' })}
-  onclick={() => api.action({ action: 'stop_cue', cue })}>{t('type.stop')}</Button
+  onclick={() => api.action({ action: 'stop_cue', cue })}
 >
+  {t('type.stop')}
+</Button>

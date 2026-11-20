@@ -36,12 +36,12 @@
       {#if file}
         <span>{fmtLufs(file.lufs)} · {t('normalization.true_peak', { peak: fmtDb(file.peak_db) })}</span>
         {#if cue.normalize_db != null}
-          <span class="text-muted-foreground"
-            >{t('normalization.offset', {
+          <span class="text-muted-foreground">
+            {t('normalization.offset', {
               offset: fmtDb(cue.normalize_db),
               target: fmtLufs(view.show.loudness_target),
-            })}</span
-          >
+            })}
+          </span>
         {:else if file.suggested_db != null}
           <span class="text-muted-foreground">
             {t('normalization.suggestion', {
@@ -51,16 +51,14 @@
           </span>
         {/if}
       {:else}
-        <span class="text-muted-foreground"
-          >{info?.measuring ? t('normalization.measuring') : t('normalization.unknown')}</span
-        >
+        <span class="text-muted-foreground">
+          {info?.measuring ? t('normalization.measuring') : t('normalization.unknown')}
+        </span>
       {/if}
     {:else}
-      <span
-        >{t('normalization.measured', { done: measured.length, count: loudness.length })}{info?.measuring
-          ? ' …'
-          : ''}</span
-      >
+      <span>
+        {t('normalization.measured', { done: measured.length, count: loudness.length })}{info?.measuring ? ' …' : ''}
+      </span>
       <span class="text-muted-foreground">{t('normalization.normalized', { count: normalizedItems })}</span>
     {/if}
   </span>
@@ -68,9 +66,9 @@
     <span class="text-xs text-stop-soft">{t('normalization.stale')}</span>
   {/if}
   <span class="flex flex-wrap gap-1.5">
-    <Button size="sm" disabled={measured.length === 0} onclick={() => editShow({ op: 'normalize', ids: [cue.id] })}
-      >{normalized ? t('normalization.recalculate') : t('normalization.normalize')}</Button
-    >
+    <Button size="sm" disabled={measured.length === 0} onclick={() => editShow({ op: 'normalize', ids: [cue.id] })}>
+      {normalized ? t('normalization.recalculate') : t('normalization.normalize')}
+    </Button>
     <Button size="sm" variant="ghost" disabled={!normalized} onclick={onreset}>{t('normalization.remove')}</Button>
   </span>
 </FieldRow>

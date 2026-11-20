@@ -124,8 +124,10 @@
         onclick={() => {
           draft.keys = $state.snapshot(view.default_keys);
           notes = {};
-        }}>{t('shortcuts.keys_default')}</Button
+        }}
       >
+        {t('shortcuts.keys_default')}
+      </Button>
     </div>
   {/if}
 
@@ -134,9 +136,9 @@
       <div
         class="sticky top-0 z-10 grid grid-cols-[minmax(10rem,1.1fr)_1fr_1fr_minmax(9.5rem,1fr)_1.75rem] gap-2 border-b border-line bg-card py-1.5 text-[11px] tracking-[0.06em] text-muted-foreground uppercase max-sm:hidden"
       >
-        <span>{t('field.action')}</span><span>{t('shortcuts.key')}</span><span>{t('shortcuts.key2')}</span><span
-          >MIDI</span
-        >
+        <span>{t('field.action')}</span><span>{t('shortcuts.key')}</span><span>{t('shortcuts.key2')}</span><span>
+          MIDI
+        </span>
       </div>
     {/if}
     {#each ACTION_GROUPS as group (group.id)}

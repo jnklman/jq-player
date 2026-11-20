@@ -19,7 +19,9 @@
       class="shrink-0"
       aria-label={t('device.reload')}
       disabled={disabled || setup.loading}
-      onclick={() => setup.reload()}><ArrowClockwise /></Button
+      onclick={() => setup.reload()}
     >
+      <ArrowClockwise />
+    </Button>
   {/snippet}
 </Tooltip>

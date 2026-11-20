@@ -73,9 +73,9 @@
       />
       <span class={hint}>
         {t('ui_tab.escape_hint')}
-        <button class="cursor-pointer text-primary hover:underline" onclick={() => settings.open('keys')}
-          >{t('settings.tab.keys')}</button
-        >.
+        <button class="cursor-pointer text-primary hover:underline" onclick={() => settings.open('keys')}>
+          {t('settings.tab.keys')}
+        </button>.
       </span>
     </SettingRow>
     <SettingRow label={t('ui_tab.focus')} keywords={t('ui_tab.focus_keywords')}>

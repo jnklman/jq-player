@@ -195,8 +195,9 @@
           tip={t('wave.drag_start')}
           aria-label={t('check.field.start')}
           onpointerdown={(e) => grab(e, { kind: 'start' })}
-          ><span class="mx-auto block h-full w-0.5 bg-go"></span></Tooltip
         >
+          <span class="mx-auto block h-full w-0.5 bg-go"></span>
+        </Tooltip>
         <Tooltip
           tabindex={-1}
           class="{handle} cursor-ew-resize"
@@ -204,8 +205,9 @@
           tip={t('wave.drag_end')}
           aria-label={t('overrides.end')}
           onpointerdown={(e) => grab(e, { kind: 'end' })}
-          ><span class="mx-auto block h-full w-0.5 bg-stop-soft"></span></Tooltip
         >
+          <span class="mx-auto block h-full w-0.5 bg-stop-soft"></span>
+        </Tooltip>
         {#each shown.vamps as vamp, i (i)}
           <Tooltip
             tabindex={-1}
@@ -232,8 +234,9 @@
             tip={t('wave.mark_at', { time: fmtPosition(mark) })}
             aria-label={t('wave.mark', { number: i + 1 })}
             onpointerdown={(e) => grab(e, { kind: 'mark', index: i })}
-            ><span class="mx-auto block size-2 rotate-45 bg-primary"></span></Tooltip
           >
+            <span class="mx-auto block size-2 rotate-45 bg-primary"></span>
+          </Tooltip>
         {/each}
       {/if}
     {:else if error}
@@ -248,9 +251,10 @@
         {t('wave.hint')}
       </span>
       {#if onexpand}
-        <Tooltip tip={t('wave.expand_tip')} class="{buttonVariants({ size: 'xs' })} shrink-0" onclick={onexpand}
-          ><ArrowsOut /> {t('wave.expand')}</Tooltip
-        >
+        <Tooltip tip={t('wave.expand_tip')} class="{buttonVariants({ size: 'xs' })} shrink-0" onclick={onexpand}>
+          <ArrowsOut />
+          {t('wave.expand')}
+        </Tooltip>
       {/if}
     </div>
   {/if}

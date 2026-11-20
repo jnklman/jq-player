@@ -58,8 +58,10 @@
     class={buttonVariants({ size: 'icon' })}
     aria-label={label}
     disabled={here == null || locked}
-    onclick={() => here != null && apply(here)}><Crosshair /></Tooltip
+    onclick={() => here != null && apply(here)}
   >
+    <Crosshair />
+  </Tooltip>
 {/snippet}
 
 <!-- Seconds to the millisecond, with a button that sets them from the position. -->
@@ -130,8 +132,8 @@
   </div>
 
   <!-- The padding keeps the focus rings inside the scrolling box, which clips them. -->
-  <ScrollArea class="-m-1 max-h-56 min-w-0"
-    ><div class="flex flex-col gap-3 p-1">
+  <ScrollArea class="-m-1 max-h-56 min-w-0">
+    <div class="flex flex-col gap-3 p-1">
       <div class="flex flex-col gap-1.5" role="group" aria-labelledby="wf-vamps-label">
         <span id="wf-vamps-label" class="text-xs text-muted-foreground">{t('wave.vamps_s')}</span>
         {#each times.vamps as vamp, i (i)}
@@ -163,13 +165,15 @@
               size="icon-sm"
               class="shrink-0 text-base"
               aria-label={t('sound_main.vamp_remove', { number: i + 1 })}
-              onclick={() => oncommit({ vamps: times.vamps.filter((_, index) => index !== i) })}><XMark /></Button
+              onclick={() => oncommit({ vamps: times.vamps.filter((_, index) => index !== i) })}
             >
+              <XMark />
+            </Button>
           </div>
         {/each}
-        <Tooltip tip={t('wave.add_vamp_tip')} class="{buttonVariants()} self-start" onclick={addVamp}
-          >{t('sound_main.add_vamp')}</Tooltip
-        >
+        <Tooltip tip={t('wave.add_vamp_tip')} class="{buttonVariants()} self-start" onclick={addVamp}>
+          {t('sound_main.add_vamp')}
+        </Tooltip>
       </div>
       <div class="flex flex-col gap-1.5" role="group" aria-labelledby="wf-marks-label">
         <span id="wf-marks-label" class="text-xs text-muted-foreground">
@@ -183,6 +187,6 @@
           onchange={(marks) => oncommit({ marks })}
         />
       </div>
-    </div></ScrollArea
-  >
+    </div>
+  </ScrollArea>
 </fieldset>

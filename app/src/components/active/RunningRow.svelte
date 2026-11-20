@@ -55,8 +55,8 @@
     {/if}
     {#if running.pass}
       <Badge variant="outline" class={running.looping ? 'text-vamp-soft' : 'text-muted-foreground'}>
-        {passLabel(running.pass)}</Badge
-      >
+        {passLabel(running.pass)}
+      </Badge>
     {:else if running.looping}
       <Badge variant="outline" class="text-vamp-soft">{loopLabel(cue)}</Badge>
     {/if}
@@ -106,7 +106,8 @@
         class={buttonVariants({ class: [jumpBtn, 'rounded-r-none'] })}
         aria-label={t('active.jump_back_label', { number: cue?.number ?? '', secs: back })}
         onclick={() => api.action({ action: 'jump_back', cue: running.cue })}
-        >−{back}
+      >
+        −{back}
       </Tooltip>
       <Tooltip
         tip={t('active.jump_forward_tip', { secs: forward })}

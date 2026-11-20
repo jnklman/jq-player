@@ -39,9 +39,9 @@
   {#if !settings.searching}
     <p class="{hint} -mt-3 mb-0">
       {t('midi_tab.bindings_before')}
-      <button class="cursor-pointer text-primary hover:underline" onclick={() => settings.open('keys')}
-        >{t('settings.tab.keys')}</button
-      >.
+      <button class="cursor-pointer text-primary hover:underline" onclick={() => settings.open('keys')}>
+        {t('settings.tab.keys')}
+      </button>.
     </p>
   {/if}
   <SettingGroup title={t('midi_tab.input')}>

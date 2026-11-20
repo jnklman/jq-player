@@ -15,5 +15,7 @@
   class={buttonVariants({ class: 'gap-1 bg-transparent px-2 text-xs text-fg-2 hover:bg-hover' })}
   disabled={!enabled}
   aria-label={t('active.next_item_label', { number: number ?? '' })}
-  onclick={() => api.action({ action: 'next_item', cue })}><SkipForward class="size-3.5" />{t('active.next')}</Tooltip
+  onclick={() => api.action({ action: 'next_item', cue })}
 >
+  <SkipForward class="size-3.5" />{t('active.next')}
+</Tooltip>

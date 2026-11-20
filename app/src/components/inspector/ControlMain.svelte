@@ -52,9 +52,9 @@
 {#if cue.type === 'stopwatch'}
   <FieldGroup title={t('stopwatches.watch')}>
     {#snippet aside()}
-      <Button variant="link" class="min-h-0 p-0 text-xs" onclick={() => (ui.stopwatchesOpen = true)}
-        >{t('control_main.stopwatches')}</Button
-      >
+      <Button variant="link" class="min-h-0 p-0 text-xs" onclick={() => (ui.stopwatchesOpen = true)}>
+        {t('control_main.stopwatches')}
+      </Button>
     {/snippet}
     <FieldRow label={t('stopwatches.watch')} field="watch">
       <SimpleSelect
@@ -129,9 +129,9 @@
                   <span class="truncate">{other.title}</span>
                 </Label>
               {:else}
-                <span class={hint}
-                  >{candidates.length ? t('control_main.no_match') : t('control_main.no_candidates')}</span
-                >
+                <span class={hint}>
+                  {candidates.length ? t('control_main.no_match') : t('control_main.no_candidates')}
+                </span>
               {/each}
             </div>
           </ScrollArea>

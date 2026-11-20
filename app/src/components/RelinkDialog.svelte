@@ -43,9 +43,9 @@
   <Dialog.Content class="max-w-150">
     <Dialog.Header>
       <Dialog.Title>{t('relink.title')}</Dialog.Title>
-      <Dialog.Close class={buttonVariants({ variant: 'ghost', size: 'icon-sm' })} aria-label={t('common.close')}
-        ><XMark /></Dialog.Close
-      >
+      <Dialog.Close class={buttonVariants({ variant: 'ghost', size: 'icon-sm' })} aria-label={t('common.close')}>
+        <XMark />
+      </Dialog.Close>
     </Dialog.Header>
     <Dialog.Description class="m-0 px-4 pt-3">
       {#if missingFiles.length}

@@ -95,7 +95,9 @@
       size="icon-xs"
       aria-label={t('keycapture.remove', { label })}
       {disabled}
-      onclick={() => onchange(null)}><XMark /></Button
+      onclick={() => onchange(null)}
     >
+      <XMark />
+    </Button>
   {/if}
 </span>

@@ -16,7 +16,9 @@
       class={[
         'tracking-wide uppercase',
         kind === 'show' ? 'border-primary/40 bg-primary/10 text-primary' : 'border-fade-line bg-fade/10 text-fade-soft',
-      ]}>{kind === 'show' ? t('settings.badge_show') : t('settings.badge_now')}</Badge
+      ]}
     >
+      {kind === 'show' ? t('settings.badge_show') : t('settings.badge_now')}
+    </Badge>
   {/snippet}
 </Tooltip>

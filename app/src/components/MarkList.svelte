@@ -58,14 +58,18 @@
         size="icon-sm"
         aria-label={t('marks.remove', { number: i + 1 })}
         {disabled}
-        onclick={() => onchange(marks.filter((_, index) => index !== i))}><XMark /></Button
+        onclick={() => onchange(marks.filter((_, index) => index !== i))}
       >
+        <XMark />
+      </Button>
     </span>
   {/each}
   <Tooltip
     tip={nextTip}
     class={buttonVariants()}
     disabled={disabled || next == null}
-    onclick={() => next != null && onchange(tidy([...marks, next]))}>{t('marks.add')}</Tooltip
+    onclick={() => next != null && onchange(tidy([...marks, next]))}
   >
+    {t('marks.add')}
+  </Tooltip>
 </div>

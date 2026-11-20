@@ -65,15 +65,18 @@
           size="icon-sm"
           class="shrink-0 text-base"
           aria-label={t('midi_fields.remove', { number: i + 1 })}
-          onclick={() => edit.set({ messages: cue.messages.filter((_, j) => j !== i) })}><XMark /></Button
+          onclick={() => edit.set({ messages: cue.messages.filter((_, j) => j !== i) })}
         >
+          <XMark />
+        </Button>
       </div>
     {/each}
     <Button
       size="sm"
       class="self-start"
       onclick={() => edit.set({ messages: [...cue.messages, { address: '/', args: [] }] })}
-      >{t('midi_fields.add')}</Button
     >
+      {t('midi_fields.add')}
+    </Button>
   </FieldRow>
 </FieldGroup>

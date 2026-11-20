@@ -114,8 +114,10 @@
         size="icon-xs"
         class="shrink-0"
         aria-label={t('shortcuts.remove_midi', { label })}
-        onclick={onunbind}><XMark /></Button
+        onclick={onunbind}
       >
+        <XMark />
+      </Button>
     {:else}
       <Tooltip tip={canLearn ? undefined : learnTip}>
         {#snippet child({ props })}
@@ -134,8 +136,10 @@
           variant="ghost"
           size="icon-xs"
           aria-label={t('shortcuts.default_keys_of', { label })}
-          onclick={onreset}><ArrowCounterClockwise /></Button
+          onclick={onreset}
         >
+          <ArrowCounterClockwise />
+        </Button>
       {/snippet}
     </Tooltip>
   {:else}
@@ -146,7 +150,9 @@
       class={[
         'col-start-2 col-end-[-1] px-2 pb-0.5 text-xs max-sm:col-start-1',
         message.error ? 'text-stop-soft' : 'text-fade-soft',
-      ]}>{message.text}</span
+      ]}
     >
+      {message.text}
+    </span>
   {/if}
 </div>

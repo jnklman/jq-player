@@ -97,8 +97,10 @@
             variant="ghost"
             size="icon-xs"
             aria-label={t('trigger.remove_midi')}
-            onclick={() => edit.set({ midi_trigger: null })}><XMark /></Button
+            onclick={() => edit.set({ midi_trigger: null })}
           >
+            <XMark />
+          </Button>
         {:else}
           <Tooltip tip={view.midi.port ? undefined : t('trigger.no_midi_input')}>
             {#snippet child({ props })}
@@ -106,8 +108,10 @@
                 <Button
                   size="sm"
                   disabled={!view.midi.port}
-                  onclick={() => attempt(api.midiLearn({ kind: 'cue', cue: single.id }))}>{t('trigger.learn')}</Button
+                  onclick={() => attempt(api.midiLearn({ kind: 'cue', cue: single.id }))}
                 >
+                  {t('trigger.learn')}
+                </Button>
               </span>
             {/snippet}
           </Tooltip>

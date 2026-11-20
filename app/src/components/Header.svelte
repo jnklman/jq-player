@@ -118,8 +118,10 @@
 
     <span
       class="flex items-center font-mono text-xl leading-none font-semibold tabular-nums"
-      data-tauri-drag-region="deep">{clock(new Date(now()))}</span
+      data-tauri-drag-region="deep"
     >
+      {clock(new Date(now()))}
+    </span>
     <div class="flex items-center">
       <div class={dragFill} data-tauri-drag-region="deep"></div>
       <WindowControls />
@@ -175,9 +177,10 @@
                     ]}
                   ></span>
                   <span class="truncate">{shortDevice(view.audio.device)}</span>
-                  <span class="shrink-0"
-                    >· {fmtNumber(view.audio.sample_rate / 1000)} kHz · {view.audio.channels} {t('header.ch')}</span
-                  >
+                  <span class="shrink-0">
+                    · {fmtNumber(view.audio.sample_rate / 1000)} kHz · {view.audio.channels}
+                    {t('header.ch')}
+                  </span>
                 </button>
               {/snippet}
             </Popover.Trigger>

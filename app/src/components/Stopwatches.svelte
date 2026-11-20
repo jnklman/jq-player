@@ -48,18 +48,21 @@
       aria-label={t('stopwatches.watch_named', { name: watch.name })}
     >
       {#if watch.running}
-        <Button onclick={() => attempt(api.stopwatch(watch.id, 'stop'))}
-          ><Pause class="size-3.5" /> {t('stopwatch_action.stop')}</Button
-        >
+        <Button onclick={() => attempt(api.stopwatch(watch.id, 'stop'))}>
+          <Pause class="size-3.5" />
+          {t('stopwatch_action.stop')}
+        </Button>
       {:else}
-        <Button onclick={() => attempt(api.stopwatch(watch.id, 'start'))}
-          ><Play class="size-3.5" /> {t('stopwatch_action.start')}</Button
-        >
+        <Button onclick={() => attempt(api.stopwatch(watch.id, 'start'))}>
+          <Play class="size-3.5" />
+          {t('stopwatch_action.start')}
+        </Button>
       {/if}
       <Button onclick={() => attempt(api.stopwatch(watch.id, 'restart'))}>{t('stopwatches.restart')}</Button>
-      <Button variant="ghost" onclick={() => attempt(api.stopwatch(watch.id, 'reset'))}
-        ><ArrowCounterClockwise class="size-3.5" /> {t('common.reset')}</Button
-      >
+      <Button variant="ghost" onclick={() => attempt(api.stopwatch(watch.id, 'reset'))}>
+        <ArrowCounterClockwise class="size-3.5" />
+        {t('common.reset')}
+      </Button>
     </Popover.Content>
   </Popover.Root>
 {/each}
