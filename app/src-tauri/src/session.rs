@@ -1408,19 +1408,32 @@ impl Session {
                 self.runner.set_show(self.editor.show().clone());
             }
         }
+        if self.audio_error.is_none() {
+            self.warn_missing_channels(notices);
+        }
+        Ok(())
+    }
+
+    /// Warns of output and preview pairs the open main device lacks; what
+    /// plays there stays silent.
+    fn warn_missing_channels(&self, notices: &mut Vec<Notice>) {
         let channels = self.output.info().channels as usize;
-        for (output, &first) in &self.settings.outputs {
-            if first + 1 > channels {
+        let outputs =
+            self.editor.show().outputs.iter().map(|o| (o.name.clone(), self.settings.output_channel(&o.id)));
+        let preview =
+            self.settings.preview_device.is_none().then_some(self.settings.preview_channel).flatten();
+        let preview = preview.map(|_| (t!("session.preview"), self.settings.preview_first_channel()));
+        for (output, first) in outputs.chain(preview) {
+            if first + 2 > channels {
                 notices.push(Notice::Warning(t!(
                     "session.output_channels",
                     output = output,
-                    first = first,
-                    second = first + 1,
+                    first = first + 1,
+                    second = first + 2,
                     channels = channels
                 )));
             }
         }
-        Ok(())
     }
 
     /// Remembers where the audio file picker was last used. Unlike
@@ -1595,10 +1608,16 @@ impl Session {
         }
     }
 
-    /// Rejects output and preview channels the devices do not have. The
+    /// Rejects a channel count the main device does not have, and output
+    /// and preview channels it does not have when the routing changes. A
+    /// device picked under the routing set before may lack some of its
+    /// channels: what plays there stays silent, `set_settings` warns. The
     /// devices are only probed when they change; one that cannot be found
     /// passes, opening it reports the error.
     fn check_channels(&self, settings: &LocalSettings) -> Result<(), String> {
+        let routing_changed = settings.outputs != self.settings.outputs
+            || (&settings.preview_device, settings.preview_channel)
+                != (&self.settings.preview_device, self.settings.preview_channel);
         let main = if self.audio_error.is_some() || settings.audio_differs(&self.settings) {
             AudioOutput::probe(&main_spec(settings)).ok()
         } else {
@@ -1609,7 +1628,11 @@ impl Session {
                 self.editor.show().outputs.iter().map(|o| (o.name.clone(), settings.output_channel(&o.id)));
             let preview = settings.preview_device.is_none().then_some(settings.preview_channel).flatten();
             let preview = preview.map(|_| (t!("session.preview"), settings.preview_first_channel()));
-            check_pairs(&main, settings.channels, pairs.chain(preview))?;
+            let pairs = pairs.chain(preview).filter(|_| routing_changed);
+            check_pairs(&main, settings.channels, pairs)?;
+        }
+        if !routing_changed {
+            return Ok(());
         }
         let preview_changed =
             self.preview_error.is_some() || settings.preview_device != self.settings.preview_device;
@@ -3418,6 +3441,35 @@ mod tests {
         settings.device_names.insert("x".into(), "y".into());
         session.set_settings(settings, &mut Vec::new()).ok();
         assert!(!session.settings.device_names.contains_key("x"));
+        drop(session);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn routing_a_device_lacks_stays_silent_unless_set_now() {
+        let dir = tempdir("missing-channels");
+        let (writer, _notices) = Writer::spawn();
+        let mut session = open_session(&dir, &writer);
+        session.output = AudioOutput::null(48_000, 2, 1).0;
+        session.audio_error = None;
+        // As after switching from a bigger device: the preview pair is gone.
+        session.settings.channels = Some(2);
+        session.settings.preview_channel = Some(3);
+        let mut notices = Vec::new();
+        let settings = LocalSettings { fade_all: 2.0, ..session.settings.clone() };
+        assert!(session.set_settings(settings, &mut notices).is_ok());
+        assert!(
+            notices
+                .iter()
+                .any(|n| matches!(n, Notice::Warning(w) if w.starts_with("Preview on channels 3/4"))),
+            "{notices:?}"
+        );
+        assert_eq!(session.settings.fade_all, 2.0);
+
+        // Routing set now must exist.
+        let settings = LocalSettings { preview_channel: Some(5), ..session.settings.clone() };
+        assert!(session.set_settings(settings, &mut Vec::new()).is_err());
+        assert_eq!(session.settings.preview_channel, Some(3));
         drop(session);
         std::fs::remove_dir_all(dir).unwrap();
     }

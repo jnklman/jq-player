@@ -45,6 +45,8 @@
     applying = false;
     // What the backend runs now, also after a refusal (e.g. while cues run); a copy, the view is the store's.
     draft = structuredClone((applied ?? ui.view!).settings);
+    // A refused host change goes back to the old host: list its devices again.
+    setup.follow();
   }
 
   function openSettings() {
@@ -107,7 +109,7 @@
         disabled={fieldsLocked || setup.loading}
         options={setup.deviceOptions}
         onchange={(device) => {
-          draft.device = device || null;
+          setup.setDevice(device);
           void apply();
         }}
       />

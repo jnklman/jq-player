@@ -131,6 +131,42 @@ describe('AudioSetup', () => {
     expect(audio.channelsValid).toBe(false);
   });
 
+  it('lets a picked device lack pairs of the routing in use, but not routing set now', async () => {
+    const { audio, draft, current } = await setup({ device: 'desk', preview_channel: 3 });
+    current.settings = settings({ device: 'desk', preview_channel: 3 });
+    audio.setDevice('phones');
+    expect(audio.previewLimit).toBe(2);
+    expect(audio.channelsValid).toBe(true);
+    draft.preview_channel = 5;
+    expect(audio.channelsValid).toBe(false);
+  });
+
+  it('drops a set channel count the next device or host may not have', async () => {
+    const { audio, draft } = await setup({ device: 'desk', channels: 8 });
+    audio.setDevice('desk');
+    expect(draft.channels).toBe(8);
+    audio.setDevice('phones');
+    expect(draft.channels).toBeNull();
+    draft.channels = 2;
+    audio.setDevice('');
+    expect(draft.channels).toBeNull();
+    draft.channels = 2;
+    audio.setHost('ASIO');
+    expect(draft.channels).toBeNull();
+  });
+
+  it('follows the draft host when another host is listed', async () => {
+    const { audio, draft } = await setup({ host: 'ASIO' });
+    audio.setHost('WASAPI');
+    await settle();
+    draft.host = 'ASIO';
+    audio.follow();
+    await settle();
+    audio.follow();
+    expect(backend.invoked('audio_devices')).toEqual([{ host: 'ASIO' }, { host: 'WASAPI' }, { host: 'ASIO' }]);
+    expect(audio.devices?.host).toBe('ASIO');
+  });
+
   it('knows the channels of the open default device only', async () => {
     const { audio, draft } = await setup();
     expect(audio.mainMax).toBe(2);

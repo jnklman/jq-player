@@ -189,6 +189,18 @@ export function dialogEscape(): 'close' | 'ignore' {
 }
 
 /**
+ * `onInteractOutside` for dialog and popover contents: a click into the notices (`data-notices`, above dialogs) leaves
+ * them open; any other calls the content's own `handler`.
+ */
+export function besideNotices(handler?: (event: PointerEvent) => void) {
+  return (event: PointerEvent) => {
+    const target = event.target;
+    if (target instanceof Element && target.closest('[data-notices]')) event.preventDefault();
+    else handler?.(event);
+  };
+}
+
+/**
  * Props for a question's `alert-dialog-content` that let Esc give `answer` (its "Cancel") with "close_first";
  * without an answer, or with Esc as a panic, Esc is ignored. `data-escape` tells `shortcuts.ts` not to panic.
  */

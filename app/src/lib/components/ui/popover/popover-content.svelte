@@ -2,7 +2,7 @@
   import { Popover as PopoverPrimitive } from 'bits-ui';
   import type { ComponentProps } from 'svelte';
 
-  import { dialogEscape } from '$lib/store.svelte.js';
+  import { besideNotices, dialogEscape } from '$lib/store.svelte.js';
   import { cn, type WithoutChildrenOrChild } from '$lib/utils.js';
 
   import PopoverPortal from './popover-portal.svelte';
@@ -13,6 +13,7 @@
     sideOffset = 4,
     align = 'center',
     portalProps,
+    onInteractOutside,
     ...restProps
   }: PopoverPrimitive.ContentProps & {
     portalProps?: WithoutChildrenOrChild<ComponentProps<typeof PopoverPortal>>;
@@ -31,6 +32,7 @@
     )}
     preventOverflowTextSelection={false}
     escapeKeydownBehavior={dialogEscape()}
+    onInteractOutside={besideNotices(onInteractOutside)}
     {...restProps}
   />
 </PopoverPortal>

@@ -12,6 +12,7 @@ import {
   askUnsaved,
   attempt,
   attemptChange,
+  besideNotices,
   cueById,
   dialogEscape,
   dismiss,
@@ -400,5 +401,24 @@ describe('cue lookup', () => {
     expect(importFor('x.wav')).toBe(0.4);
     expect(isRunning(cueById('g')!)).toBe(true);
     expect(isRunning(cueById('g2')!)).toBe(false);
+  });
+});
+
+describe('besideNotices', () => {
+  it('keeps a dialog open for clicks into the notices only', () => {
+    document.body.innerHTML = '<div data-notices><button>x</button></div><p>outside</p>';
+    const own = vi.fn();
+    const outside = besideNotices(own);
+    const click = (target: Element) => {
+      const event = new Event('pointerup', { cancelable: true }) as PointerEvent;
+      Object.defineProperty(event, 'target', { value: target });
+      outside(event);
+      return event;
+    };
+    expect(click(document.querySelector('button')!).defaultPrevented).toBe(true);
+    expect(own).not.toHaveBeenCalled();
+    expect(click(document.querySelector('p')!).defaultPrevented).toBe(false);
+    expect(own).toHaveBeenCalledOnce();
+    document.body.innerHTML = '';
   });
 });

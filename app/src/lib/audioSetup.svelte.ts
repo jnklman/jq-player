@@ -27,9 +27,12 @@ export class AudioSetup {
 
   /** Counts the loads, so only the latest one's answer is kept. */
   private loads = 0;
+  /** The host whose devices are listed (or being loaded). */
+  private listed: string | null | undefined;
 
   async load(host: string | null) {
     const mine = ++this.loads;
+    this.listed = host;
     this.loading = true;
     const devices = (await attempt(api.audioDevices(host ?? undefined))) ?? null;
     if (mine !== this.loads) return;
@@ -42,11 +45,25 @@ export class AudioSetup {
     void this.load(this.draft().host);
   }
 
-  /** Another host: its default device, and its device list. */
+  /** Lists the draft host's devices if another host's are listed, e.g. after the draft was set back. */
+  follow() {
+    if (this.draft().host !== this.listed) void this.load(this.draft().host);
+  }
+
+  /** Another host: its default device, and its device list. A set channel count was meant for the device before. */
   setHost(host: string) {
     this.draft().host = host || null;
     this.draft().device = null;
+    this.draft().channels = null;
     void this.load(this.draft().host);
+  }
+
+  /** Another device ('' = the default); a set channel count stays only if the device is known to have it. */
+  setDevice(device: string) {
+    const draft = this.draft();
+    draft.device = device || null;
+    const max = this.devices?.devices.find((info) => info.id === draft.device)?.max_channels;
+    if (draft.channels !== null && !(max != null && draft.channels <= max)) draft.channels = null;
   }
 
   readonly selectedDevice = $derived.by(() =>
@@ -190,11 +207,25 @@ export class AudioSetup {
     return channels !== null && this.mainMax !== null && channels > this.mainMax;
   });
 
+  /** The outputs and the preview pair differ from the ones in use. */
+  readonly routingChanged = $derived.by(() => {
+    const current = this.view().settings;
+    const draft = this.draft();
+    return (
+      JSON.stringify(draft.outputs) !== JSON.stringify(current.outputs) ||
+      draft.preview_device !== current.preview_device ||
+      draft.preview_channel !== current.preview_channel
+    );
+  });
+
+  /** The pairs must exist when the routing is set; on a device picked under routing set before, pairs it lacks stay
+   * silent (the backend warns), like the backend's check. */
   readonly channelsValid = $derived.by(
     () =>
       !this.tooManyChannels &&
-      this.view().show.outputs.every((output) => fits(this.draft().outputs[output.id] ?? 1, this.mainLimit)) &&
-      (this.previewMode === 'off' || fits(this.draft().preview_channel ?? 1, this.previewLimit)),
+      (!this.routingChanged ||
+        (this.view().show.outputs.every((output) => fits(this.draft().outputs[output.id] ?? 1, this.mainLimit)) &&
+          (this.previewMode === 'off' || fits(this.draft().preview_channel ?? 1, this.previewLimit)))),
   );
 
   /** A preview pair overlapping a show output would be heard in the hall. */

@@ -11,6 +11,7 @@
 <div
   class="pointer-events-auto fixed right-5 bottom-14 z-60 flex w-[min(420px,calc(100%-40px))] flex-col gap-2"
   aria-live="polite"
+  data-notices
 >
   {#each ui.notices as notice (notice.id)}
     <div

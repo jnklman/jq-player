@@ -12,6 +12,17 @@ different in the app, not how the code changed). The Release workflow turns
 
 ## Unreleased
 
+### Fixed
+
+- Switching to an audio device with fewer channels (e.g. from a 32-channel ASIO interface to a
+  stereo device) is no longer refused: outputs and a preview on channels the device lacks stay
+  silent, with a warning, and the rest keeps playing. A channel count set for the previous device
+  is reset to the default.
+- After a host change in the header's audio menu was refused, the menu showed the old host with the
+  new host's devices, so the device appeared as "not found".
+- Clicking a notification, or closing it, while a dialog or the audio menu is open no longer closes
+  the dialog or asks to discard its changes.
+
 ## 0.3.1 – 2026-11-20
 
 ### Fixed

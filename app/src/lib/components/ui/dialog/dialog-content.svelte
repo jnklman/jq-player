@@ -6,7 +6,7 @@
   import XIcon from '~icons/ph/x-bold';
   import { Button } from '$lib/components/ui/button/index.js';
   import { t } from '$lib/i18n/index.svelte.js';
-  import { dialogEscape } from '$lib/store.svelte.js';
+  import { besideNotices, dialogEscape } from '$lib/store.svelte.js';
   import { cn, type WithoutChildrenOrChild } from '$lib/utils.js';
 
   import DialogOverlay from './dialog-overlay.svelte';
@@ -16,6 +16,7 @@
     ref = $bindable(null),
     class: className,
     portalProps,
+    onInteractOutside,
     children,
     showCloseButton = false,
     ...restProps
@@ -37,6 +38,7 @@
     )}
     preventOverflowTextSelection={false}
     escapeKeydownBehavior={dialogEscape()}
+    onInteractOutside={besideNotices(onInteractOutside)}
     {...restProps}
   >
     {@render children?.()}

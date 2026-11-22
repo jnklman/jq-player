@@ -72,7 +72,7 @@
           tip={setup.selectedDevice?.description}
           disabled={setup.loading}
           options={setup.deviceOptions}
-          onchange={(device) => (draft.device = device || null)}
+          onchange={(device) => setup.setDevice(device)}
         />
         <ReloadDevices {setup} />
       </div>
