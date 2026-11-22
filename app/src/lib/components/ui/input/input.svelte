@@ -42,10 +42,15 @@
   }
 
   // A number field without negative values takes no minus sign, so "1-2" cannot be typed.
-  const noMinus = $derived(restProps.min != null && restProps.min !== '' && Number(restProps.min) >= 0);
+  const noMinus = $derived(
+    type === 'number' && restProps.min != null && restProps.min !== '' && Number(restProps.min) >= 0,
+  );
   function keydown(e: KeyboardEvent & { currentTarget: EventTarget & HTMLInputElement }) {
     if (noMinus && (e.key === '-' || e.key === '−')) e.preventDefault();
     restProps.onkeydown?.(e);
+    // Enter commits the entry and leaves the field (leaving it sends the change); a handler that keeps the
+    // field focused (an entry to correct) prevents the default. Not while an input method composes.
+    if (e.key === 'Enter' && !e.defaultPrevented && !e.isComposing) e.currentTarget.blur();
   }
 </script>
 
@@ -126,5 +131,6 @@
     {type}
     bind:value
     {...restProps}
+    onkeydown={keydown}
   />
 {/if}

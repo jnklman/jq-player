@@ -12,9 +12,12 @@
 
   function onkeydown(e: KeyboardEvent) {
     if (e.key === 'Enter') {
+      // A found cue leaves the field (the input does that on Enter); a missing one keeps it, selected, to correct.
       missing = !gotoCue(number);
-      if (!missing) (e.currentTarget as HTMLInputElement).blur();
-      else (e.currentTarget as HTMLInputElement).select();
+      if (missing) {
+        e.preventDefault();
+        (e.currentTarget as HTMLInputElement).select();
+      }
     } else if (e.key === 'Escape') {
       (e.currentTarget as HTMLInputElement).blur();
     }

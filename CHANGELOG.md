@@ -20,6 +20,10 @@ different in the app, not how the code changed). The Release workflow turns
   cue shows it ("Pause before pass 3" with the time left) and its bar fills with the pause instead of
   standing at the end.
 
+### Changed
+
+- Pressing Enter in a field now also leaves it, so the keys work for the cue list again right away.
+
 ### Fixed
 
 - Switching to an audio device with fewer channels (e.g. from a 32-channel ASIO interface to a

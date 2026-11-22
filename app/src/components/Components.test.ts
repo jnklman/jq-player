@@ -160,6 +160,18 @@ describe('MarkList', () => {
   });
 });
 
+describe('Input', () => {
+  it('leaves the field on Enter, which commits the entry', async () => {
+    const onchange = vi.fn();
+    const { user } = await renderUi(MarkList, { marks: [1, 3], next: 2, nextTip: 'Add', onchange });
+    const first = screen.getByRole('spinbutton', { name: 'Mark 1 (s)' });
+    await user.clear(first);
+    await user.type(first, '2{Enter}');
+    expect(first).not.toHaveFocus();
+    expect(onchange).toHaveBeenLastCalledWith([2, 3]);
+  });
+});
+
 describe('GotoField', () => {
   it('moves the playhead to a cue by its number, or says there is none', async () => {
     await loadShow(view([sound('a', { number: '12' })]));
@@ -167,11 +179,14 @@ describe('GotoField', () => {
     const field = screen.getByRole('textbox');
     await user.type(field, '99{Enter}');
     expect(screen.getByText(/No cue with the number 99/)).toBeInTheDocument();
+    // A missing cue keeps the field to correct the entry.
+    expect(field).toHaveFocus();
     await user.type(field, '7');
     await user.clear(field);
     await user.type(field, '12{Enter}');
     await settle();
     expect(ui.selected).toBe('a');
+    expect(field).not.toHaveFocus();
     await user.type(field, '3{Escape}');
     expect(field).toHaveValue('');
   });
