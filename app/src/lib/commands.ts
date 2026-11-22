@@ -116,11 +116,16 @@ export function selectEveryCue() {
   selectAll(cues().map((cue) => cue.id));
 }
 
-/** Puts the focus into the "Go to" field of the cue list toolbar, its text selected; false if this window has none. */
+/**
+ * Puts the focus into the "Go to" field of the cue list toolbar, its text selected; false if this window has none.
+ * `data-quiet-focus` tells the field not to open its tooltip for this focus (the user knows the shortcut already).
+ */
 export function focusGoto(): boolean {
   const field = document.querySelector<HTMLInputElement>('[data-goto-field]');
   if (!field) return false;
+  field.dataset.quietFocus = '';
   field.focus();
+  delete field.dataset.quietFocus;
   field.select();
   return true;
 }

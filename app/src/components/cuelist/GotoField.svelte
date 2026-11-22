@@ -45,6 +45,11 @@
       aria-invalid={missing}
       bind:value={number}
       oninput={() => (missing = false)}
+      onfocus={(e) => {
+        // Focused with the shortcut (`focusGoto`): no tooltip until there is an error; with Tab as usual.
+        if (!(e.currentTarget as HTMLInputElement).hasAttribute('data-quiet-focus'))
+          (props.onfocus as ((e: FocusEvent) => void) | undefined)?.(e);
+      }}
       onblur={(e) => {
         // The tooltip's own blur closes it (opened by focusing the field with the keyboard).
         (props.onblur as ((e: FocusEvent) => void) | undefined)?.(e);

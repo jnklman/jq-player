@@ -4,6 +4,7 @@ import { fireEvent, screen, within } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from 'vitest';
 
 import type { EditOp } from '../lib/api';
+import { focusGoto } from '../lib/commands';
 import { keyCapture } from '../lib/keys.svelte';
 import { ask, ui } from '../lib/store.svelte';
 import { backend } from '../test/backend';
@@ -189,6 +190,22 @@ describe('GotoField', () => {
     expect(field).not.toHaveFocus();
     await user.type(field, '3{Escape}');
     expect(field).toHaveValue('');
+  });
+
+  it('shows its tooltip on Tab, but not when focused with the shortcut', async () => {
+    await loadShow(view([sound('a', { number: '12' })]));
+    const { user } = await renderUi(GotoField);
+    const field = screen.getByRole('textbox');
+    focusGoto();
+    await settle();
+    expect(field).toHaveFocus();
+    expect(screen.queryByText('Jump to cue')).not.toBeInTheDocument();
+    await user.type(field, '99{Enter}');
+    expect(screen.getByText(/No cue with the number 99/)).toBeInTheDocument();
+    await user.tab();
+    await user.tab({ shift: true });
+    expect(field).toHaveFocus();
+    expect(screen.getAllByText('Jump to cue').length).toBeGreaterThan(0);
   });
 });
 

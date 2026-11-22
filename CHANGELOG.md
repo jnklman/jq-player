@@ -23,6 +23,8 @@ different in the app, not how the code changed). The Release workflow turns
 ### Changed
 
 - Pressing Enter in a field now also leaves it, so the keys work for the cue list again right away.
+- The "Go to" field no longer shows its tooltip when focused with its shortcut, only when there is no
+  cue with the number entered.
 
 ### Fixed
 
