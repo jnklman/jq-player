@@ -48,6 +48,37 @@ pub struct LoopRegion {
     /// How often playback jumps back to `start`; `None` loops until the loop
     /// is exited via [`LoopExit`] (vamp).
     pub repeats: Option<u32>,
+    /// File frames between two passes. Positive: silence after a pass before
+    /// the next one starts. Negative: the next pass starts this long before
+    /// the current one ends, and both play over each other; at most two
+    /// passes overlap, so the overlap is limited (see [`LoopRegion::overlap`]).
+    pub delay: i64,
+}
+
+impl LoopRegion {
+    /// Silence after each pass, in file frames.
+    pub fn gap(&self) -> usize {
+        usize::try_from(self.delay).unwrap_or(0)
+    }
+
+    /// How long a pass plays on under the next one, in file frames: the
+    /// negative delay, at most what lets only two passes overlap at a time
+    /// (the old pass plays on for the crossfade after the loop end, too).
+    pub fn overlap(&self, crossfade_frames: u32) -> usize {
+        if self.delay >= 0 {
+            return 0;
+        }
+        let room = (self.end - self.start).saturating_sub(crossfade_frames as usize) / 2;
+        usize::try_from(self.delay.unsigned_abs()).unwrap_or(usize::MAX).min(room)
+    }
+
+    /// File frames each jump back adds to playback: the gap, or minus the overlap.
+    pub fn shift(&self, crossfade_frames: u32) -> i64 {
+        match self.gap() {
+            0 => -(self.overlap(crossfade_frames) as i64),
+            gap => gap as i64,
+        }
+    }
 }
 
 /// Where playback is within the loops of a voice.
@@ -161,6 +192,39 @@ struct Tail {
     total: u32,
 }
 
+/// The pass before, playing on under the next one (a negative loop delay),
+/// or the end of a pass fading out into the silence of a gap: at full level
+/// for `full` frames, then fading out over `total`. Unlike a [`Tail`] it is
+/// added on top; the head fades in by itself ([`Head::rise`]).
+#[derive(Clone, Copy, Debug)]
+struct Layer {
+    pos: usize,
+    full: usize,
+    remaining: u32,
+    total: u32,
+}
+
+impl Layer {
+    /// The weight of the frame at `pos`, then one ahead.
+    #[inline]
+    fn step(&mut self) -> f32 {
+        let w = if self.full > 0 {
+            self.full -= 1;
+            1.0
+        } else {
+            let w = self.remaining as f32 / self.total as f32;
+            self.remaining -= 1;
+            w
+        };
+        self.pos += 1;
+        w
+    }
+
+    fn done(&self) -> bool {
+        self.full == 0 && self.remaining == 0
+    }
+}
+
 /// What the stretcher and the per-frame mixing need from the mixer.
 pub(crate) struct Context<'a> {
     /// Kernel of the varispeed interpolation.
@@ -186,6 +250,14 @@ struct Head {
     jump_at: Option<(usize, u32)>,
     crossfade: u32,
     tail: Option<Tail>,
+    /// The pass before under the current one, or a pass end fading into a gap.
+    layer: Option<Layer>,
+    /// Fade-in of the head after a gap or an overlapping jump back: frames
+    /// done, of how many.
+    rise: Option<(u32, u32)>,
+    /// Waiting at the end of the current loop (a positive delay): silent
+    /// frames left before the jump back.
+    gap: Option<usize>,
     /// Loops with an index below this were released by [`Head::exit_loop`]
     /// (not by running out of repeats); leaving one is reported.
     exit_released: usize,
@@ -214,6 +286,9 @@ impl Head {
             jump_at: None,
             crossfade: p.loop_crossfade_frames,
             tail: None,
+            layer: None,
+            rise: None,
+            gap: None,
             exit_released: 0,
             stop_on_exit: false,
             exit_total: 0,
@@ -309,8 +384,63 @@ impl Head {
     }
 
     fn jump(&mut self, to: usize, crossfade: u32) {
-        self.tail = (crossfade > 0).then_some(Tail { pos: self.pos, remaining: crossfade, total: crossfade });
+        // A pass playing on under this one fades out with the crossfade.
+        if let Some(layer) = self.layer.as_mut()
+            && layer.full > 0
+        {
+            layer.full = 0;
+            layer.remaining = crossfade;
+            layer.total = crossfade;
+        }
+        self.layer = self.layer.filter(|l| !l.done());
+        if self.gap.take().is_some() {
+            // Silent until now: nothing to crossfade from, the head fades in.
+            self.rise = (crossfade > 0).then_some((0, crossfade));
+        } else {
+            self.tail =
+                (crossfade > 0).then_some(Tail { pos: self.pos, remaining: crossfade, total: crossfade });
+            self.rise = None;
+        }
         self.pos = to;
+    }
+
+    /// Back to the start of loop `l` for a new pass, fading in over the
+    /// crossfade: after a gap, or with the pass before playing on (`layer`).
+    fn restart_pass(&mut self, l: LoopRegion, layer: Option<Layer>) {
+        if layer.is_some() {
+            self.layer = layer;
+        }
+        self.gap = None;
+        self.rise = (self.crossfade > 0).then_some((0, self.crossfade));
+        self.pos = l.start;
+        self.count_pass();
+    }
+
+    /// A jump back to the loop start was made: one pass more, one repeat less.
+    fn count_pass(&mut self) {
+        self.pass = self.pass.saturating_add(1);
+        if let Some(n) = self.loops_left.as_mut() {
+            *n -= 1;
+            if *n == 0 {
+                self.released = self.current + 1;
+            }
+        }
+    }
+
+    /// The loop was released during its gap: playback goes on past its end,
+    /// from where the pass's end fading into the gap has got to (rising from
+    /// its level), or else from the end, fading in.
+    fn leave_gap(&mut self, loops: &[LoopRegion]) {
+        self.gap = None;
+        let next_start = loops.get(self.current + 1).map_or(usize::MAX, |n| n.start);
+        match self.layer {
+            Some(layer) if layer.full == 0 && layer.pos <= next_start => {
+                self.layer = None;
+                self.pos = layer.pos;
+                self.rise = (layer.remaining < layer.total).then_some((layer.remaining, layer.total));
+            }
+            _ => self.rise = (self.crossfade > 0).then_some((0, self.crossfade)),
+        }
     }
 
     /// Takes jumps at a mark and at a loop end; false once the end is reached.
@@ -324,10 +454,25 @@ impl Head {
                 self.jump(l.end, crossfade);
             }
         }
+        // A negative delay: the next pass starts before this one ends, and
+        // this one plays on under it.
+        if let Some(l) = self.current_loop(loops)
+            && self.released <= self.current
+            && let overlap = l.overlap(self.crossfade)
+            && overlap > 0
+            && self.pos == l.end - overlap
+        {
+            let layer =
+                Layer { pos: self.pos, full: overlap, remaining: self.crossfade, total: self.crossfade };
+            self.restart_pass(l, Some(layer));
+        }
         if let Some(l) = self.current_loop(loops)
             && self.pos == l.end
         {
             if self.released > self.current {
+                if self.gap.is_some() {
+                    self.leave_gap(loops);
+                }
                 if self.current < self.exit_released {
                     self.exit_total += 1;
                     self.exit_last = self.stop_on_exit || self.current + 1 >= self.exit_released;
@@ -336,24 +481,78 @@ impl Head {
                 // Passed: the next loop (if any) takes over.
                 self.current += 1;
                 self.enter_loop(loops);
+            } else if l.gap() > 0 {
+                match self.gap {
+                    // The pass is over: silence, while its end fades out.
+                    None => {
+                        self.gap = Some(l.gap());
+                        self.layer = (self.crossfade > 0).then_some(Layer {
+                            pos: l.end,
+                            full: 0,
+                            remaining: self.crossfade,
+                            total: self.crossfade,
+                        });
+                    }
+                    Some(0) => self.restart_pass(l, None),
+                    Some(_) => {}
+                }
             } else {
                 self.jump(l.start, self.crossfade);
-                self.pass = self.pass.saturating_add(1);
-                if let Some(n) = self.loops_left.as_mut() {
-                    *n -= 1;
-                    if *n == 0 {
-                        self.released = self.current + 1;
-                    }
-                }
+                self.count_pass();
             }
         }
         // A stream may turn out shorter than its header said.
-        self.pos < self.end && self.pos < frames
+        self.gap.is_some() || (self.pos < self.end && self.pos < frames)
+    }
+
+    /// The frame at the position (blended with a jump's tail, silent in a
+    /// gap, with a layer added), then one ahead.
+    #[inline]
+    fn read(&mut self, buffer: &AudioBuffer) -> (f32, f32) {
+        if self.layer.is_none() && self.rise.is_none() && self.gap.is_none() {
+            self.read_head(buffer)
+        } else {
+            self.read_layered(buffer)
+        }
+    }
+
+    /// [`Head::read`] in a gap, during a rise or with a layer under the head.
+    fn read_layered(&mut self, buffer: &AudioBuffer) -> (f32, f32) {
+        let (mut l, mut r) = match self.gap.as_mut() {
+            Some(left) if *left > 0 => {
+                *left -= 1;
+                (0.0, 0.0)
+            }
+            _ => {
+                let (l, r) = self.read_head(buffer);
+                match self.rise.as_mut() {
+                    Some((done, total)) => {
+                        let w = *done as f32 / *total as f32;
+                        *done += 1;
+                        if *done >= *total {
+                            self.rise = None;
+                        }
+                        (l * w, r * w)
+                    }
+                    None => (l, r),
+                }
+            }
+        };
+        if let Some(layer) = self.layer.as_mut() {
+            let (ll, lr) = if layer.pos < buffer.frames() { buffer.frame(layer.pos) } else { (0.0, 0.0) };
+            let w = layer.step();
+            l += ll * w;
+            r += lr * w;
+            if layer.done() {
+                self.layer = None;
+            }
+        }
+        (l, r)
     }
 
     /// The frame at the position (blended with a jump's tail), then one ahead.
     #[inline]
-    fn read(&mut self, buffer: &AudioBuffer) -> (f32, f32) {
+    fn read_head(&mut self, buffer: &AudioBuffer) -> (f32, f32) {
         let frames = buffer.frames();
         let (mut l, mut r) = buffer.frame(self.pos);
         if let Some(t) = self.tail.as_mut() {
@@ -757,6 +956,11 @@ impl Voice {
     /// last pass (released or out of repeats); `None` between loops.
     pub(crate) fn loop_pass(&self) -> Option<LoopPass> {
         self.heard_feed().head.loop_pass(&self.loops)
+    }
+
+    /// In the silence between two passes: file frames until the next starts.
+    pub(crate) fn loop_gap(&self) -> Option<usize> {
+        self.heard_feed().head.gap
     }
 
     /// True while playback is inside a loop that will still jump back.

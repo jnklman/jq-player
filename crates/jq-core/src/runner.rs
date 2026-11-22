@@ -311,6 +311,8 @@ pub struct ActiveState {
     pub has_next: bool,
     /// Pass through the loop or vamp playback is in.
     pub pass: Option<PassState>,
+    /// In the silence between two passes of a loop with a delay.
+    pub loop_gap: Option<LoopGapState>,
     pub paused: bool,
     /// Waits for its file's start to be read; plays once it is (at most
     /// [`START_WAIT`] later).
@@ -325,6 +327,15 @@ pub struct PassState {
     pub count: Option<u32>,
     /// The vamp (from 1) for a cue with vamps; `None` for its loop.
     pub vamp: Option<usize>,
+}
+
+/// The silence after a pass of a loop, before the next pass.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+pub struct LoopGapState {
+    /// Seconds (real time, at the rate of now) until the next pass starts.
+    pub remaining: f64,
+    /// How much of the silence is over, 0…1.
+    pub progress: f32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
@@ -402,6 +413,8 @@ struct Active {
     looping: bool,
     /// The loop played through and the pass, as the engine last reported.
     pass: Option<LoopPass>,
+    /// In the silence after a pass: file frames until the next one.
+    gap: Option<usize>,
     /// The loops are the cue's vamps (else one loop over the range).
     vamps: bool,
     /// Cue to fire when this one ends by itself.
@@ -1307,9 +1320,10 @@ impl Runner {
                     }
                     self.preview_event(&Event::Started(v), now);
                 }
-                Event::Position { id, frame, gain, looping, pass, pan, rate, pitch } => {
+                Event::Position { id, frame, gain, looping, pass, gap, pan, rate, pitch } => {
                     if let Some(a) = self.active.iter_mut().find(|a| a.voice == id) {
-                        (a.frame, a.gain, a.looping, a.pass, a.pan_now) = (frame, gain, looping, pass, pan);
+                        (a.frame, a.gain, a.looping, a.pass, a.gap, a.pan_now) =
+                            (frame, gain, looping, pass, gap, pan);
                         (a.rate_now, a.pitch_now, a.frame_at) = (rate, pitch, Some(now));
                     }
                     self.preview_event(&event, now);
@@ -1484,6 +1498,10 @@ impl Runner {
         let speed = (a.rate_now as f64).max(0.01);
         let range_frames = a.end_frame.saturating_sub(a.start_frame).max(1);
         let range = range_frames as f64 / rate / speed;
+        // A pass and the delay before the next one (the loop over the range).
+        let shift = a.loops.first().map_or(0, |l| l.shift(self.engine.frames(LOOP_CROSSFADE)));
+        let period_frames = (range_frames as i64 + shift).max(1) as usize;
+        let period = period_frames as f64 / rate / speed;
         let remaining = if a.devamped < a.open_loops {
             None
         } else if a.open_loops > 0 {
@@ -1493,7 +1511,7 @@ impl Runner {
             // The rate changed on the way, or a counted loop was left early
             // (its passes no longer follow from the clock): from the
             // position, the passes still to come, at the rate of now.
-            let left = a.end_frame.saturating_sub(a.frame) + a.passes_left() as usize * range_frames;
+            let left = a.end_frame.saturating_sub(a.frame) + a.passes_left() as usize * period_frames;
             let since = match (a.paused_at, a.frame_at) {
                 (None, Some(at)) => now.saturating_duration_since(at).as_secs_f64(),
                 _ => 0.0,
@@ -1501,7 +1519,7 @@ impl Runner {
             Some(left as f64 / rate / speed - since)
         } else {
             match a.loop_mode {
-                LoopMode::Times(n) => Some(range * n.max(1) as f64 - self.elapsed(a, now)),
+                LoopMode::Times(n) => Some(range + period * (n.max(1) - 1) as f64 - self.elapsed(a, now)),
                 _ => Some(range - self.elapsed(a, now)),
             }
         };
@@ -1605,6 +1623,21 @@ impl Runner {
                                 region.repeats.map(|r| r.saturating_add(1))
                             },
                             vamp: a.vamps.then_some(p.index + 1),
+                        })
+                    }),
+                    loop_gap: a.gap.zip(a.pass).and_then(|(left, p)| {
+                        let total = a.loops.get(p.index)?.gap().max(1);
+                        // Real time since the report, so it counts down smoothly.
+                        let since = match (a.paused_at, a.frame_at) {
+                            (None, Some(at)) => now.saturating_duration_since(at).as_secs_f64(),
+                            _ => 0.0,
+                        };
+                        let speed = (a.rate_now as f64).max(0.01);
+                        let remaining = (left as f64 / rate / speed - since).max(0.0);
+                        let done = total as f64 - remaining * rate * speed;
+                        Some(LoopGapState {
+                            remaining,
+                            progress: (done / total as f64).clamp(0.0, 1.0) as f32,
                         })
                     }),
                     paused: a.paused_at.is_some(),
@@ -2312,6 +2345,7 @@ impl Runner {
             // report it once playback reaches them.
             looping: s.vamps.is_empty() && s.loop_mode.repeats() != Some(0),
             pass: None,
+            gap: None,
             vamps: !s.vamps.is_empty(),
             follow: None,
             near_end: None,
@@ -3351,18 +3385,23 @@ fn position_target(show: &Show, a: &Active, to: PositionTo, rate: f64) -> Option
 }
 
 /// The cue's vamps in frames (sorted, inside start–end, overlaps dropped),
-/// or else its loop over the whole range.
+/// or else its loop over the whole range, with its delay between passes.
 fn loop_regions(s: &SoundCue, start: usize, end: usize, frames: impl Fn(f64) -> usize) -> Vec<LoopRegion> {
     if s.vamps.is_empty() {
+        let delay = match s.loop_delay {
+            d if d < 0.0 => -(frames(-d) as i64),
+            d if d > 0.0 => frames(d) as i64,
+            _ => 0,
+        };
         return match s.loop_mode.repeats() {
             Some(0) => vec![],
-            repeats => vec![LoopRegion { start, end, repeats }],
+            repeats => vec![LoopRegion { start, end, repeats, delay }],
         };
     }
     let mut vamps: Vec<LoopRegion> = s
         .vamps
         .iter()
-        .map(|v| LoopRegion { start: frames(v.start), end: frames(v.end).min(end), repeats: None })
+        .map(|v| LoopRegion { start: frames(v.start), end: frames(v.end).min(end), repeats: None, delay: 0 })
         // A vamp that ends before the start position is never reached.
         .filter(|l| l.start < l.end && l.end > start)
         .collect();

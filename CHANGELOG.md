@@ -12,6 +12,14 @@ different in the app, not how the code changed). The Release workflow turns
 
 ## Unreleased
 
+### Added
+
+- Sound cues that loop have a delay between passes: a pause of silence after each pass, or, negative,
+  the next pass starts that much earlier and plays over the end of the one before (by at most half
+  the range). The cue's duration and remaining time include it. During the pause, the running
+  cue shows it ("Pause before pass 3" with the time left) and its bar fills with the pause instead of
+  standing at the end.
+
 ### Fixed
 
 - Switching to an audio device with fewer channels (e.g. from a 32-channel ASIO interface to a

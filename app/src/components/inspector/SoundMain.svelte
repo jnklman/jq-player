@@ -11,7 +11,7 @@
   import { fmtTime } from '../../lib/format';
   import { t } from '../../lib/i18n/index.svelte';
   import { roundMs } from '../../lib/input';
-  import { loopOptions } from '../../lib/options';
+  import { loopKind, loopOptions } from '../../lib/options';
   import { nextMarkAt, nextVamp } from '../../lib/soundTimes';
   import { importFor, ui } from '../../lib/store.svelte';
   import { hint } from '../../lib/ui';
@@ -22,6 +22,7 @@
   import FieldGroup from './FieldGroup.svelte';
   import FieldRow from './FieldRow.svelte';
   import CountRow from './fields/CountRow.svelte';
+  import NumberRow from './fields/NumberRow.svelte';
 
   // The first tab of sound cues: file and waveform, range and fades, loop, vamps and marks. With several
   // sound cues only what they all can share (range, fades, loop).
@@ -31,6 +32,7 @@
   const start = $derived(edit.value<number>('start'));
   const end = $derived(edit.value<number | null>('end'));
   const vamps = $derived(edit.cues.some((other) => other.type === 'sound' && other.vamps.length > 0));
+  const looping = $derived(!vamps && edit.cues.some((other) => loopKind(other) !== 'off'));
   // Previewing never touches the show, so it works in show mode too.
   const preview = $derived(cue && ui.runtime?.preview?.cue === cue.id ? ui.runtime.preview : null);
 
@@ -144,6 +146,11 @@
   >
     {#if vamps && cue}<span class={hint}>{t('sound_main.vamps_no_loop')}</span>{/if}
   </CountRow>
+  {#if looping}
+    <NumberRow {edit} key="loop_delay" label={t('sound_main.loop_delay')} unit="s" step={0.1}>
+      <span class={hint}>{t('sound_main.loop_delay_hint')}</span>
+    </NumberRow>
+  {/if}
   {#if cue}
     <FieldRow label={t('sound_main.vamps')}>
       {#each cue.vamps as vamp, i (i)}

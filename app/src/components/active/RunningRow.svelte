@@ -6,7 +6,7 @@
   import { type ActiveState, api } from '../../lib/api';
   import { panLabel } from '../../lib/control';
   import { loopLabel, passLabel, vampSpans } from '../../lib/cue';
-  import { fmtDb, fmtRunning, meterPercent, nearEnd } from '../../lib/format';
+  import { fmtDb, fmtRunning, fmtTime, meterPercent, nearEnd } from '../../lib/format';
   import { fmtNumber, t } from '../../lib/i18n/index.svelte';
   import { rateLabel, transposeLabel } from '../../lib/speed';
   import { cueById, ui } from '../../lib/store.svelte';
@@ -21,6 +21,8 @@
   const cue = $derived(cueById(running.cue));
   const warn = $derived(nearEnd(running.remaining, ui.view?.settings.end_warning ?? 10));
   const times = $derived(fmtRunning(running.elapsed, running.remaining));
+  // In the silence between two loop passes the bar fills with the silence instead of standing at the end.
+  const gap = $derived(running.loop_gap);
   // Rounded to whole percent, so a standing pan does not touch the DOM.
   const pan = $derived(Math.round(Math.max(-1, Math.min(1, running.pan ?? 0)) * 100) / 100);
   // Rate in whole percent and transposition in tenths, as they play now (rate cues move them).
@@ -53,7 +55,12 @@
         {t('active.item', { index: running.item.index + 1, count: running.item.count })}
       </Badge>
     {/if}
-    {#if running.pass}
+    {#if gap && running.pass}
+      <Badge variant="outline" class="text-muted-foreground">
+        {t('active.loop_gap', { pass: running.pass.pass + 1 })}
+        <span class="font-mono">{fmtTime(gap.remaining)}</span>
+      </Badge>
+    {:else if running.pass}
       <Badge variant="outline" class={running.looping ? 'text-vamp-soft' : 'text-muted-foreground'}>
         {passLabel(running.pass)}
       </Badge>
@@ -70,9 +77,17 @@
       <span
         class={[
           'block h-full w-full origin-left',
-          running.paused ? 'bg-pause' : running.looping ? 'bg-vamp' : warn ? 'bg-fade' : 'bg-progress',
+          running.paused
+            ? 'bg-pause'
+            : gap
+              ? 'bg-vamp-soft/50'
+              : running.looping
+                ? 'bg-vamp'
+                : warn
+                  ? 'bg-fade'
+                  : 'bg-progress',
         ]}
-        style:transform="scaleX({running.progress})"
+        style:transform="scaleX({gap?.progress ?? running.progress})"
       ></span>
       {#each vampSpans(cue, ui.view?.cue_info[running.cue]) as span, i (i)}
         <span

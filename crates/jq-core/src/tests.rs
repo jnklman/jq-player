@@ -464,6 +464,47 @@ fn loop_times_reports_remaining_over_all_passes() {
 }
 
 #[test]
+fn a_loop_delay_counts_between_the_passes() {
+    // 0.5 s of silence after each pass, or the next pass 0.25 s early.
+    for (delay, total) in [(0.5, 2.5), (-0.25, 1.75)] {
+        let mut c = counted("1", 2);
+        if let CueKind::Sound(s) = &mut c.kind {
+            s.loop_delay = delay;
+        }
+        let mut rig = Rig::new(vec![c]);
+        rig.act(Action::Go);
+        rig.run(500);
+        let a = &rig.runner.state(rig.now()).active[0];
+        assert!((a.remaining.unwrap() - (total - 0.5)).abs() < 0.02, "{delay}: {:?}", a.remaining);
+        rig.run(((total - 0.5) * 1000.0) as u64 - 100);
+        assert_eq!(rig.active(), ["1"], "{delay}: still playing");
+        rig.run(200);
+        assert!(rig.active().is_empty(), "{delay}: ended");
+    }
+}
+
+#[test]
+fn the_silence_between_passes_counts_down() {
+    let mut c = counted("1", 2);
+    if let CueKind::Sound(s) = &mut c.kind {
+        s.loop_delay = 0.5;
+    }
+    let mut rig = Rig::new(vec![c]);
+    rig.act(Action::Go);
+    rig.run(900);
+    assert_eq!(rig.runner.state(rig.now()).active[0].loop_gap, None, "still the first pass");
+    rig.run(300);
+    let a = &rig.runner.state(rig.now()).active[0];
+    let gap = a.loop_gap.expect("in the silence");
+    assert!((gap.remaining - 0.3).abs() < 0.03, "{gap:?}");
+    assert!((gap.progress - 0.4).abs() < 0.06, "{gap:?}");
+    assert_eq!(a.pass.map(|p| p.pass), Some(1), "the next pass is still to come");
+    rig.run(400);
+    let a = &rig.runner.state(rig.now()).active[0];
+    assert_eq!((a.loop_gap, a.pass.map(|p| p.pass)), (None, Some(2)));
+}
+
+#[test]
 fn a_jump_back_on_the_last_pass_of_a_counted_loop_stays_on_it() {
     let mut c = sound("1", "len1000.wav");
     let id = c.id;

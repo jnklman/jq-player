@@ -38,6 +38,9 @@ pub enum TimingIssue {
     FadeInTooLong,
     /// The end fade is longer than the start–end range.
     EndFadeTooLong,
+    /// The loop's passes would overlap by more than half the range; they
+    /// overlap by half of it.
+    LoopOverlapCut,
 }
 
 impl fmt::Display for TimingIssue {
@@ -58,6 +61,7 @@ impl fmt::Display for TimingIssue {
             Self::MarkDuplicate { index } => f.write_str(&t!("timing.mark_duplicate", number = index + 1)),
             Self::FadeInTooLong => f.write_str(&t!("timing.fade_in_too_long")),
             Self::EndFadeTooLong => f.write_str(&t!("timing.end_fade_too_long")),
+            Self::LoopOverlapCut => f.write_str(&t!("timing.loop_overlap_cut")),
         }
     }
 }
@@ -113,6 +117,11 @@ pub fn check_timing(s: &SoundCue, file_secs: f64) -> Vec<TimingIssue> {
     }
     if s.end_fade && s.fade_out > range + TOLERANCE {
         issues.push(TimingIssue::EndFadeTooLong);
+    }
+    let file_range = end - s.start;
+    if s.vamps.is_empty() && s.loop_mode.repeats() != Some(0) && -s.loop_delay > file_range / 2.0 + TOLERANCE
+    {
+        issues.push(TimingIssue::LoopOverlapCut);
     }
     issues
 }
@@ -212,6 +221,18 @@ mod tests {
     }
 
     #[test]
+    fn a_loop_overlap_beyond_half_the_range_is_reported() {
+        use crate::model::LoopMode;
+        let mut s = SoundCue { loop_mode: LoopMode::Times(3), loop_delay: -2.0, ..cue(0.0, Some(4.0)) };
+        assert!(check_timing(&s, 10.0).is_empty());
+        s.loop_delay = -2.5;
+        assert_eq!(check_timing(&s, 10.0), [TimingIssue::LoopOverlapCut]);
+        // Without a loop, the delay does nothing.
+        s.loop_mode = LoopMode::Off;
+        assert!(check_timing(&s, 10.0).is_empty());
+    }
+
+    #[test]
     fn issues_read_with_numbers_counted_from_one() {
         use TimingIssue as I;
         let texts: Vec<String> = [
@@ -226,6 +247,7 @@ mod tests {
             I::MarkDuplicate { index: 6 },
             I::FadeInTooLong,
             I::EndFadeTooLong,
+            I::LoopOverlapCut,
         ]
         .iter()
         .map(ToString::to_string)
@@ -244,6 +266,7 @@ mod tests {
                 "Mark 7 is there twice",
                 "Fade-in is longer than the section",
                 "End fade is longer than the section",
+                "The passes of the loop overlap by half the section at most",
             ]
         );
     }

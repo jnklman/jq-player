@@ -1102,6 +1102,11 @@ pub struct SoundCue {
     /// Repeats of the start–end range; ignored while the cue has vamps.
     #[serde(default, rename = "loop", skip_serializing_if = "omit_in_file")]
     pub loop_mode: LoopMode,
+    /// Seconds (file time) between two passes of the loop: silence after
+    /// each pass, or, negative, the next pass starts this long before the
+    /// current one ends and both overlap (by at most half the range).
+    #[serde(default, skip_serializing_if = "omit_in_file")]
+    pub loop_delay: f64,
     /// Regions repeated until a devamp cue releases them, in file order.
     #[serde(default, skip_serializing_if = "omit_in_file")]
     pub vamps: Vec<Vamp>,
@@ -1136,6 +1141,12 @@ impl SoundCue {
         self.file.is_empty()
     }
 
+    /// Seconds (file time) each jump back of the loop over a range of
+    /// `range` seconds adds: the delay, an overlap of at most half the range.
+    pub fn pass_delay(&self, range: f64) -> f64 {
+        if self.loop_delay.is_finite() { self.loop_delay.max(-range / 2.0) } else { 0.0 }
+    }
+
     pub fn new(file: impl Into<String>) -> Self {
         Self {
             file: file.into(),
@@ -1146,6 +1157,7 @@ impl SoundCue {
             start: 0.0,
             end: None,
             loop_mode: LoopMode::Off,
+            loop_delay: 0.0,
             vamps: Vec::new(),
             marks: Vec::new(),
             fade_in: 0.0,

@@ -417,6 +417,7 @@ mod tests {
         }
         show.cues.push(Cue::new(CueKind::Sound(SoundCue {
             loop_mode: LoopMode::Times(3),
+            loop_delay: -0.75,
             vamps: vec![Vamp { start: 12.0, end: 24.5 }],
             marks: vec![12.0, 18.25],
             normalize_db: Some(-4.5),

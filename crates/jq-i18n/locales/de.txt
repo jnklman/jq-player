@@ -119,6 +119,7 @@ timing.mark_outside = Marke {number} liegt außerhalb von Start–Ende
 timing.mark_duplicate = Marke {number} ist doppelt
 timing.fade_in_too_long = Fade-In ist länger als der Abschnitt
 timing.end_fade_too_long = End-Fade ist länger als der Abschnitt
+timing.loop_overlap_cut = Die Durchläufe des Loops überlappen höchstens um den halben Abschnitt
 
 # Cue labels in messages
 cue.label_both = {number} „{title}“

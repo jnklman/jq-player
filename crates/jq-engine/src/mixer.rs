@@ -25,12 +25,15 @@ const PIN_MARGIN: Duration = Duration::from_millis(500);
 /// chunk) and where an exit lands (the end plus `margin` for the crossfade
 /// tail). The body between is only needed while playback is in it, and the
 /// reader follows that, so a long loop does not keep the whole file in memory.
-fn loop_pins(l: &LoopRegion, margin: usize) -> impl Iterator<Item = std::ops::Range<usize>> {
+/// With passes that overlap, the end from where the next pass starts stays
+/// loaded too: the pass before plays it while playback is back at the start.
+fn loop_pins(l: &LoopRegion, margin: usize, crossfade: u32) -> impl Iterator<Item = std::ops::Range<usize>> {
     let head_end = l.start.saturating_add(crate::stream::CHUNK_FRAMES + margin);
-    let (first, second) = if head_end >= l.end {
+    let tail_start = l.end - l.overlap(crossfade);
+    let (first, second) = if head_end >= tail_start {
         (l.start..l.end + margin, None)
     } else {
-        (l.start..head_end, Some(l.end..l.end + margin))
+        (l.start..head_end, Some(tail_start..l.end + margin))
     };
     std::iter::once(first).chain(second)
 }
@@ -203,6 +206,9 @@ pub enum Event {
         looping: bool,
         /// The loop played through and the pass, inside one.
         pass: Option<LoopPass>,
+        /// In the silence after a pass of a loop with a delay: file frames
+        /// left until the next pass starts.
+        gap: Option<usize>,
         /// Balance as it is now (−1 … +1), also while a pan move runs.
         pan: f32,
         /// Rate and pitch as they are now (1 = original).
@@ -333,7 +339,14 @@ impl Controller {
             // Loops jump back, so their regions stay loaded; the reader
             // starts loading at the start position right away.
             let margin = self.frames(PIN_MARGIN) as usize;
-            stream.set_pins(slot, params.loops.iter().flat_map(|l| loop_pins(l, margin)).collect());
+            stream.set_pins(
+                slot,
+                params
+                    .loops
+                    .iter()
+                    .flat_map(|l| loop_pins(l, margin, params.loop_crossfade_frames))
+                    .collect(),
+            );
             stream.report_position(slot, params.start);
         }
         if let Err(e) = self.send(Command::Play { id, params, slot }) {
@@ -630,6 +643,7 @@ impl Mixer {
                     gain: v.gain(),
                     looping: v.is_looping(),
                     pass: v.loop_pass(),
+                    gap: v.loop_gap(),
                     pan: v.pan(),
                     rate: v.speed().0,
                     pitch: v.speed().1,

@@ -44,6 +44,7 @@ const cues = (): Cue[] => [
     release_trigger: true,
   }),
   sound('ph', { file: '', release_trigger: true, second_trigger: { action: 'restart' } as never }),
+  sound('sl', { number: '3', loop: 3, loop_delay: -0.5 }),
   playlist('p', ['a.wav', 'dir/b.wav', 'c.wav'], {
     items: [
       { file: 'a.wav', start: 1, gain_db: -3, preserve_pitch: true },
@@ -285,6 +286,26 @@ describe('Inspector fields', () => {
       unmount();
     }
     expect(backend.edits.filter((op) => op.op === 'update_cues').length).toBeGreaterThan(4);
+  });
+
+  it('sets the delay between loop passes only while the cue loops', async () => {
+    await loadShow(showView(), runtime());
+    select('sl');
+    const { user } = await renderUi(Inspector);
+    const delay = screen.getByRole('spinbutton', { name: 'Between passes' });
+    await user.clear(delay);
+    await user.type(delay, '1.5');
+    await user.tab();
+    await settle();
+    expect(backend.edits).toContainEqual(
+      expect.objectContaining({ op: 'update_cue', cue: expect.objectContaining({ id: 'sl', loop_delay: 1.5 }) }),
+    );
+    // Not for a cue that does not loop, nor one with vamps.
+    for (const id of ['s2', 's']) {
+      select(id);
+      await settle();
+      expect(screen.queryByRole('spinbutton', { name: 'Between passes' }), id).toBeNull();
+    }
   });
 
   it('links to the dialogs for stopwatches and devices', async () => {

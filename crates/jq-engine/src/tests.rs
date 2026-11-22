@@ -64,7 +64,7 @@ fn start_and_end_position() {
 fn loop_jump_is_sample_exact() {
     let (mut ctl, mut mix) = setup(2);
     let mut p = VoiceParams::new(ramp_buffer(10));
-    p.loops = [LoopRegion { start: 2, end: 5, repeats: Some(2) }].into();
+    p.loops = [LoopRegion { start: 2, end: 5, repeats: Some(2), delay: 0 }].into();
     ctl.play(p).unwrap();
     assert_eq!(played_frames(&mut mix, 18), [0, 1, 2, 3, 4, 2, 3, 4, 2, 3, 4, 5, 6, 7, 8, 9, 0, 0]);
 }
@@ -73,7 +73,7 @@ fn loop_jump_is_sample_exact() {
 fn vamp_runs_until_released_at_loop_end() {
     let (mut ctl, mut mix) = setup(2);
     let mut p = VoiceParams::new(ramp_buffer(8));
-    p.loops = [LoopRegion { start: 2, end: 5, repeats: None }].into();
+    p.loops = [LoopRegion { start: 2, end: 5, repeats: None, delay: 0 }].into();
     let id = ctl.play(p).unwrap();
     assert_eq!(played_frames(&mut mix, 10), [0, 1, 2, 3, 4, 2, 3, 4, 2, 3]);
     ctl.exit_loop(id, LoopExit::AtLoopEnd, false, false).unwrap();
@@ -84,7 +84,7 @@ fn vamp_runs_until_released_at_loop_end() {
 fn vamp_exit_immediate_jumps_to_loop_end() {
     let (mut ctl, mut mix) = setup(2);
     let mut p = VoiceParams::new(ramp_buffer(10));
-    p.loops = [LoopRegion { start: 2, end: 6, repeats: None }].into();
+    p.loops = [LoopRegion { start: 2, end: 6, repeats: None, delay: 0 }].into();
     let id = ctl.play(p).unwrap();
     assert_eq!(played_frames(&mut mix, 3), [0, 1, 2]);
     ctl.exit_loop(id, LoopExit::Immediate { crossfade_frames: 0 }, false, false).unwrap();
@@ -95,7 +95,7 @@ fn vamp_exit_immediate_jumps_to_loop_end() {
 fn loop_crossfade_keeps_level_constant() {
     let (mut ctl, mut mix) = setup(2);
     let mut p = VoiceParams::new(constant_buffer(100, 0.5));
-    p.loops = [LoopRegion { start: 10, end: 40, repeats: None }].into();
+    p.loops = [LoopRegion { start: 10, end: 40, repeats: None, delay: 0 }].into();
     p.loop_crossfade_frames = 8;
     ctl.play(p).unwrap();
     let mut out = vec![0.0; 200 * 2];
@@ -107,7 +107,7 @@ fn loop_crossfade_keeps_level_constant() {
 fn loop_crossfade_blends_tail_into_loop_start() {
     let (mut ctl, mut mix) = setup(2);
     let mut p = VoiceParams::new(ramp_buffer(20));
-    p.loops = [LoopRegion { start: 2, end: 6, repeats: Some(1) }].into();
+    p.loops = [LoopRegion { start: 2, end: 6, repeats: Some(1), delay: 0 }].into();
     p.loop_crossfade_frames = 2;
     ctl.play(p).unwrap();
     let mut out = vec![0.0; 9 * 2];
@@ -218,10 +218,10 @@ fn rejects_invalid_params() {
     p.output_channel = 1;
     assert!(matches!(ctl.play(p), Err(EngineError::OutputChannel { .. })));
     let mut p = VoiceParams::new(ramp_buffer(10));
-    p.loops = [LoopRegion { start: 5, end: 5, repeats: None }].into();
+    p.loops = [LoopRegion { start: 5, end: 5, repeats: None, delay: 0 }].into();
     assert!(matches!(ctl.play(p), Err(EngineError::InvalidRegion(_))));
     let mut p = VoiceParams::new(ramp_buffer(10));
-    let vamp = |start, end| LoopRegion { start, end, repeats: None };
+    let vamp = |start, end| LoopRegion { start, end, repeats: None, delay: 0 };
     p.loops = [vamp(1, 5), vamp(4, 8)].into();
     assert!(matches!(ctl.play(p), Err(EngineError::InvalidRegion(_))), "overlapping loops");
     let mut p = VoiceParams::new(ramp_buffer(10));
@@ -242,7 +242,7 @@ fn voice_limit_rejects_and_returns_buffer() {
 fn reports_positions() {
     let (mut ctl, mut mix) = setup(2);
     let mut p = VoiceParams::new(ramp_buffer(5000));
-    p.loops = [LoopRegion { start: 0, end: 4000, repeats: None }].into();
+    p.loops = [LoopRegion { start: 0, end: 4000, repeats: None, delay: 0 }].into();
     let id = ctl.play(p).unwrap();
     played_frames(&mut mix, 1000);
     let pos = ctl.poll_events().find_map(|e| match e {
@@ -258,8 +258,8 @@ fn reports_the_pass_through_each_loop() {
     let mut p = VoiceParams::new(ramp_buffer(5000));
     // Vamp-like: frames 1000–2000 three times (two jumps back), then 3000–4000 until released.
     p.loops = [
-        LoopRegion { start: 1000, end: 2000, repeats: Some(2) },
-        LoopRegion { start: 3000, end: 4000, repeats: None },
+        LoopRegion { start: 1000, end: 2000, repeats: Some(2), delay: 0 },
+        LoopRegion { start: 3000, end: 4000, repeats: None, delay: 0 },
     ]
     .into();
     let id = ctl.play(p).unwrap();
@@ -312,7 +312,7 @@ fn decibel_end_fade_falls_evenly_in_db() {
 fn end_fade_waits_for_last_loop_pass() {
     let (mut ctl, mut mix) = setup(2);
     let mut p = VoiceParams::new(constant_buffer(4, 1.0));
-    p.loops = [LoopRegion { start: 0, end: 4, repeats: Some(1) }].into();
+    p.loops = [LoopRegion { start: 0, end: 4, repeats: Some(1), delay: 0 }].into();
     p.end_fade_frames = 2;
     ctl.play(p).unwrap();
     let mut out = vec![0.0; 9 * 2];
@@ -335,7 +335,7 @@ fn end_blend_ramps_out_at_an_end_mark() {
 fn end_blend_waits_for_last_loop_pass() {
     let (mut ctl, mut mix) = setup(2);
     let mut p = VoiceParams::new(constant_buffer(4, 1.0));
-    p.loops = [LoopRegion { start: 0, end: 4, repeats: Some(1) }].into();
+    p.loops = [LoopRegion { start: 0, end: 4, repeats: Some(1), delay: 0 }].into();
     p.end_blend_frames = 2;
     ctl.play(p).unwrap();
     assert_eq!(left(&mut mix, 9), [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.5, 0.0]);
@@ -458,7 +458,7 @@ fn pan_moves_smoothly_while_playing() {
 }
 
 fn vamp(start: usize, end: usize) -> LoopRegion {
-    LoopRegion { start, end, repeats: None }
+    LoopRegion { start, end, repeats: None, delay: 0 }
 }
 
 #[test]
@@ -668,7 +668,7 @@ fn stream_holds_loops_and_ends_where_the_file_really_ends() {
     let (mut ctl, mut mix) = setup(2);
     let (buf, data) = stream_buffer(2, &[0, 1]);
     let mut p = VoiceParams::new(buf);
-    p.loops = [LoopRegion { start: 10, end: 20, repeats: Some(1) }].into();
+    p.loops = [LoopRegion { start: 10, end: 20, repeats: Some(1), delay: 0 }].into();
     ctl.play(p).unwrap();
     assert_eq!(data.pins(), vec![(10..20 + 500)], "loop pinned with margin (RATE 1000 → 500 frames)");
     // The reader found the end early.
@@ -692,7 +692,7 @@ fn voices_on_one_stream_keep_their_own_position_and_pins() {
         let mut p = VoiceParams::new(buf.clone());
         p.start = i * 100;
         p.end = Some(i * 100 + 50);
-        p.loops = [LoopRegion { start: i * 100, end: i * 100 + 10, repeats: Some(1) }].into();
+        p.loops = [LoopRegion { start: i * 100, end: i * 100 + 10, repeats: Some(1), delay: 0 }].into();
         ids.push(ctl.play(p).unwrap());
     }
     assert_eq!(data.pins().len(), stream::POSITION_SLOTS, "one voice got no slot");
@@ -720,7 +720,7 @@ fn positions_never_crowd_out_finished_buffers() {
     let buf = constant_buffer(1000, 0.1);
     let looped = || {
         let mut p = VoiceParams::new(buf.clone());
-        p.loops = [LoopRegion { start: 0, end: 1000, repeats: None }].into();
+        p.loops = [LoopRegion { start: 0, end: 1000, repeats: None, delay: 0 }].into();
         p
     };
     let ids: Vec<VoiceId> = (0..4).map(|_| ctl.play(looped()).unwrap()).collect();
@@ -757,7 +757,7 @@ fn dropped_controller_frees_its_stream_slots() {
     let (buf, data) = stream_buffer(2, &[0, 1]);
     let (mut ctl, _mix) = setup(2);
     let mut p = VoiceParams::new(buf.clone());
-    p.loops = [LoopRegion { start: 10, end: 20, repeats: None }].into();
+    p.loops = [LoopRegion { start: 10, end: 20, repeats: None, delay: 0 }].into();
     ctl.play(p).unwrap();
     assert_eq!((data.positions().count(), data.pins().len()), (1, 1));
     // E.g. the preview device is switched while it plays.
@@ -1027,7 +1027,7 @@ fn near_end_comes_in_the_block_that_reaches_it() {
 fn near_end_waits_for_the_last_pass_of_a_loop() {
     let (mut ctl, mut mix) = setup(2);
     let mut p = VoiceParams::new(ramp_buffer(10));
-    p.loops = [LoopRegion { start: 0, end: 10, repeats: Some(2) }].into();
+    p.loops = [LoopRegion { start: 0, end: 10, repeats: Some(2), delay: 0 }].into();
     p.notify_before_end = Some(3);
     ctl.play(p).unwrap();
     for _ in 0..2 {
@@ -1163,7 +1163,7 @@ fn loop_exits_are_reported_in_their_block_for_every_mode() {
 fn repeats_running_out_are_no_loop_exit() {
     let (mut ctl, mut mix) = setup(2);
     let mut p = VoiceParams::new(ramp_buffer(10));
-    p.loops = [LoopRegion { start: 2, end: 5, repeats: Some(2) }].into();
+    p.loops = [LoopRegion { start: 2, end: 5, repeats: Some(2), delay: 0 }].into();
     ctl.play(p).unwrap();
     played_frames(&mut mix, 30);
     assert_eq!(notifications(&mut ctl), "F");
@@ -1285,7 +1285,7 @@ fn a_rearming_seek_within_a_counted_loop_keeps_its_pass() {
     let counted = || {
         let (mut ctl, mix) = setup(2);
         let mut p = VoiceParams::new(ramp_buffer(10));
-        p.loops = [LoopRegion { start: 2, end: 5, repeats: Some(2) }].into();
+        p.loops = [LoopRegion { start: 2, end: 5, repeats: Some(2), delay: 0 }].into();
         let id = ctl.play(p).unwrap();
         (ctl, mix, id)
     };
@@ -1311,7 +1311,7 @@ fn a_rearming_seek_within_a_counted_loop_keeps_its_pass() {
 fn a_rearming_seek_on_the_last_pass_holds_the_vamps_after_it_again() {
     let (mut ctl, mut mix) = setup(2);
     let mut p = VoiceParams::new(ramp_buffer(12));
-    p.loops = [LoopRegion { start: 2, end: 5, repeats: Some(1) }, vamp(6, 8)].into();
+    p.loops = [LoopRegion { start: 2, end: 5, repeats: Some(1), delay: 0 }, vamp(6, 8)].into();
     let id = ctl.play(p).unwrap();
     assert_eq!(played_frames(&mut mix, 7), [0, 1, 2, 3, 4, 2, 3]);
     // Released ahead, then back within the counted loop's last pass.
@@ -1325,7 +1325,7 @@ fn a_rearming_seek_on_the_last_pass_holds_the_vamps_after_it_again() {
 fn five_passes() -> (Controller, Mixer, VoiceId) {
     let (mut ctl, mix) = setup(2);
     let mut p = VoiceParams::new(ramp_buffer(10));
-    p.loops = [LoopRegion { start: 2, end: 5, repeats: Some(4) }].into();
+    p.loops = [LoopRegion { start: 2, end: 5, repeats: Some(4), delay: 0 }].into();
     let id = ctl.play(p).unwrap();
     (ctl, mix, id)
 }
@@ -1349,7 +1349,7 @@ fn a_counted_loop_left_early_plays_its_pass_to_the_end_and_goes_on() {
 fn leaving_a_counted_loop_on_its_last_pass_changes_nothing() {
     let (mut ctl, mut mix) = setup(2);
     let mut p = VoiceParams::new(ramp_buffer(10));
-    p.loops = [LoopRegion { start: 2, end: 5, repeats: Some(1) }].into();
+    p.loops = [LoopRegion { start: 2, end: 5, repeats: Some(1), delay: 0 }].into();
     let id = ctl.play(p).unwrap();
     assert_eq!(played_frames(&mut mix, 6), [0, 1, 2, 3, 4, 2]);
     ctl.exit_loop(id, LoopExit::Immediate { crossfade_frames: 0 }, false, false).unwrap();
@@ -1361,7 +1361,7 @@ fn leaving_a_counted_loop_on_its_last_pass_changes_nothing() {
 fn a_counted_loop_left_early_waits_for_near_end_until_its_last_pass() {
     let (mut ctl, mut mix) = setup(2);
     let mut p = VoiceParams::new(ramp_buffer(10));
-    p.loops = [LoopRegion { start: 0, end: 10, repeats: Some(4) }].into();
+    p.loops = [LoopRegion { start: 0, end: 10, repeats: Some(4), delay: 0 }].into();
     p.notify_before_end = Some(3);
     let id = ctl.play(p).unwrap();
     played_frames(&mut mix, 12);
@@ -1430,7 +1430,8 @@ fn direct_playback_stays_bit_identical() {
     p.start = 50;
     p.end = Some(2900);
     p.loops =
-        [LoopRegion { start: 200, end: 400, repeats: Some(2) }, vamp(700, 1000), vamp(1500, 1800)].into();
+        [LoopRegion { start: 200, end: 400, repeats: Some(2), delay: 0 }, vamp(700, 1000), vamp(1500, 1800)]
+            .into();
     p.marks = [300, 800, 900, 1600, 1700].into();
     p.gain = 0.8;
     p.fade_in_frames = 120;
@@ -2025,7 +2026,7 @@ fn a_full_event_queue_holds_finished_voices_until_there_is_room() {
     let buf = constant_buffer(1000, 0.0);
     let looped = || {
         let mut p = VoiceParams::new(buf.clone());
-        p.loops = [LoopRegion { start: 0, end: 1000, repeats: None }].into();
+        p.loops = [LoopRegion { start: 0, end: 1000, repeats: None, delay: 0 }].into();
         p
     };
     let first = ctl.play(looped()).unwrap();
@@ -2198,8 +2199,212 @@ fn long_stream_loops_pin_only_their_ends() {
     let (buf, data) = stream_buffer(40, &[]);
     let mut p = VoiceParams::new(buf);
     let (start, end) = (10, 38 * chunk);
-    p.loops = [LoopRegion { start, end, repeats: None }].into();
+    p.loops = [LoopRegion { start, end, repeats: None, delay: 0 }].into();
     ctl.play(p).unwrap();
     // RATE 1000 → 500 frames of margin.
     assert_eq!(data.pins(), vec![start..start + chunk + 500, end..end + 500]);
+}
+
+#[test]
+fn overlapping_stream_loops_keep_the_overlap_loaded() {
+    let (mut ctl, _mix) = setup(2);
+    let chunk = stream::CHUNK_FRAMES;
+    let (buf, data) = stream_buffer(40, &[]);
+    let mut p = VoiceParams::new(buf);
+    let (start, end) = (10, 38 * chunk);
+    p.loops = [LoopRegion { start, end, repeats: None, delay: -(chunk as i64) }].into();
+    ctl.play(p).unwrap();
+    assert_eq!(data.pins(), vec![start..start + chunk + 500, end - chunk..end + 500]);
+}
+
+fn delayed(start: usize, end: usize, repeats: Option<u32>, delay: i64) -> LoopRegion {
+    LoopRegion { start, end, repeats, delay }
+}
+
+#[test]
+fn loop_delay_is_silence_between_passes() {
+    let (mut ctl, mut mix) = setup(2);
+    let mut p = VoiceParams::new(ramp_buffer(10));
+    p.loops = [delayed(2, 5, Some(2), 2)].into();
+    ctl.play(p).unwrap();
+    assert_eq!(played_frames(&mut mix, 20), [0, 1, 2, 3, 4, 0, 0, 2, 3, 4, 0, 0, 2, 3, 4, 5, 6, 7, 8, 9]);
+}
+
+#[test]
+fn loop_delay_waits_at_the_end_of_the_file_too() {
+    let (mut ctl, mut mix) = setup(2);
+    let mut p = VoiceParams::new(ramp_buffer(4));
+    p.loops = [delayed(0, 4, Some(1), 3)].into();
+    ctl.play(p).unwrap();
+    assert_eq!(played_frames(&mut mix, 11), [0, 1, 2, 3, 0, 0, 0, 0, 1, 2, 3]);
+    assert!(finished(&mut ctl).is_empty());
+    played_frames(&mut mix, 1);
+    assert_eq!(finished(&mut ctl).len(), 1);
+}
+
+#[test]
+fn negative_loop_delay_overlaps_the_passes() {
+    let (mut ctl, mut mix) = setup(2);
+    let mut p = VoiceParams::new(ramp_buffer(12));
+    p.loops = [delayed(2, 8, Some(1), -2)].into();
+    ctl.play(p).unwrap();
+    // At 6 the second pass starts at 2, while 6 and 7 play on under it.
+    assert_eq!(played_frames(&mut mix, 17), [0, 1, 2, 3, 4, 5, 2 + 6, 3 + 7, 4, 5, 6, 7, 8, 9, 10, 11, 0]);
+}
+
+#[test]
+fn loop_overlap_is_at_most_half_the_loop() {
+    let (mut ctl, mut mix) = setup(2);
+    let mut p = VoiceParams::new(ramp_buffer(10));
+    p.loops = [delayed(2, 8, Some(2), -100)].into();
+    ctl.play(p).unwrap();
+    // Passes start every 3 frames; only two ever sound at once.
+    assert_eq!(
+        played_frames(&mut mix, 16),
+        [0, 1, 2, 3, 4, 2 + 5, 3 + 6, 4 + 7, 2 + 5, 3 + 6, 4 + 7, 5, 6, 7, 8, 9]
+    );
+    let l = delayed(2, 8, None, -100);
+    assert_eq!((l.overlap(0), l.overlap(2), l.shift(2)), (3, 2, -2));
+    assert_eq!((delayed(2, 8, None, 5).overlap(0), delayed(2, 8, None, 5).shift(0)), (0, 5));
+}
+
+#[test]
+fn overlapping_passes_fade_in_and_out_with_the_crossfade() {
+    let (mut ctl, mut mix) = setup(2);
+    let mut p = VoiceParams::new(constant_buffer(100, 0.5));
+    p.loops = [delayed(10, 40, None, -6)].into();
+    p.loop_crossfade_frames = 4;
+    ctl.play(p).unwrap();
+    let out = left(&mut mix, 50);
+    // From 34 the next pass rises over 4 frames on top of the one before,
+    // which plays 34–39 fully, then fades out over 4 frames.
+    let expected: Vec<f32> = (0..50)
+        .map(|i| match i {
+            ..34 => 0.5,
+            34..38 => 0.5 + 0.5 * (i - 34) as f32 / 4.0,
+            38..41 => 1.0,
+            41..44 => 0.5 + 0.5 * (44 - i) as f32 / 4.0,
+            _ => 0.5,
+        })
+        .collect();
+    assert!(out.iter().zip(&expected).all(|(a, b)| close(*a, *b)), "{out:?}");
+}
+
+#[test]
+fn a_pass_end_fades_into_the_gap_and_the_next_pass_fades_in() {
+    let (mut ctl, mut mix) = setup(2);
+    let mut p = VoiceParams::new(constant_buffer(100, 0.5));
+    p.loops = [delayed(10, 20, Some(1), 6)].into();
+    p.loop_crossfade_frames = 4;
+    ctl.play(p).unwrap();
+    let out = left(&mut mix, 34);
+    let expected: Vec<f32> = (0..34)
+        .map(|i| match i {
+            ..20 => 0.5,
+            20..24 => 0.5 * (24 - i) as f32 / 4.0,
+            24..26 => 0.0,
+            26..30 => 0.5 * (i - 26) as f32 / 4.0,
+            _ => 0.5,
+        })
+        .collect();
+    assert!(out.iter().zip(&expected).all(|(a, b)| close(*a, *b)), "{out:?}");
+}
+
+#[test]
+fn positions_report_the_silence_left_before_the_next_pass() {
+    let (mut ctl, mut mix) = engine(EngineConfig { report_rate_hz: 1000, ..EngineConfig::new(RATE, 2) });
+    let mut p = VoiceParams::new(ramp_buffer(10));
+    p.loops = [delayed(2, 5, Some(1), 3)].into();
+    ctl.play(p).unwrap();
+    let gaps: Vec<Option<usize>> = (0..10)
+        .flat_map(|_| {
+            played_frames(&mut mix, 1);
+            ctl.poll_events()
+                .filter_map(|e| match e {
+                    Event::Position { gap, .. } => Some(gap),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    // After 0–4, three silent frames (each reporting what is left after
+    // it), then the second pass from 2.
+    assert_eq!(gaps, [None, None, None, None, None, Some(2), Some(1), Some(0), None, None]);
+}
+
+#[test]
+fn a_devamp_in_the_gap_plays_on_past_the_loop_end() {
+    let (mut ctl, mut mix) = setup(2);
+    let mut p = VoiceParams::new(ramp_buffer(10));
+    p.loops = [delayed(2, 5, None, 4)].into();
+    let id = ctl.play(p).unwrap();
+    assert_eq!(played_frames(&mut mix, 7), [0, 1, 2, 3, 4, 0, 0]);
+    ctl.exit_loop(id, LoopExit::AtLoopEnd, false, false).unwrap();
+    assert_eq!(played_frames(&mut mix, 6), [5, 6, 7, 8, 9, 0]);
+    assert_eq!(notifications(&mut ctl), "LF");
+}
+
+#[test]
+fn a_devamp_in_the_gap_goes_on_from_the_fading_pass_end() {
+    let (mut ctl, mut mix) = setup(2);
+    let mut p = VoiceParams::new(constant_buffer(40, 0.5));
+    p.loops = [delayed(2, 10, None, 20)].into();
+    p.loop_crossfade_frames = 4;
+    let id = ctl.play(p).unwrap();
+    // Two frames into the gap, the pass end fading out into it is at 2/4 …
+    let out = left(&mut mix, 12);
+    assert!(
+        out[..10].iter().all(|x| close(*x, 0.5)) && close(out[10], 0.5) && close(out[11], 0.375),
+        "{out:?}"
+    );
+    ctl.exit_loop(id, LoopExit::AtLoopEnd, false, false).unwrap();
+    // … and playback goes on from there, rising from that level.
+    let out = left(&mut mix, 4);
+    assert!(out.iter().zip([0.25, 0.375, 0.5, 0.5]).all(|(a, b)| close(*a, b)), "{out:?}");
+}
+
+#[test]
+fn a_seek_in_the_gap_plays_from_there() {
+    let (mut ctl, mut mix) = setup(2);
+    let mut p = VoiceParams::new(ramp_buffer(10));
+    p.loops = [delayed(2, 5, None, 100)].into();
+    let id = ctl.play(p).unwrap();
+    assert_eq!(played_frames(&mut mix, 7), [0, 1, 2, 3, 4, 0, 0]);
+    ctl.seek(id, 3, 0).unwrap();
+    assert_eq!(played_frames(&mut mix, 3), [3, 4, 0]);
+}
+
+#[test]
+fn an_immediate_exit_fades_out_a_pass_playing_under_the_next() {
+    let (mut ctl, mut mix) = setup(2);
+    let mut p = VoiceParams::new(constant_buffer(100, 0.5));
+    p.loops = [delayed(10, 40, None, -10)].into();
+    p.loop_crossfade_frames = 4;
+    let id = ctl.play(p).unwrap();
+    // Into the overlap (from 30), both passes at full level.
+    let out = left(&mut mix, 36);
+    assert!(close(out[35], 1.0), "{out:?}");
+    ctl.exit_loop(id, LoopExit::Immediate { crossfade_frames: 4 }, false, false).unwrap();
+    let out = left(&mut mix, 8);
+    // Both fade out over 4 frames while the end fades in: no jump in level.
+    let expected = [1.0, 0.5 + 0.375, 0.5 + 0.25, 0.5 + 0.125, 0.5, 0.5, 0.5, 0.5];
+    assert!(out.iter().zip(expected).all(|(a, b)| close(*a, b)), "{out:?}");
+}
+
+#[test]
+fn loop_delay_holds_at_another_rate() {
+    let (mut ctl, mut mix) = setup_hz(0);
+    let mut p = VoiceParams::new(sine_buffer(1000.0, 0.1));
+    let frames = p.buffer.frames();
+    p.loops = [delayed(0, frames, Some(1), frames as i64)].into();
+    p.rate = 0.5;
+    p.pitch = 0.5;
+    ctl.play(p).unwrap();
+    // Two passes and a gap as long, at half speed.
+    let (left, end) = render_until_finished(&mut ctl, &mut mix, HZ as usize);
+    let end = end.unwrap();
+    assert!(end.abs_diff(6 * frames) < 512, "{end}");
+    let gap = &left[2 * frames + 200..4 * frames - 200];
+    assert!(gap.iter().all(|x| x.abs() < 1e-4));
+    assert!(rms(&left[4 * frames + 200..6 * frames - 400]) > 0.3);
 }

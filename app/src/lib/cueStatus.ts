@@ -27,6 +27,8 @@ export interface CueStatus {
   /** The progress bar shows copying, not playback. */
   copying?: boolean;
   paused?: boolean;
+  /** The progress bar shows the silence between two loop passes, not the position. */
+  silent?: boolean;
 }
 
 /**
@@ -46,16 +48,19 @@ function runningStatus(cue: Cue): CueStatus | undefined {
       text: `${elapsed} / −${remaining}`,
       info: active.paused
         ? t('status.paused')
-        : active.loading
-          ? t('status.loading')
-          : active.item
-            ? `${active.item.index + 1}/${active.item.count}`
-            : active.pass
-              ? passLabel(active.pass)
-              : active.looping
-                ? loopLabel(cue)
-                : undefined,
-      progress: active.progress,
+        : active.loop_gap
+          ? t('status.loop_gap', { time: fmtSecs(active.loop_gap.remaining) })
+          : active.loading
+            ? t('status.loading')
+            : active.item
+              ? `${active.item.index + 1}/${active.item.count}`
+              : active.pass
+                ? passLabel(active.pass)
+                : active.looping
+                  ? loopLabel(cue)
+                  : undefined,
+      progress: active.loop_gap?.progress ?? active.progress,
+      silent: !!active.loop_gap,
       vamp: active.looping,
       warn: nearEnd(active.remaining, ui.view?.settings.end_warning ?? 10),
       paused: active.paused,

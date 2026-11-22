@@ -154,6 +154,10 @@ export interface SoundFields extends SpeedFields {
   end: number | null;
   /** Ignored while the cue has vamps. */
   loop: LoopMode;
+  /** Seconds (file time, like start and end) between two passes of the loop: silence after each pass; negative: the
+   * next pass starts that long before the current one ends and both play over each other (by at most half the
+   * range, else a timing warning). Counted in `CueInfo.duration` and the remaining time. */
+  loop_delay: number;
   /** Regions (seconds in the file) repeated until a loop exit cue releases them, in order. */
   vamps: Vamp[];
   /** Seconds in the file where a loop exit "next_mark" may leave a vamp; targets of position cues. */
@@ -968,6 +972,9 @@ export interface ActiveState {
   /** Pass (from 1) through the loop or vamp playback is in; `count` null = until devamped or stopped; `vamp`: its
    * number (from 1), null for a loop over the whole range. Null between vamps and without loops. */
   pass: PassState | null;
+  /** In the silence between two passes of a loop with a delay (`loop_delay` > 0): `progress` stands at 1 then, and
+   * `pass` is still the pass before. Null otherwise. */
+  loop_gap: LoopGapState | null;
   /** Held by a pause; elapsed and remaining stand still. */
   paused: boolean;
   /** Waits (at most 2 s) for its streamed file's start to be read, instead of playing silence; elapsed stays 0. */
@@ -980,6 +987,13 @@ export interface ItemState {
   index: number;
   file: number;
   count: number;
+}
+
+export interface LoopGapState {
+  /** Seconds until the next pass starts. */
+  remaining: number;
+  /** How much of the silence is over, 0…1. */
+  progress: number;
 }
 
 export interface PassState {

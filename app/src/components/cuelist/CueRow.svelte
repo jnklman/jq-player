@@ -68,11 +68,13 @@
       ? 'bg-muted-foreground/50'
       : status.paused
         ? 'bg-pause'
-        : status.vamp
-          ? 'bg-vamp'
-          : status.warn
-            ? 'bg-fade'
-            : 'bg-progress',
+        : status.silent
+          ? 'bg-vamp-soft/50'
+          : status.vamp
+            ? 'bg-vamp'
+            : status.warn
+              ? 'bg-fade'
+              : 'bg-progress',
   );
 
   // Edit mode: Ctrl-click adds or removes a cue, Shift-click selects the

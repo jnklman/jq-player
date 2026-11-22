@@ -2365,13 +2365,17 @@ impl Session {
         let file = self.media.get(&s.file);
         let file_duration = file.and_then(|f| f.duration);
         let duration = file_duration.and_then(|d| {
-            // Real time at the cue's rate.
-            let range = (s.end.unwrap_or(d).min(d) - s.start).max(0.0) / s.speed.factors().0;
+            // Real time at the cue's rate; the delay between passes is file time too.
+            let file_range = (s.end.unwrap_or(d).min(d) - s.start).max(0.0);
+            let rate = s.speed.factors().0;
+            let range = file_range / rate;
             match s.loop_mode {
                 // Vamps last until devamped.
                 _ if !s.vamps.is_empty() => None,
                 LoopMode::Off => Some(range),
-                LoopMode::Times(n) => Some(range * n.max(1) as f64),
+                LoopMode::Times(n) => {
+                    Some(range + (file_range + s.pass_delay(file_range)) / rate * (n.max(1) - 1) as f64)
+                }
                 LoopMode::Forever => None,
             }
         });

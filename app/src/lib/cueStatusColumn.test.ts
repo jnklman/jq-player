@@ -29,6 +29,12 @@ describe('a running cue', () => {
     expect(at({ item: { index: 1, file: 0, count: 3 } }).info).toBe('2/3');
     expect(at({ pass: { pass: 2, count: 4, vamp: null } }).info).toBe('Loop 2/4');
     expect(at({ looping: true })).toMatchObject({ info: 'Loop', vamp: true });
+    // Between two loop passes the bar shows the silence.
+    expect(at({ progress: 1, loop_gap: { remaining: 1.25, progress: 0.4 } })).toMatchObject({
+      info: 'Pause 1.3 s',
+      progress: 0.4,
+      silent: true,
+    });
   });
 
   it('shows fades, playlist gaps and pre-waits', () => {
