@@ -2674,6 +2674,8 @@ dependencies = [
 name = "jq-i18n"
 version = "0.3.1"
 dependencies = [
+ "serde",
+ "serde_json",
  "sys-locale",
 ]
 

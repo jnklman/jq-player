@@ -2,6 +2,7 @@
   import { Input } from '$lib/components/ui/input';
 
   import { api, type LocalSettings } from '../../lib/api';
+  import { errorText } from '../../lib/errors';
   import { t } from '../../lib/i18n/index.svelte';
   import { liveNumber } from '../../lib/input';
   import { withMissing } from '../../lib/options';
@@ -54,7 +55,7 @@
         onchange={(port) => (draft.midi_port = port || null)}
       />
       {#if view.midi.error}
-        <span class="text-xs text-stop-soft">{t('midi_tab.error_retry', { error: view.midi.error })}</span>
+        <span class="text-xs text-stop-soft">{t('midi_tab.error_retry', { error: errorText(view.midi.error) })}</span>
       {:else if draft.midi_port !== view.settings.midi_port}
         <span class={hint}>{t('midi_tab.opens_on_apply')}</span>
       {:else if view.midi.port}
@@ -89,7 +90,9 @@
         onchange={(port) => (draft.midi_out = port || null)}
       />
       {#if view.midi.out_error}
-        <span class="text-xs text-stop-soft">{t('midi_tab.error_retry', { error: view.midi.out_error })}</span>
+        <span class="text-xs text-stop-soft"
+          >{t('midi_tab.error_retry', { error: errorText(view.midi.out_error) })}</span
+        >
       {/if}
     </SettingRow>
   </SettingGroup>

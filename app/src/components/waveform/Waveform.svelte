@@ -4,6 +4,7 @@
   import { Tooltip } from '$lib/components/ui/tooltip';
 
   import type { SoundCue } from '../../lib/api';
+  import { errorText } from '../../lib/errors';
   import { fmtPosition } from '../../lib/format';
   import { t } from '../../lib/i18n/index.svelte';
   import { activeFor, ui } from '../../lib/store.svelte';
@@ -59,7 +60,7 @@
         if (!stale) data = peaks;
       },
       (e) => {
-        if (!stale) error = String(e);
+        if (!stale) error = errorText(e);
       },
     );
     return () => {

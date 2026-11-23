@@ -1,4 +1,5 @@
-//! Localised texts of the backend (errors, notices, names of actions, …).
+//! Localised texts of the backend, for what never reaches the web UI (native dialogs, the system) or is
+//! stored (default cue titles). Everything the UI shows is a [`Detail`] it words itself.
 //!
 //! Texts live in `locales/<code>.txt`, one `key = text` per line (`#` starts a comment, `\n` in a text is a line
 //! break). `{name}` in a text is replaced by the argument of that name. A text with a plural form has the keys
@@ -14,6 +15,10 @@ use std::collections::HashMap;
 use std::fmt::Display;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU8, Ordering};
+
+pub mod detail;
+
+pub use detail::Detail;
 
 /// A language the program is available in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

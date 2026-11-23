@@ -27,6 +27,7 @@ import {
   isTopLevel,
   mode,
   moveSelection,
+  noticeMessage,
   notify,
   previousOf,
   saveShow,
@@ -93,8 +94,8 @@ describe('show events', () => {
 describe('main window events', () => {
   it('shows notices and the update offered at start', async () => {
     await loadShow(view());
-    await backend.emit('notice', { level: 'error', message: 'Device lost' });
-    expect(ui.notices.map((n) => n.message)).toContain('Device lost');
+    await backend.emit('notice', { level: 'error', kind: 'audio_unavailable', error: 'Device lost' });
+    expect(ui.notices.map(noticeMessage)).toContain('Audio output not available: Device lost');
 
     await backend.emit('update_available', { version: '9.9.9', notes: null });
     expect(ui.update?.version).toBe('9.9.9');
@@ -127,6 +128,39 @@ describe('notices', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('shows a repeated notice once, the newer in place of the older', () => {
+    vi.useFakeTimers();
+    try {
+      const running = { level: 'warning', kind: 'already_running', cue: { number: '1', title: '' } } as const;
+      notify(running);
+      notify({ level: 'error', message: 'refused' });
+      vi.advanceTimersByTime(5000);
+      notify(running);
+      notify({ level: 'error', message: 'refused' });
+      expect(ui.notices.map(noticeMessage)).toEqual(['Cue 1 is already running', 'refused']);
+      vi.advanceTimersByTime(5000);
+      expect(ui.notices).toHaveLength(2);
+      notify({ ...running, cue: { number: '2', title: 'Rain' } });
+      expect(ui.notices.map(noticeMessage)).toContain('Cue 2 “Rain” is already running');
+      expect(ui.notices).toHaveLength(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('lets a newer notice about the same device or file replace the older one', () => {
+    notify({ level: 'error', kind: 'device_lost', device: 'main', name: 'USB', reason: 'unplugged' });
+    notify({ level: 'error', kind: 'device_lost', device: 'preview', name: 'Phones', reason: 'gone' });
+    notify({ level: 'warning', kind: 'device_back', device: 'main', name: 'USB' });
+    notify({ level: 'warning', kind: 'underrun', file: 'a.wav', ms: 10 });
+    notify({ level: 'warning', kind: 'underrun', file: 'a.wav', ms: 30 });
+    expect(ui.notices.map((n) => [n.level, noticeMessage(n)])).toEqual([
+      ['error', expect.stringMatching(/^Preview output “Phones” interrupted: gone\./)],
+      ['warning', 'Audio output “USB” reconnected'],
+      ['warning', 'a.wav: 30 ms of silence, the file did not come from the disk fast enough'],
+    ]);
   });
 
   it('`attempt` turns a failure into an error notice', async () => {
@@ -225,15 +259,17 @@ describe('saving', () => {
 });
 
 describe('language', () => {
-  it('takes the backend language and follows its changes, dropping old notices', async () => {
+  it("takes the backend language and follows its changes, rewording the backend's notices", async () => {
     backend.on('get_language', () => ({ setting: 'de', resolved: 'de' }));
     await initLanguage();
     expect(i18n.locale).toBe('de');
     expect(i18n.setting).toBe('de');
     notify({ level: 'error', message: 'old' });
+    notify({ level: 'error', kind: 'search_aborted' });
+    expect(ui.notices.map(noticeMessage)).toEqual(['old', 'Suche nach fehlenden Dateien abgebrochen']);
     await backend.emit('language_changed', { setting: 'auto', resolved: 'en' });
     expect(i18n.locale).toBe('en');
-    expect(ui.notices).toEqual([]);
+    expect(ui.notices.map(noticeMessage)).toEqual(['Search for missing files aborted']);
   });
 });
 

@@ -14,10 +14,9 @@ use tauri::utils::{config::BundleType, platform::bundle_type};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_updater::{Update, UpdaterExt};
 
-use jq_i18n::t;
-
 use crate::Backend;
 use crate::backend::{CloseCheck, Request};
+use crate::error::{AppError, Error};
 use crate::writer::Writer;
 
 const EVENT_PROGRESS: &str = "update_progress";
@@ -73,15 +72,18 @@ pub fn check_at_startup(app: AppHandle) {
 
 /// The newer release, if there is one.
 #[tauri::command]
-pub async fn check_update(app: AppHandle, pending: State<'_, Pending>) -> Result<Option<UpdateInfo>, String> {
+pub async fn check_update(app: AppHandle, pending: State<'_, Pending>) -> Result<Option<UpdateInfo>, Error> {
     let updater = app
         .updater_builder()
         .timeout(NETWORK_TIMEOUT)
         .build()
-        .map_err(|e| t!("update.check_failed", error = e))?;
-    let update = updater.check().await.map_err(|e| t!("update.check_failed", error = e))?;
+        .map_err(|e| Error::from(AppError::UpdateCheckFailed { error: e.to_string() }))?;
+    let update = updater
+        .check()
+        .await
+        .map_err(|e| Error::from(AppError::UpdateCheckFailed { error: e.to_string() }))?;
     let info = update.as_ref().map(|u| UpdateInfo { version: u.version.clone(), notes: u.body.clone() });
-    *pending.0.lock().map_err(|_| t!("app.backend_locked"))? = update;
+    *pending.0.lock().map_err(|_| Error::from(AppError::BackendLocked))? = update;
     Ok(info)
 }
 
@@ -96,23 +98,23 @@ pub async fn install_update(
     app: AppHandle,
     backend: State<'_, Backend>,
     pending: State<'_, Pending>,
-) -> Result<(), String> {
+) -> Result<(), Error> {
     // The updater would run the installer, which installs instead of replacing this file.
     if crate::paths::portable() {
-        return Err(t!("update.portable"));
+        return Err(AppError::UpdatePortable.into());
     }
     updatable()?;
     if pending.1.swap(true, Ordering::AcqRel) {
-        return Err(t!("update.installing"));
+        return Err(AppError::UpdateInstalling.into());
     }
     let _installing = Installing(&pending.1);
     show_allows_update(&backend).await?;
     let update = pending
         .0
         .lock()
-        .map_err(|_| t!("app.backend_locked"))?
+        .map_err(|_| Error::from(AppError::BackendLocked))?
         .clone()
-        .ok_or_else(|| t!("update.none_pending"))?;
+        .ok_or_else(|| Error::from(AppError::UpdateNonePending))?;
     let mut downloaded = 0;
     let progress = app.clone();
     let bytes = update
@@ -124,16 +126,16 @@ pub async fn install_update(
             || {},
         )
         .await
-        .map_err(|e| t!("update.install_failed", error = e))?;
+        .map_err(|e| Error::from(AppError::UpdateInstallFailed { error: e.to_string() }))?;
     // Meanwhile a cue may have started or show mode begun.
     show_allows_update(&backend).await?;
     // The installer ends the program: what is still queued goes to disk first.
     let writer = app.state::<Writer>().inner().clone();
     let flushed = tauri::async_runtime::spawn_blocking(move || writer.flush(FLUSH_TIMEOUT)).await;
     if !flushed.unwrap_or(false) {
-        return Err(t!("update.writes_pending"));
+        return Err(AppError::UpdateWritesPending.into());
     }
-    update.install(bytes).map_err(|e| t!("update.install_failed", error = e))?;
+    update.install(bytes).map_err(|e| Error::from(AppError::UpdateInstallFailed { error: e.to_string() }))?;
     // The installer ends the program on Windows; elsewhere this starts the new version.
     app.restart();
 }
@@ -143,18 +145,18 @@ pub async fn install_update(
 /// installer from the bundle type, so an rpm install would download one of
 /// those and fail with "invalid updater binary format". A deb update runs
 /// `dpkg -i` through pkexec (or sudo), which asks for the password.
-fn updatable() -> Result<(), String> {
+fn updatable() -> Result<(), Error> {
     match bundle_type() {
         Some(BundleType::Nsis | BundleType::Msi | BundleType::AppImage | BundleType::Deb) => Ok(()),
-        Some(BundleType::Rpm) => Err(t!("update.rpm")),
-        _ => Err(t!("update.not_bundled")),
+        Some(BundleType::Rpm) => Err(AppError::UpdateRpm.into()),
+        _ => Err(AppError::UpdateNotBundled.into()),
     }
 }
 
 /// Refuses an update while the show could be disturbed: locked show mode,
 /// cues running, files being copied in, unsaved changes. Show mode alone
 /// does not count: between performances the operator may update.
-async fn show_allows_update(backend: &Backend) -> Result<(), String> {
+async fn show_allows_update(backend: &Backend) -> Result<(), Error> {
     let (tx, rx) = mpsc::channel();
     // No answer in time counts as "something may be running".
     let check = match backend.send(Request::CloseCheck(tx)) {
@@ -172,9 +174,9 @@ async fn show_allows_update(backend: &Backend) -> Result<(), String> {
         imports: 0,
     }));
     match check {
-        Some(check) if check.show_mode_locked => Err(t!("update.locked")),
-        Some(check) if check.running > 0 || check.imports > 0 => Err(t!("update.busy")),
-        Some(check) if check.dirty => Err(t!("update.unsaved")),
+        Some(check) if check.show_mode_locked => Err(AppError::UpdateLocked.into()),
+        Some(check) if check.running > 0 || check.imports > 0 => Err(AppError::UpdateBusy.into()),
+        Some(check) if check.dirty => Err(AppError::UpdateUnsaved.into()),
         _ => Ok(()),
     }
 }

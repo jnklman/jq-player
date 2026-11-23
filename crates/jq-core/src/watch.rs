@@ -19,6 +19,7 @@ use jq_show::paths::{self, FileStamp};
 use notify::event::ModifyKind;
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 
+use crate::notice::Notice;
 use crate::settings::WatchMode;
 
 /// Current stamp of every watched file; `None` = missing.
@@ -41,7 +42,7 @@ enum Msg {
 pub struct MediaWatcher {
     msgs: Sender<Msg>,
     snapshots: Receiver<Stamps>,
-    warnings: Receiver<String>,
+    warnings: Receiver<Notice>,
 }
 
 impl MediaWatcher {
@@ -96,7 +97,7 @@ impl MediaWatcher {
     }
 
     /// Problems of the system's file watcher (it then polls instead).
-    pub fn take_warnings(&self) -> Vec<String> {
+    pub fn take_warnings(&self) -> Vec<Notice> {
         self.warnings.try_iter().collect()
     }
 }
@@ -116,7 +117,7 @@ struct Thread {
     /// Handed to the system's watcher, which sends its events here.
     events: Sender<Msg>,
     snapshots: Sender<Stamps>,
-    warnings: Sender<String>,
+    warnings: Sender<Notice>,
     interval: Duration,
     mode: WatchMode,
     /// `None` while polling (by choice or because it failed).
@@ -228,7 +229,7 @@ impl Thread {
     fn fail(&mut self, e: &notify::Error) {
         self.system = None;
         self.dirs.clear();
-        let _ = self.warnings.send(jq_i18n::t!("watch.system_unavailable", error = e));
+        let _ = self.warnings.send(Notice::WatcherUnavailable { error: e.to_string().into() });
     }
 
     /// Watches the folders holding the files (or, while one is missing, the

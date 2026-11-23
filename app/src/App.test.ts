@@ -254,12 +254,12 @@ describe('questions', () => {
   it('shows notices until they are dismissed', async () => {
     await loadShow(showView());
     const { user } = await renderUi(App);
-    await backend.emit('notice', { level: 'error', message: 'Device lost' });
-    await backend.emit('notice', { level: 'warning', message: 'Slow disk' });
+    await backend.emit('notice', { level: 'error', kind: 'audio_unavailable', error: 'Device lost' });
+    await backend.emit('notice', { level: 'warning', kind: 'underrun', file: 'rain.wav', ms: 20 });
     const [first] = screen.getAllByRole('button', { name: 'Dismiss message' });
     await user.click(first);
-    expect(screen.queryByText('Device lost')).toBeNull();
-    expect(screen.getByText('Slow disk')).toBeInTheDocument();
+    expect(screen.queryByText('Audio output not available: Device lost')).toBeNull();
+    expect(screen.getByText(/^rain\.wav: 20 ms of silence/)).toBeInTheDocument();
   });
 });
 

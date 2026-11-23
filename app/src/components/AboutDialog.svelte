@@ -11,6 +11,7 @@
 
   import appIcon from '../../assets/app-icon.svg';
   import { api, events, type UpdateInfo } from '../lib/api';
+  import { errorText } from '../lib/errors';
   import { t } from '../lib/i18n/index.svelte';
   import { ui } from '../lib/store.svelte';
   import { hint } from '../lib/ui';
@@ -41,7 +42,7 @@
       const info = await api.checkUpdate();
       update = info ? { kind: 'available', info } : { kind: 'current' };
     } catch (e) {
-      update = { kind: 'error', message: String(e) };
+      update = { kind: 'error', message: errorText(e) };
     }
   }
 
@@ -53,7 +54,7 @@
     try {
       await api.installUpdate();
     } catch (e) {
-      update = { kind: 'error', message: String(e) };
+      update = { kind: 'error', message: errorText(e) };
     } finally {
       unlisten();
     }

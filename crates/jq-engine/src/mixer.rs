@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use jq_i18n::t;
+use jq_i18n::{Detail, detail};
 use rtrb::{Consumer, Producer, RingBuffer};
 
 use crate::buffer::AudioBuffer;
@@ -247,34 +247,38 @@ pub enum RegionProblem {
     MarksUnsorted,
 }
 
-impl std::fmt::Display for RegionProblem {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&match self {
-            Self::StartAfterEnd => t!("engine.region.start_after_end"),
-            Self::LoopBackwards => t!("engine.region.loop_backwards"),
-            Self::LoopPastEnd => t!("engine.region.loop_past_end"),
-            Self::LoopsUnordered => t!("engine.region.loops_unordered"),
-            Self::MarksUnsorted => t!("engine.region.marks_unsorted"),
-        })
+impl RegionProblem {
+    fn name(self) -> &'static str {
+        match self {
+            Self::StartAfterEnd => "start_after_end",
+            Self::LoopBackwards => "loop_backwards",
+            Self::LoopPastEnd => "loop_past_end",
+            Self::LoopsUnordered => "loops_unordered",
+            Self::MarksUnsorted => "marks_unsorted",
+        }
     }
 }
 
-impl std::fmt::Display for EngineError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&match self {
-            Self::QueueFull => t!("engine.queue_full"),
+impl EngineError {
+    /// For the UI, which words it.
+    pub fn detail(&self) -> Detail {
+        match self {
+            Self::QueueFull => detail!("engine_queue_full"),
             Self::SampleRateMismatch { buffer, engine } => {
-                t!("engine.sample_rate_mismatch", buffer = buffer, engine = engine)
+                detail!("engine_sample_rate_mismatch", buffer = buffer, engine = engine)
             }
-            Self::InvalidRegion(problem) => t!("engine.invalid_region", problem = problem),
+            Self::InvalidRegion(problem) => detail!("engine_invalid_region", problem = problem.name()),
             Self::OutputChannel { channel, channels } => {
-                t!("engine.output_channel", first = channel + 1, second = channel + 2, channels = channels)
+                detail!(
+                    "engine_output_channel",
+                    first = channel + 1,
+                    second = channel + 2,
+                    channels = channels
+                )
             }
-        })
+        }
     }
 }
-
-impl std::error::Error for EngineError {}
 
 /// Creates the two halves of the engine: the [`Controller`] stays on the
 /// control thread, the [`Mixer`] moves into the audio callback.

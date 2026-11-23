@@ -3,7 +3,7 @@
 //! Control addresses cues by number. The port itself is opened elsewhere
 //! (`jq-midi`).
 
-use jq_i18n::t;
+use jq_i18n::{Detail, detail};
 use jq_show::{MidiMessage, MscCommand, Show};
 use serde::{Deserialize, Serialize};
 
@@ -134,13 +134,13 @@ pub fn msc(message: &[u8], device: u8) -> Option<MscIn> {
 /// What an MSC command does: GO with a number moves the playhead to that
 /// cue and goes; STOP pauses and RESUME resumes (one cue or all), as in the
 /// standard; ALL_OFF stops everything. An unknown number is an error.
-pub fn msc_actions(show: &Show, command: &MscIn) -> Result<Vec<Action>, String> {
+pub fn msc_actions(show: &Show, command: &MscIn) -> Result<Vec<Action>, Detail> {
     let find = |number: &str| {
         show.cues
             .iter()
             .find(|c| c.number.trim() == number)
             .map(|c| c.id)
-            .ok_or_else(|| t!("midi.msc_no_cue", number = number))
+            .ok_or_else(|| detail!("midi_msc_no_cue", number = number))
     };
     Ok(match command {
         MscIn::Go(None) => vec![Action::Go],
@@ -155,46 +155,40 @@ pub fn msc_actions(show: &Show, command: &MscIn) -> Result<Vec<Action>, String> 
 
 /// Where MIDI cues send to; a trait so tests can record.
 pub trait MidiSink: Send {
-    fn send(&mut self, message: &[u8]) -> Result<(), String>;
+    fn send(&mut self, message: &[u8]) -> Result<(), Detail>;
 }
 
 /// Raw bytes of an outgoing message; values out of range are refused.
-pub fn encode(message: &MidiMessage) -> Result<Vec<u8>, String> {
-    let data = |v: u8, what: String| {
-        if v < 128 { Ok(v) } else { Err(t!("midi.out_of_range", what = what, value = v)) }
+pub fn encode(message: &MidiMessage) -> Result<Vec<u8>, Detail> {
+    // `what`: the value's name, which the UI words.
+    let data = |v: u8, what: &str| {
+        if v < 128 { Ok(v) } else { Err(detail!("midi_out_of_range", what = what, value = v)) }
     };
-    let channel = |c: u8| if c < 16 { Ok(c) } else { Err(t!("midi.bad_channel", channel = c as u16 + 1)) };
+    let channel =
+        |c: u8| if c < 16 { Ok(c) } else { Err(detail!("midi_bad_channel", channel = c as u16 + 1)) };
     Ok(match *message {
         MidiMessage::ProgramChange { channel: c, program } => {
-            vec![0xc0 | channel(c)?, data(program, t!("midi.what.program"))?]
+            vec![0xc0 | channel(c)?, data(program, "program")?]
         }
         MidiMessage::ControlChange { channel: c, controller, value } => {
-            vec![
-                0xb0 | channel(c)?,
-                data(controller, t!("midi.what.controller"))?,
-                data(value, t!("midi.what.value"))?,
-            ]
+            vec![0xb0 | channel(c)?, data(controller, "controller")?, data(value, "value")?]
         }
         MidiMessage::NoteOn { channel: c, note, velocity } => {
-            vec![
-                0x90 | channel(c)?,
-                data(note, t!("midi.what.note"))?,
-                data(velocity, t!("midi.what.velocity"))?,
-            ]
+            vec![0x90 | channel(c)?, data(note, "note")?, data(velocity, "velocity")?]
         }
         MidiMessage::NoteOff { channel: c, note } => {
-            vec![0x80 | channel(c)?, data(note, t!("midi.what.note"))?, 0]
+            vec![0x80 | channel(c)?, data(note, "note")?, 0]
         }
         MidiMessage::Msc { device, command, ref cue, ref list } => {
             let number = |text: &str| {
                 if text.chars().all(|c| c.is_ascii_digit() || c == '.') {
                     Ok(text.as_bytes().to_vec())
                 } else {
-                    Err(t!("midi.msc_cue_digits", text = text))
+                    Err(detail!("midi_msc_cue_digits", text = text))
                 }
             };
             // F0 7F <device> 02 <format: all types> <command> [cue [00 list]] F7
-            let mut bytes = vec![0xf0, 0x7f, data(device, t!("midi.what.msc_device"))?, 0x02, 0x7f];
+            let mut bytes = vec![0xf0, 0x7f, data(device, "msc_device")?, 0x02, 0x7f];
             bytes.push(match command {
                 MscCommand::Go => 0x01,
                 MscCommand::Stop => 0x02,
@@ -328,7 +322,10 @@ mod tests {
         assert_eq!(msc_actions(&show, &MscIn::Stop(None)), Ok(vec![Action::PauseAll]));
         assert_eq!(msc_actions(&show, &MscIn::Resume(Some("3".into()))), Ok(vec![Action::ResumeCue(id)]));
         assert_eq!(msc_actions(&show, &MscIn::AllOff), Ok(vec![Action::StopAll]));
-        assert_eq!(msc_actions(&show, &MscIn::Go(Some("4".into()))), Err("MSC: no cue 4".into()));
+        assert_eq!(
+            msc_actions(&show, &MscIn::Go(Some("4".into()))),
+            Err(detail!("midi_msc_no_cue", number = "4"))
+        );
     }
 
     #[test]

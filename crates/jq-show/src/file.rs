@@ -7,8 +7,6 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use jq_i18n::t;
-
 use crate::model::{FORMAT, Show, VERSION};
 
 pub const SHOW_FILE_EXTENSION: &str = "jqshow";
@@ -23,21 +21,14 @@ pub enum ShowFileError {
     Exists(PathBuf),
 }
 
+/// For logs; the UI words it from [`ShowError`](crate::ShowError).
 impl std::fmt::Display for ShowFileError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let text = match self {
-            Self::Io { path, source } => format!("{}: {source}", path.display()),
-            Self::Parse { path, source } => t!("show_file.invalid", path = path.display(), error = source),
-            Self::WrongFormat { path, found } => {
-                t!("show_file.wrong_format", path = path.display(), found = found)
-            }
-            Self::TooNew { path, found } => {
-                t!("show_file.too_new", path = path.display(), found = found, current = VERSION)
-            }
-            Self::InvalidName(name) => t!("show_file.invalid_name", name = name),
-            Self::Exists(path) => t!("show_file.exists", path = path.display()),
-        };
-        f.write_str(&text)
+        match self {
+            Self::Io { path, source } => write!(f, "{}: {source}", path.display()),
+            Self::Parse { path, source } => write!(f, "{}: {source}", path.display()),
+            other => write!(f, "{other:?}"),
+        }
     }
 }
 
@@ -715,30 +706,33 @@ mod tests {
 
     #[test]
     fn errors_name_the_file_and_the_cause() {
-        use std::error::Error;
+        use crate::ShowError;
         let dir = tempdir("errors");
         let p = dir.join("x.jq");
-        let message = |e: ShowFileError| (e.to_string(), e.source().is_some());
-        let shown = p.display();
+        let shown = p.display().to_string();
+        let error = |e: ShowFileError| ShowError::from(e);
 
-        let (text, cause) = message(ShowFile::load(&p).unwrap_err());
-        assert!(text.starts_with(&format!("{shown}: ")) && cause, "{text}");
+        assert!(
+            matches!(error(ShowFile::load(&p).unwrap_err()), ShowError::FileIo { path, .. } if path == shown)
+        );
         fs::write(&p, "{").unwrap();
-        let (text, cause) = message(ShowFile::load(&p).unwrap_err());
-        assert!(text.starts_with(&format!("{shown}: not a valid show file: ")) && cause, "{text}");
+        assert!(matches!(
+            error(ShowFile::load(&p).unwrap_err()),
+            ShowError::FileInvalid { path, error } if path == shown && !error.is_empty()
+        ));
         fs::write(&p, r#"{"format": "other", "version": 1}"#).unwrap();
         assert_eq!(
-            message(ShowFile::load(&p).unwrap_err()),
-            (format!("{shown}: format “other” is not a show file"), false)
+            error(ShowFile::load(&p).unwrap_err()),
+            ShowError::FileWrongFormat { path: shown.clone(), found: "other".into() }
         );
         fs::write(&p, r#"{"format": "jqshow", "version": 99}"#).unwrap();
         assert_eq!(
-            message(ShowFile::load(&p).unwrap_err()).0,
-            format!("{shown}: version 99 is newer than this program version ({VERSION})")
+            error(ShowFile::load(&p).unwrap_err()),
+            ShowError::FileTooNew { path: shown, found: 99, current: VERSION }
         );
         assert_eq!(
-            message(ShowFile::create(&dir, "a/b", true).unwrap_err()).0,
-            "“a/b” is not possible as a file or folder name"
+            error(ShowFile::create(&dir, "a/b", true).unwrap_err()),
+            ShowError::InvalidName { name: "a/b".into() }
         );
         fs::remove_dir_all(dir).unwrap();
     }
@@ -749,7 +743,6 @@ mod tests {
         let first = ShowFile::create(&dir, "Eins", false).unwrap();
         let again = ShowFile::create(&dir, "Eins", false).unwrap_err();
         assert!(matches!(&again, ShowFileError::Exists(p) if *p == first.path));
-        assert_eq!(again.to_string(), format!("{} already exists", first.path.display()));
         // Its media folder is taken by the first show.
         assert!(matches!(
             ShowFile::create(&dir, "Zwei", false),

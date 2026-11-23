@@ -1,6 +1,7 @@
 //! Decoded-buffer cache with a background loader, so the cues after the
 //! playhead are in RAM before GO ("arm").
 
+use jq_i18n::Detail;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -13,7 +14,7 @@ use jq_show::paths::{self, FileStamp};
 use crate::watch::Stamps;
 
 pub trait MediaLoader: Send + Sync + 'static {
-    fn load(&self, path: &Path, sample_rate: u32) -> Result<AudioBuffer, String>;
+    fn load(&self, path: &Path, sample_rate: u32) -> Result<AudioBuffer, Detail>;
 }
 
 /// Silence of a streamed file is reported once no more came for this long,
@@ -36,21 +37,21 @@ struct Underruns {
 pub struct FileLoader;
 
 impl MediaLoader for FileLoader {
-    fn load(&self, path: &Path, sample_rate: u32) -> Result<AudioBuffer, String> {
-        jq_media::load(path, sample_rate).map_err(|e| e.to_string())
+    fn load(&self, path: &Path, sample_rate: u32) -> Result<AudioBuffer, Detail> {
+        jq_media::load(path, sample_rate).map_err(|e| e.detail())
     }
 }
 
 /// The file's stamp is taken before reading it, so a change during the load
 /// shows up as a differing stamp afterwards; `None` if it changed while being
 /// read.
-type LoadResult = (PathBuf, Option<Option<FileStamp>>, Result<Arc<AudioBuffer>, String>);
+type LoadResult = (PathBuf, Option<Option<FileStamp>>, Result<Arc<AudioBuffer>, Detail>);
 
 pub struct BufferCache {
     loader: Arc<dyn MediaLoader>,
     sample_rate: u32,
     ready: HashMap<PathBuf, (Arc<AudioBuffer>, Option<FileStamp>)>,
-    failed: HashMap<PathBuf, (String, Option<FileStamp>)>,
+    failed: HashMap<PathBuf, (Detail, Option<FileStamp>)>,
     /// Files queued for the loader thread and still wanted; it skips the
     /// others, and their results are dropped.
     pending: Arc<Mutex<HashSet<PathBuf>>>,
@@ -231,13 +232,13 @@ impl BufferCache {
         self.ready.contains_key(path)
     }
 
-    pub fn error(&self, path: &Path) -> Option<&str> {
-        self.failed.get(path).map(|(e, _)| e.as_str())
+    pub fn error(&self, path: &Path) -> Option<&Detail> {
+        self.failed.get(path).map(|(e, _)| e)
     }
 
     /// Returns the buffer, decoding synchronously if it is not armed yet.
     /// The bool says whether it had to be loaded on the spot.
-    pub fn get_now(&mut self, path: &Path) -> Result<(Arc<AudioBuffer>, bool), String> {
+    pub fn get_now(&mut self, path: &Path) -> Result<(Arc<AudioBuffer>, bool), Detail> {
         self.poll();
         if let Some((b, _)) = self.ready.get(path) {
             return Ok((b.clone(), false));

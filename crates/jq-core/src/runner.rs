@@ -10,7 +10,7 @@ use jq_engine::{
     AudioBuffer, Controller, Curve, END_BLEND, Event, Held, LoopExit, LoopPass, LoopRegion, PARAM_SMOOTHING,
     Shape, VoiceId, VoiceParams, db_to_gain, gain_to_db,
 };
-use jq_i18n::t;
+use jq_i18n::{Detail, detail};
 use jq_show::{
     AdvanceAt, Cue, CueId, CueKind, DevampMode, ExitLoop, FadeCurve, GoToCue, GroupMode, LoopLevel, LoopMode,
     OthersAction, OthersScope, PanCurve, PauseAction, PositionTo, RATE_MAX, RATE_MIN, Repeat, SILENCE_DB,
@@ -20,6 +20,7 @@ use serde::Serialize;
 
 use crate::loader::{BufferCache, MediaLoader};
 use crate::midi::{self, MidiSink};
+use crate::notice::{CueName, FadingIgnores, Notice};
 use crate::order::{Order, step_file};
 use crate::osc::{self, OscOut};
 use crate::settings::LocalSettings;
@@ -156,14 +157,6 @@ pub enum Control {
         watch: String,
         action: StopwatchAction,
     },
-}
-
-/// Something the operator should see.
-#[derive(Clone, Debug, PartialEq, Serialize)]
-#[serde(tag = "level", content = "message", rename_all = "snake_case")]
-pub enum Notice {
-    Warning(String),
-    Error(String),
 }
 
 /// Snapshot for the UI, sent about 30 times per second.
@@ -1027,7 +1020,7 @@ impl Runner {
                     && !ended
                     && let Some(cue) = self.show.cue(id)
                 {
-                    self.notices.push(Notice::Warning(t!("runner.already_fading", cue = label(cue))));
+                    self.notices.push(Notice::AlreadyFading { cue: CueName::of(cue) });
                 }
                 for (v, d) in voices {
                     let c = self.decibel(Shape::SlowTop);
@@ -1300,7 +1293,7 @@ impl Runner {
         for (path, frames) in underruns {
             let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
             let ms = frames * 1000 / self.engine.config().sample_rate.max(1) as u64;
-            self.notices.push(Notice::Warning(t!("runner.underrun", name = name, ms = ms)));
+            self.notices.push(Notice::Underrun { file: name, ms });
         }
         let events: Vec<Event> = self.engine.poll_events().collect();
         for event in events {
@@ -1332,8 +1325,7 @@ impl Runner {
                     if let Some(cue) =
                         self.active.iter().find(|a| a.voice == v).and_then(|a| self.show.cue(a.cue))
                     {
-                        self.notices
-                            .push(Notice::Warning(t!("runner.too_many_stretchers", cue = label(cue))));
+                        self.notices.push(Notice::TooManyStretchers { cue: CueName::of(cue) });
                     }
                 }
                 Event::Finished { id, .. } => {
@@ -1349,7 +1341,7 @@ impl Runner {
                 }
                 Event::Rejected { id, .. } => {
                     self.preview_event(&event, now);
-                    self.notices.push(Notice::Error(t!("runner.too_many_voices")));
+                    self.notices.push(Notice::TooManyVoices);
                     // Like a broken cue, a rejected one must not break the chain.
                     if let Some(i) = self.active.iter().position(|a| a.voice == id) {
                         let a = self.active.remove(i);
@@ -1814,7 +1806,7 @@ impl Runner {
                 self.second_trigger(id, now, go);
                 return;
             }
-            self.notices.push(Notice::Warning(t!("runner.already_running", cue = label(cue))));
+            self.notices.push(Notice::AlreadyRunning { cue: CueName::of(cue) });
             // Like a broken cue, a blocked one must not break the chain; at
             // later points the running instance carries it on.
             if let Some((next, AdvanceAt::Start)) = self.advance_of(cue) {
@@ -1924,24 +1916,30 @@ impl Runner {
                 }
             }
             CueKind::Sound(s) if s.is_placeholder() => {
-                self.notices.push(Notice::Warning(t!("runner.placeholder", cue = label(&cue))));
+                self.notices.push(Notice::Placeholder { cue: CueName::of(&cue) });
                 // Like a broken cue: the chain goes on.
                 ended = true;
             }
             CueKind::Sound(s) => {
                 let lead = near_end.map(|(_, lead)| lead);
-                match self.start_sound(id, s, &label(&cue), None, SpeedSet::default(), go, lead, from, None) {
+                match self.start_sound(
+                    id,
+                    s,
+                    &CueName::of(&cue),
+                    None,
+                    SpeedSet::default(),
+                    go,
+                    lead,
+                    from,
+                    None,
+                ) {
                     Ok(()) => {
                         if let Some(a) = self.active.last_mut() {
                             (a.follow, a.near_end) = (end_next, near_end);
                         }
                     }
                     Err(e) => {
-                        self.notices.push(Notice::Error(t!(
-                            "runner.cue_problem",
-                            cue = label(&cue),
-                            problem = e
-                        )));
+                        self.notices.push(Notice::CueFailed { cue: CueName::of(&cue), item: None, error: e });
                         // A broken cue must not break the chain.
                         ended = true;
                     }
@@ -1998,11 +1996,9 @@ impl Runner {
             }
             CueKind::Stopwatch(w) => {
                 match &w.watch {
-                    None => self
-                        .notices
-                        .push(Notice::Warning(t!("runner.no_stopwatch_chosen", cue = label(&cue)))),
+                    None => self.notices.push(Notice::NoStopwatchChosen { cue: CueName::of(&cue) }),
                     Some(watch) if !self.show.stopwatches.iter().any(|s| &s.id == watch) => {
-                        self.notices.push(Notice::Error(t!("runner.stopwatch_missing", cue = label(&cue))));
+                        self.notices.push(Notice::StopwatchMissing { cue: CueName::of(&cue) });
                     }
                     Some(watch) => self.stopwatch(&watch.clone(), w.action, now),
                 }
@@ -2034,21 +2030,13 @@ impl Runner {
             }
             CueKind::Osc(o) => {
                 if let Err(e) = self.send_osc(o) {
-                    self.notices.push(Notice::Error(t!(
-                        "runner.cue_problem",
-                        cue = label(&cue),
-                        problem = e
-                    )));
+                    self.notices.push(Notice::CueFailed { cue: CueName::of(&cue), item: None, error: e });
                 }
                 ended = true;
             }
             CueKind::Midi(m) => {
                 if let Err(e) = self.send_midi(m) {
-                    self.notices.push(Notice::Error(t!(
-                        "runner.cue_problem",
-                        cue = label(&cue),
-                        problem = e
-                    )));
+                    self.notices.push(Notice::CueFailed { cue: CueName::of(&cue), item: None, error: e });
                 }
                 ended = true;
             }
@@ -2146,16 +2134,15 @@ impl Runner {
     /// chain that led here).
     fn go_to(&mut self, cue: &Cue, g: &GoToCue, now: Instant, go: u64, direct: bool) {
         let Some(target) = g.target else {
-            self.notices.push(Notice::Warning(t!("runner.no_target", cue = label(cue))));
+            self.notices.push(Notice::NoTarget { cue: CueName::of(cue) });
             return;
         };
         let Some(index) = self.show.index_of(target) else {
             // Only top-level cues can be jumped to; a cue inside a group is not.
-            let why = match self.show.cue(target) {
-                Some(inner) => t!("runner.target_in_group", target = label(inner)),
-                None => t!("runner.target_missing"),
-            };
-            self.notices.push(Notice::Error(t!("runner.cue_problem", cue = label(cue), problem = why)));
+            self.notices.push(match self.show.cue(target) {
+                Some(inner) => Notice::TargetInGroup { cue: CueName::of(cue), target: CueName::of(inner) },
+                None => Notice::TargetMissing { cue: CueName::of(cue) },
+            });
             return;
         };
         if !g.start {
@@ -2163,7 +2150,7 @@ impl Runner {
             return;
         }
         if self.goto_depth >= GOTO_DEPTH {
-            self.notices.push(Notice::Error(t!("runner.goto_loop", cue = label(cue))));
+            self.notices.push(Notice::GotoLoop { cue: CueName::of(cue) });
             return;
         }
         self.goto_depth += 1;
@@ -2263,24 +2250,24 @@ impl Runner {
         &mut self,
         id: CueId,
         s: &SoundCue,
-        name: &str,
+        name: &CueName,
         volume: Option<f64>,
         speed_set: SpeedSet,
         go: u64,
         near_end: Option<f64>,
         from: Option<f64>,
         paused: Option<Instant>,
-    ) -> Result<(), String> {
+    ) -> Result<(), Detail> {
         let path = jq_show::paths::resolve(&self.media_dir, &s.file);
         if self.importing.contains(&path) {
-            return Err(t!("runner.still_copying"));
+            return Err(detail!("runner_still_copying"));
         }
         let (buffer, loaded_now) =
-            self.cache.get_now(&path).map_err(|e| t!("runner.file_not_loadable", error = e))?;
+            self.cache.get_now(&path).map_err(|e| detail!("runner_file_not_loadable", error = e))?;
         // Cues started directly (hotkey, OSC) cannot all be armed, so for
         // them this is only reported along with disk underruns.
         if loaded_now && (!self.is_direct_go(go) || self.settings.underrun_warning) {
-            self.notices.push(Notice::Warning(t!("runner.not_preloaded", cue = name)));
+            self.notices.push(Notice::NotPreloaded { cue: name.clone() });
         }
 
         let rate = self.engine.config().sample_rate as f64;
@@ -2318,7 +2305,7 @@ impl Runner {
         p.paused = paused.is_some();
         let loading = !ready_at(&p.buffer, play_from);
 
-        let voice = self.engine.play(p).map_err(|e| e.to_string())?;
+        let voice = self.engine.play(p).map_err(|e| e.detail())?;
         // The next item of a ducked playlist starts ducked.
         let duck = self.duck_gain(id);
         if duck < 1.0 {
@@ -2528,8 +2515,17 @@ impl Runner {
                 _ => None,
             };
             let lead = near_end.map(|(_, lead)| lead);
-            match self.start_sound(id, &item, &label(&cue), carry.level, carry.speed, go, lead, None, paused)
-            {
+            match self.start_sound(
+                id,
+                &item,
+                &CueName::of(&cue),
+                carry.level,
+                carry.speed,
+                go,
+                lead,
+                None,
+                paused,
+            ) {
                 Ok(()) => {
                     if let Some(a) = self.active.last_mut() {
                         (a.item, a.continues) = (Some(Item { step, file, count }), !last);
@@ -2543,12 +2539,11 @@ impl Runner {
                     self.arm();
                     return true;
                 }
-                Err(e) => self.notices.push(Notice::Error(t!(
-                    "runner.item_error",
-                    cue = label(&cue),
-                    item = file + 1,
-                    error = e
-                ))),
+                Err(e) => self.notices.push(Notice::CueFailed {
+                    cue: CueName::of(&cue),
+                    item: Some(file + 1),
+                    error: e,
+                }),
             }
         }
         false
@@ -2652,7 +2647,7 @@ impl Runner {
             if !self.is_running_tree(target) {
                 // A start cue starting itself (or one that starts it) would never end.
                 if self.goto_depth >= GOTO_DEPTH {
-                    self.notices.push(Notice::Error(t!("runner.start_loop", cue = label(cue))));
+                    self.notices.push(Notice::StartLoop { cue: CueName::of(cue) });
                     return;
                 }
                 self.goto_depth += 1;
@@ -2664,7 +2659,7 @@ impl Runner {
             if self.is_paused(&ids) && !self.is_playing(Some(&ids)) {
                 self.set_paused(Some(&ids), false, now);
             } else if let Some(cue) = self.show.cue(target) {
-                self.notices.push(Notice::Warning(t!("runner.already_running", cue = label(cue))));
+                self.notices.push(Notice::AlreadyRunning { cue: CueName::of(cue) });
             }
         }
     }
@@ -2706,7 +2701,7 @@ impl Runner {
         let mut longest = Duration::ZERO;
         let stop = f.action == VolumeAction::FadeStop;
         if !stop {
-            self.warn_stopping(hit, &t!("runner.what.fade_to_level"));
+            self.warn_stopping(hit, FadingIgnores::FadeToLevel);
         }
         let show = &self.show;
         let targets: Vec<(VoiceId, f64, f64, f64, f64, bool)> = self
@@ -2769,10 +2764,10 @@ impl Runner {
         (longest, voices.into_iter().map(|v| (v, Held::Gain)).collect())
     }
 
-    /// Warns about chosen targets fading out to a stop, which `what` leaves
+    /// Warns about chosen targets fading out to a stop, which the action leaves
     /// alone (it would undo the stop); like starting a running cue. Targets
     /// "all" and an output take such cues in by nature and stay quiet.
-    fn warn_stopping(&mut self, hit: &Hit, what: &str) {
+    fn warn_stopping(&mut self, hit: &Hit, ignores: FadingIgnores) {
         let Hit::Cues { ids, .. } = hit else { return };
         let mut fading: Vec<CueId> = Vec::new();
         for a in self.active.iter().filter(|a| (a.stopping || a.excluded) && ids.contains(&a.cue)) {
@@ -2782,8 +2777,7 @@ impl Runner {
         }
         for id in fading {
             if let Some(cue) = self.show.cue(id) {
-                let message = t!("runner.fading_no_effect", cue = label(cue), what = what);
-                self.notices.push(Notice::Warning(message));
+                self.notices.push(Notice::FadingNoEffect { cue: CueName::of(cue), ignores });
             }
         }
     }
@@ -2870,7 +2864,7 @@ impl Runner {
     /// over `d`; cues fading out to a stop are left alone. Returns the
     /// voices it moves.
     fn apply_reset(&mut self, hit: &Hit, d: Duration) -> Vec<(VoiceId, Held)> {
-        self.warn_stopping(hit, &t!("runner.what.reset"));
+        self.warn_stopping(hit, FadingIgnores::Reset);
         let show = &self.show;
         /// Where a voice goes back to: gain, pan, and rate and pitch if a
         /// rate cue moved them.
@@ -2928,7 +2922,7 @@ impl Runner {
         }
         for cue in missing {
             if let Some(c) = self.show.cue(cue) {
-                self.notices.push(Notice::Warning(t!("runner.mark_missing", cue = label(c))));
+                self.notices.push(Notice::MarkMissing { cue: CueName::of(c) });
             }
         }
         self.seek_voices(&seeks, now, crossfade);
@@ -2980,11 +2974,11 @@ impl Runner {
     }
 
     /// Sends all messages of an OSC cue; stops at the first failure.
-    fn send_osc(&self, cue: &jq_show::OscCue) -> Result<(), String> {
-        let device = cue.device.as_deref().ok_or_else(|| t!("runner.no_osc_device"))?;
+    fn send_osc(&self, cue: &jq_show::OscCue) -> Result<(), Detail> {
+        let device = cue.device.as_deref().ok_or_else(|| detail!("runner_no_osc_device"))?;
         let target = osc::device_target(&self.show, &self.settings, device)
-            .ok_or_else(|| t!("runner.osc_device_missing", device = device))?;
-        let out = self.osc_out.as_ref().ok_or_else(|| t!("runner.osc_unavailable"))?;
+            .ok_or_else(|| detail!("runner_osc_device_missing", device = device))?;
+        let out = self.osc_out.as_ref().ok_or_else(|| detail!("runner_osc_unavailable"))?;
         for message in &cue.messages {
             out.send(&target, &osc::encode(message)?)?;
         }
@@ -2992,8 +2986,8 @@ impl Runner {
     }
 
     /// Sends all messages of a MIDI cue; stops at the first failure.
-    fn send_midi(&mut self, cue: &jq_show::MidiCue) -> Result<(), String> {
-        let out = self.midi_out.as_mut().ok_or_else(|| t!("runner.no_midi_output"))?;
+    fn send_midi(&mut self, cue: &jq_show::MidiCue) -> Result<(), Detail> {
+        let out = self.midi_out.as_mut().ok_or_else(|| detail!("runner_no_midi_output"))?;
         for message in &cue.messages {
             out.send(&midi::encode(message)?)?;
         }
@@ -3016,7 +3010,7 @@ impl Runner {
             let crossfade = self.engine.frames(JUMP_CROSSFADE);
             let engine = self.preview_engine.as_mut().unwrap_or(&mut self.engine);
             if let Err(e) = engine.seek(voice, frame, crossfade) {
-                self.notices.push(Notice::Error(t!("runner.preview_error", error = e)));
+                self.notices.push(Notice::PreviewFailed { error: e.detail() });
             }
             return;
         }
@@ -3030,11 +3024,11 @@ impl Runner {
     fn start_preview(&mut self, id: CueId, from: Option<usize>, until: Option<usize>) {
         let Some(CueKind::Sound(s)) = self.show.cue(id).map(|c| &c.kind) else { return };
         if s.is_placeholder() {
-            self.notices.push(Notice::Warning(t!("runner.preview_placeholder")));
+            self.notices.push(Notice::PreviewPlaceholder);
             return;
         }
         if !self.settings.preview_enabled() {
-            self.notices.push(Notice::Warning(t!("runner.no_preview_output")));
+            self.notices.push(Notice::NoPreviewOutput);
             return;
         }
         let path = jq_show::paths::resolve(&self.media_dir, &s.file);
@@ -3058,7 +3052,7 @@ impl Runner {
     fn start_preview_when_loaded(&mut self) {
         let Some(p) = self.preview.as_ref().filter(|p| p.voice.is_none()) else { return };
         if let Some(e) = self.cache.error(&p.path) {
-            self.notices.push(Notice::Error(t!("runner.preview_not_loadable", error = e)));
+            self.notices.push(Notice::PreviewNotLoadable { error: e.clone() });
             self.preview = None;
             return;
         }
@@ -3098,7 +3092,7 @@ impl Runner {
                 }
             }
             Err(e) => {
-                self.notices.push(Notice::Error(t!("runner.preview_error", error = e)));
+                self.notices.push(Notice::PreviewFailed { error: e.detail() });
                 self.preview = None;
             }
         }
@@ -3121,7 +3115,7 @@ impl Runner {
         let Some(voice) = self.preview.take().and_then(|p| p.voice) else { return };
         let engine = self.preview_engine.as_mut().unwrap_or(&mut self.engine);
         if let Err(e) = engine.stop(voice) {
-            self.notices.push(Notice::Error(t!("runner.preview_error", error = e)));
+            self.notices.push(Notice::PreviewFailed { error: e.detail() });
         }
     }
 
@@ -3344,7 +3338,7 @@ impl Runner {
 
     fn send(&mut self, f: impl FnOnce(&mut Controller) -> Result<(), jq_engine::EngineError>) {
         if let Err(e) = f(&mut self.engine) {
-            self.notices.push(Notice::Error(t!("runner.engine_error", error = e)));
+            self.notices.push(Notice::EngineFailed { error: e.detail() });
         }
     }
 }
@@ -3514,14 +3508,6 @@ fn cancel_follow(a: &mut Active) -> VoiceId {
     a.on_exit.clear();
     a.continues = false;
     a.voice
-}
-
-fn label(cue: &Cue) -> String {
-    match (cue.number.is_empty(), cue.title.is_empty()) {
-        (false, false) => t!("cue.label_both", number = cue.number, title = cue.title),
-        (false, true) => cue.number.clone(),
-        _ => t!("cue.label_title", title = cue.title),
-    }
 }
 
 /// Seconds from the show or settings as a duration; negative and NaN are 0.

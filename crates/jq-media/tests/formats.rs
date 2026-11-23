@@ -372,7 +372,7 @@ fn unsupported_formats_are_refused_by_name() {
         ("wavpack.wv", "WavPack"),
     ] {
         let file = path(file);
-        let reason = format!("{codec} is not supported (convert the file to WAV or FLAC)");
+        let reason = jq_i18n::detail!("media_unsupported_codec", codec = codec);
         let reasons = [
             probe_duration(&file).err().map(|e| e.reason()),
             decode_file(&file, 48_000).err().map(|e| e.reason()),
@@ -381,7 +381,7 @@ fn unsupported_formats_are_refused_by_name() {
             Loudness::measure(&file, &|| true).err().map(|e| e.reason()),
         ];
         for got in reasons {
-            assert_eq!(got.as_deref(), Some(reason.as_str()), "{}", file.display());
+            assert_eq!(got.as_ref(), Some(&reason), "{}", file.display());
         }
     }
 }

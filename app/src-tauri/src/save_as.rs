@@ -5,12 +5,14 @@
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 
+use jq_core::Notice;
 use jq_show::ShowFile;
 use jq_show::paths;
 use serde::Deserialize;
 use tauri::State;
 
 use crate::backend::Request;
+use crate::error::{AppError, Error};
 use crate::session::real_path;
 use crate::{Backend, REPLY_TIMEOUT};
 
@@ -31,19 +33,19 @@ pub async fn save_show_as(
     dir: PathBuf,
     name: String,
     media: MediaChoice,
-) -> Result<serde_json::Value, String> {
+) -> Result<serde_json::Value, Error> {
     let (tx, rx) = mpsc::channel();
     backend.send(Request::SaveAsPlan(tx))?;
     let (media_dir, files) = tauri::async_runtime::spawn_blocking(move || rx.recv_timeout(REPLY_TIMEOUT))
         .await
-        .map_err(|e| e.to_string())?
-        .map_err(|_| jq_i18n::t!("app.no_reply"))??;
+        .map_err(|e| Error::from(e.to_string()))?
+        .map_err(|_| Error::from(AppError::NoReply))??;
     // The show thread checks that nothing it uses now was left out.
     let copied = (media == MediaChoice::Copy).then(|| files.clone());
     let (path, media_root, warnings) =
         tauri::async_runtime::spawn_blocking(move || prepare(&dir, &name, &media_dir, &files, media))
             .await
-            .map_err(|e| e.to_string())??;
+            .map_err(|e| Error::from(e.to_string()))??;
     // From here on the show thread removes the folder if it fails.
     backend.ask(|reply| Request::SaveAs { path, media_root, copied, warnings, reply }).await
 }
@@ -57,8 +59,8 @@ fn prepare(
     media_dir: &Path,
     files: &[String],
     media: MediaChoice,
-) -> Result<(PathBuf, String, Vec<String>), String> {
-    let path = ShowFile::create_folder(dir, name).map_err(|e| e.to_string())?;
+) -> Result<(PathBuf, String, Vec<Notice>), Error> {
+    let path = ShowFile::create_folder(dir, name).map_err(Error::from)?;
     let folder = path.parent().expect("show file lies in its folder").to_owned();
     let filled = match media {
         MediaChoice::Copy => copy(media_dir, &folder.join("media"), files),
@@ -73,16 +75,16 @@ fn prepare(
     }
 }
 
-fn copy(from: &Path, to: &Path, files: &[String]) -> Result<(String, Vec<String>), String> {
+fn copy(from: &Path, to: &Path, files: &[String]) -> Result<(String, Vec<Notice>), Error> {
     std::fs::create_dir(to).map_err(|e| format!("{}: {e}", to.display()))?;
     let copied = paths::copy_media(from, to, files.iter().map(String::as_str))
-        .map_err(|e| jq_i18n::t!("save_as.media_not_copied", error = e))?;
+        .map_err(|e| Error::from(AppError::MediaNotCopied { error: e }))?;
     let mut warnings = Vec::new();
     if !copied.missing.is_empty() {
-        warnings.push(jq_i18n::t!("save_as.missing", count = copied.missing.len(), file = copied.missing[0]));
+        warnings.push(Notice::SaveAsMissing { count: copied.missing.len(), file: copied.missing[0].clone() });
     }
     if !copied.outside.is_empty() {
-        warnings.push(jq_i18n::t!("save_as.outside", count = copied.outside.len(), file = copied.outside[0]));
+        warnings.push(Notice::SaveAsOutside { count: copied.outside.len(), file: copied.outside[0].clone() });
     }
     Ok(("media".into(), warnings))
 }
@@ -123,14 +125,16 @@ mod tests {
 
         let (path, root, warnings) = prepare(&dir, "Kopie", &media, &files, MediaChoice::Copy).unwrap();
         assert_eq!(root, "media");
-        assert!(warnings[0].contains("weg.wav"), "{warnings:?}");
+        assert!(
+            matches!(&warnings[0], Notice::SaveAsMissing { file, .. } if file == "weg.wav"),
+            "{warnings:?}"
+        );
         assert_eq!(std::fs::read(path.with_file_name("media").join("a.wav")).unwrap(), b"a");
 
-        assert!(
-            prepare(&dir, "Kopie", &media, &files, MediaChoice::Copy)
-                .unwrap_err()
-                .contains(jq_i18n::t!("show_file.exists", path = "").trim())
-        );
+        assert!(matches!(
+            prepare(&dir, "Kopie", &media, &files, MediaChoice::Copy),
+            Err(Error::Show(jq_show::ShowError::Exists { .. }))
+        ));
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

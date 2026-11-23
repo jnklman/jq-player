@@ -14,6 +14,7 @@
 //! get the native title bar (`WindowSupport::native_frame`), and overlays
 //! are not offered: an overlay in the layout opens as a normal window.
 
+use jq_i18n::{Detail, detail};
 use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -251,11 +252,11 @@ fn centered(screen: Rect, width: f64, height: f64) -> Rect {
 /// ones and closes the others. Async: creating a window from a synchronous
 /// command deadlocks on Windows.
 #[tauri::command]
-pub async fn set_panel_windows(app: AppHandle, windows: Vec<PanelWindow>) -> Result<(), String> {
+pub async fn set_panel_windows(app: AppHandle, windows: Vec<PanelWindow>) -> Result<(), Detail> {
     let state = app.state::<PanelWindows>();
     let support = WindowSupport::new(state.native_frame());
     let windows = supported(windows, support);
-    let mut open = state.open.lock().map_err(|_| jq_i18n::t!("panels.locked"))?;
+    let mut open = state.open.lock().map_err(|_| detail!("panels_locked"))?;
     // Closed by the operator meanwhile.
     open.retain(|panel, _| app.get_webview_window(&label(panel)).is_some());
     let mut failed = Vec::new();
@@ -283,7 +284,7 @@ pub async fn set_panel_windows(app: AppHandle, windows: Vec<PanelWindow>) -> Res
             }
         }
     }
-    if failed.is_empty() { Ok(()) } else { Err(jq_i18n::t!("panels.not_opened", panels = failed.join(", "))) }
+    if failed.is_empty() { Ok(()) } else { Err(detail!("panels_not_opened", panels = failed)) }
 }
 
 fn create(app: &AppHandle, spec: &PanelWindow, support: WindowSupport) -> tauri::Result<()> {

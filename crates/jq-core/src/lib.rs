@@ -5,6 +5,7 @@ pub mod keys;
 mod loader;
 mod media_lock;
 pub mod midi;
+mod notice;
 mod order;
 pub mod osc;
 pub mod peaks;
@@ -15,9 +16,10 @@ mod watch;
 pub use keepalive::{KeepAlive, KeepAliveState};
 pub use loader::{BufferCache, FileLoader, MediaLoader};
 pub use media_lock::MediaLock;
+pub use notice::{CueName, DeviceRole, FadingIgnores, Level, Notice, SentNotice};
 pub use peaks::{PeakCache, Prewarmer};
 pub use runner::{
-    Action, ActiveState, Control, FollowState, LoopGapState, Notice, PassState, RepeatState, Runner, State,
+    Action, ActiveState, Control, FollowState, LoopGapState, PassState, RepeatState, Runner, State,
     StopwatchState, WaitingState,
 };
 pub use settings::{

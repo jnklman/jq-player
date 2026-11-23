@@ -3,6 +3,7 @@
 
 use jq_i18n::t;
 
+use crate::error::ShowError;
 use crate::model::{Advance, AdvanceAt, Cue, CueId, CueKind, GroupCue, GroupMode, LinkId, Show, Targets};
 use crate::number::new_numbers;
 
@@ -168,21 +169,21 @@ impl Editor {
 
     /// Links `ids` with `source`, which they take their shared part from.
     /// Cues already linked bring the cues linked with them along.
-    pub fn link(&mut self, source: CueId, ids: &[CueId]) -> Result<(), String> {
+    pub fn link(&mut self, source: CueId, ids: &[CueId]) -> Result<(), ShowError> {
         let show = &self.show;
-        let template = show.cue(source).ok_or_else(|| t!("edit.cue_not_found"))?;
+        let template = show.cue(source).ok_or(ShowError::CueNotFound)?;
         let mut cues = vec![template];
         for id in ids.iter().filter(|id| **id != source) {
-            cues.push(show.cue(*id).ok_or_else(|| t!("edit.cue_not_found"))?);
+            cues.push(show.cue(*id).ok_or(ShowError::CueNotFound)?);
         }
         if cues.len() < 2 {
-            return Err(t!("edit.link_needs_two"));
+            return Err(ShowError::LinkNeedsTwo);
         }
         if cues.iter().any(|c| !c.can_link()) {
-            return Err(t!("edit.link_not_groups"));
+            return Err(ShowError::LinkNotGroups);
         }
         if cues.iter().any(|c| c.kind.type_name() != template.kind.type_name()) {
-            return Err(t!("edit.link_same_type"));
+            return Err(ShowError::LinkSameType);
         }
         let joined: Vec<LinkId> = cues.iter().filter_map(|c| c.link).collect();
         let link = template.link.unwrap_or_default();
@@ -324,20 +325,20 @@ impl Editor {
     /// Control cues acting on the entry before them that would now hit
     /// another one keep their target by name. The group gets a number if any
     /// of the cues has one, a free one before the first.
-    pub fn group(&mut self, ids: &[CueId]) -> Result<CueId, String> {
+    pub fn group(&mut self, ids: &[CueId]) -> Result<CueId, ShowError> {
         if ids.is_empty() {
-            return Err(t!("edit.nothing_selected"));
+            return Err(ShowError::NothingSelected);
         }
         let list = &self.show.cues;
         if ids.iter().any(|id| !list.iter().any(|c| c.id == *id)) {
-            return Err(t!("edit.group_main_only"));
+            return Err(ShowError::GroupMainOnly);
         }
         let picked = || list.iter().filter(|c| ids.contains(&c.id));
         if picked().any(Cue::is_scene) {
-            return Err(t!("edit.group_not_scenes"));
+            return Err(ShowError::GroupNotScenes);
         }
         if picked().any(|c| matches!(c.kind, CueKind::Group(_))) {
-            return Err(t!("edit.group_not_nested"));
+            return Err(ShowError::GroupNotNested);
         }
         let at = list.iter().take_while(|c| !ids.contains(&c.id)).count();
         let number = picked().any(|c| !c.number.is_empty()).then(|| {
@@ -832,8 +833,8 @@ mod tests {
 
         // Groups don't nest.
         let revision = e.revision();
-        assert_eq!(e.group(&[b]), Err(t!("edit.group_main_only")));
-        assert_eq!(e.group(&[a, g]), Err(t!("edit.group_not_nested")));
+        assert_eq!(e.group(&[b]), Err(ShowError::GroupMainOnly));
+        assert_eq!(e.group(&[a, g]), Err(ShowError::GroupNotNested));
         assert_eq!(e.revision(), revision, "nothing changed");
 
         // Dissolving brings back what grouping took.

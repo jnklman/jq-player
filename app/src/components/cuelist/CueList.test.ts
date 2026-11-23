@@ -34,7 +34,7 @@ const row = (id: string) => document.querySelector<HTMLElement>(`[data-cue="${id
 
 async function list(extra: Parameters<typeof view>[1] = {}, state = runtime({ playhead: 'b' })) {
   const v = view(cues(), extra);
-  v.cue_info.a.timing = [{ kind: 'end_past_file', message: 'End past file' }];
+  v.cue_info.a.timing = [{ kind: 'end_past_file' }];
   await loadShow(v, state);
   return renderUi(CueList);
 }

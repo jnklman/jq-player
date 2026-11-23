@@ -68,7 +68,7 @@ function showView(extra: Parameters<typeof view>[1] = {}) {
       ...extra.show,
     },
   });
-  v.cue_info.s = { ...v.cue_info.s, problems: ['Unknown output'], level_capped: true };
+  v.cue_info.s = { ...v.cue_info.s, problems: [{ kind: 'output_unknown', output: 'gone' }], level_capped: true };
   v.cue_info.s.loudness = [{ lufs: -20, peak_db: -3, suggested_db: -3 }];
   v.cue_info.p.loudness = [null, { lufs: -18, peak_db: -1, suggested_db: -5 }];
   v.cue_info.j = { ...v.cue_info.s, problems: [], target_missing: true, level_capped: false };

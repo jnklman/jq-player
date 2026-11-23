@@ -2,108 +2,145 @@
 //! negative times, a pan out of range, an output the show does not have.
 //! Playback copes with each on its own; these warnings say what it does.
 
-use jq_i18n::t;
+use serde::Serialize;
 
 use crate::model::{AdvanceAt, Cue, CueKind, RATE_MAX, RATE_MIN, SecondTrigger, Show, TRANSPOSE_MAX};
 
-/// What is wrong with the cue's values, as messages in the current language.
-pub fn check_values(cue: &Cue, show: &Show) -> Vec<String> {
+/// A time field a hand-edited show file can hold a negative value in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TimeField {
+    PreWait,
+    FollowTime,
+    Start,
+    FadeIn,
+    FadeOut,
+    Gap,
+    Duration,
+    FadeDuration,
+    StartFrom,
+    Crossfade,
+    Wait,
+}
+
+/// What is wrong with a cue's values (the UI words it). `item`: of a
+/// playlist item's overrides, counted from 1.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ValueIssue {
+    /// Counts as 0.
+    Negative { field: TimeField, item: Option<usize> },
+    /// Will be limited to −1…+1.
+    PanRange { item: Option<usize> },
+    /// Will be limited to `min`–`max` %.
+    RateRange { item: Option<usize>, min: f64, max: f64 },
+    /// Will be limited to ±`max` semitones.
+    TransposeRange { item: Option<usize>, max: f64 },
+    /// The show has no such output: plays on channels 1/2.
+    OutputUnknown { output: String },
+    /// "Next item" on a second trigger of a cue that is no playlist.
+    NextItemOnlyPlaylist,
+}
+
+/// What is wrong with the cue's values.
+pub fn check_values(cue: &Cue, show: &Show) -> Vec<ValueIssue> {
     let mut issues = Vec::new();
-    let mut negative = |value: f64, name: String| {
+    let mut negative = |value: f64, field: TimeField| {
         if value < 0.0 {
-            issues.push(t!("check.negative", name = name));
+            issues.push(ValueIssue::Negative { field, item: None });
         }
     };
-    negative(cue.pre_wait, t!("check.field.pre_wait"));
+    negative(cue.pre_wait, TimeField::PreWait);
     if let AdvanceAt::After { secs } | AdvanceAt::BeforeEnd { secs } = cue.advance.at {
-        negative(secs, t!("check.field.follow_time"));
+        negative(secs, TimeField::FollowTime);
     }
     let output = match &cue.kind {
         CueKind::Sound(s) => {
-            negative(s.start, t!("check.field.start"));
-            negative(s.fade_in, t!("check.field.fade_in"));
-            negative(s.fade_out, t!("check.field.fade_out"));
-            speed_issues(s.speed.rate, s.speed.transpose, &mut issues);
+            negative(s.start, TimeField::Start);
+            negative(s.fade_in, TimeField::FadeIn);
+            negative(s.fade_out, TimeField::FadeOut);
+            speed_issues(s.speed.rate, s.speed.transpose, None, &mut issues);
             Some((&s.output, Some(s.pan)))
         }
         CueKind::Playlist(p) => {
-            negative(p.fade_in, t!("check.field.fade_in"));
-            negative(p.fade_out, t!("check.field.fade_out"));
-            negative(p.gap, t!("check.field.gap"));
-            speed_issues(p.speed.rate, p.speed.transpose, &mut issues);
+            negative(p.fade_in, TimeField::FadeIn);
+            negative(p.fade_out, TimeField::FadeOut);
+            negative(p.gap, TimeField::Gap);
+            speed_issues(p.speed.rate, p.speed.transpose, None, &mut issues);
             // Overridden values of single items, by number.
             for (i, o) in p.items.iter().map(|item| &item.overrides).enumerate() {
-                let mut item = Vec::new();
-                let mut negative = |value: Option<f64>, name: String| {
+                let item = Some(i + 1);
+                let times = [
+                    (Some(o.start), TimeField::Start),
+                    (o.fade_in, TimeField::FadeIn),
+                    (o.fade_out, TimeField::FadeOut),
+                ];
+                for (value, field) in times {
                     if value.is_some_and(|v| v < 0.0) {
-                        item.push(t!("check.negative", name = name));
+                        issues.push(ValueIssue::Negative { field, item });
                     }
-                };
-                negative(Some(o.start), t!("check.field.start"));
-                negative(o.fade_in, t!("check.field.fade_in"));
-                negative(o.fade_out, t!("check.field.fade_out"));
-                speed_issues(o.rate.unwrap_or(100.0), o.transpose.unwrap_or(0.0), &mut item);
-                if o.pan.is_some_and(|pan| !(-1.0..=1.0).contains(&pan)) {
-                    item.push(t!("check.pan_range"));
                 }
-                issues.extend(item.into_iter().map(|issue| t!("check.item", number = i + 1, issue = issue)));
+                speed_issues(o.rate.unwrap_or(100.0), o.transpose.unwrap_or(0.0), item, &mut issues);
+                if o.pan.is_some_and(|pan| !(-1.0..=1.0).contains(&pan)) {
+                    issues.push(ValueIssue::PanRange { item });
+                }
             }
             Some((&p.output, Some(p.pan)))
         }
         CueKind::Rate(r) => {
-            negative(r.duration, t!("check.field.duration"));
-            speed_issues(r.rate.unwrap_or(100.0), r.transpose.unwrap_or(0.0), &mut issues);
+            negative(r.duration, TimeField::Duration);
+            speed_issues(r.rate.unwrap_or(100.0), r.transpose.unwrap_or(0.0), None, &mut issues);
             None
         }
         CueKind::Volume(f) => {
-            negative(f.duration.unwrap_or(0.0), t!("check.field.fade_duration"));
+            negative(f.duration.unwrap_or(0.0), TimeField::FadeDuration);
             None
         }
         CueKind::Pan(p) => {
-            negative(p.duration, t!("check.field.duration"));
+            negative(p.duration, TimeField::Duration);
             if !(-1.0..=1.0).contains(&p.pan) {
-                issues.push(t!("check.pan_range"));
+                issues.push(ValueIssue::PanRange { item: None });
             }
             None
         }
         CueKind::Reset(r) => {
-            negative(r.duration, t!("check.field.duration"));
+            negative(r.duration, TimeField::Duration);
             None
         }
         CueKind::StartStop(c) => {
-            negative(c.from.unwrap_or(0.0), t!("check.field.start_from"));
+            negative(c.from.unwrap_or(0.0), TimeField::StartFrom);
             None
         }
         CueKind::Position(p) => {
-            negative(p.crossfade_ms, t!("check.field.crossfade"));
+            negative(p.crossfade_ms, TimeField::Crossfade);
             None
         }
         CueKind::Wait(w) => {
-            negative(w.duration, t!("check.field.wait"));
+            negative(w.duration, TimeField::Wait);
             None
         }
         _ => None,
     };
     if let Some((output, pan)) = output {
         if pan.is_some_and(|pan| !(-1.0..=1.0).contains(&pan)) {
-            issues.push(t!("check.pan_range"));
+            issues.push(ValueIssue::PanRange { item: None });
         }
         if !show.outputs.iter().any(|o| &o.id == output) {
-            issues.push(t!("check.output_missing", output = output));
+            issues.push(ValueIssue::OutputUnknown { output: output.clone() });
         }
     }
     if cue.second_trigger == SecondTrigger::NextItem && !matches!(cue.kind, CueKind::Playlist(_)) {
-        issues.push(t!("check.next_item_only_playlist"));
+        issues.push(ValueIssue::NextItemOnlyPlaylist);
     }
     issues
 }
 
-fn speed_issues(rate: f64, transpose: f64, issues: &mut Vec<String>) {
+fn speed_issues(rate: f64, transpose: f64, item: Option<usize>, issues: &mut Vec<ValueIssue>) {
     if !(RATE_MIN..=RATE_MAX).contains(&rate) {
-        issues.push(t!("check.rate_range", min = RATE_MIN, max = RATE_MAX));
+        issues.push(ValueIssue::RateRange { item, min: RATE_MIN, max: RATE_MAX });
     }
     if !(-TRANSPOSE_MAX..=TRANSPOSE_MAX).contains(&transpose) {
-        issues.push(t!("check.transpose_range", max = TRANSPOSE_MAX));
+        issues.push(ValueIssue::TransposeRange { item, max: TRANSPOSE_MAX });
     }
 }
 
@@ -111,6 +148,15 @@ fn speed_issues(rate: f64, transpose: f64, issues: &mut Vec<String>) {
 mod tests {
     use super::*;
     use crate::model::SoundCue;
+    use ValueIssue::*;
+
+    const RATE: ValueIssue = RateRange { item: None, min: RATE_MIN, max: RATE_MAX };
+    const TRANSPOSE: ValueIssue = TransposeRange { item: None, max: TRANSPOSE_MAX };
+    const PAN: ValueIssue = PanRange { item: None };
+
+    fn negative(field: TimeField) -> ValueIssue {
+        Negative { field, item: None }
+    }
 
     #[test]
     fn hand_edited_item_overrides_are_reported_by_number() {
@@ -125,13 +171,14 @@ mod tests {
         };
         p.items[1].overrides = o;
         let issues = check_values(&Cue::new(CueKind::Playlist(p)), &show);
+        let item = Some(2);
         assert_eq!(
             issues,
             [
-                "Item 2: Start is negative – counts as 0",
-                "Item 2: Fade-in is negative – counts as 0",
-                "Item 2: Rate is outside 50–150 % – will be limited",
-                "Item 2: Pan is outside −1…+1 – will be limited",
+                Negative { field: TimeField::Start, item },
+                Negative { field: TimeField::FadeIn, item },
+                RateRange { item, min: RATE_MIN, max: RATE_MAX },
+                PanRange { item },
             ]
         );
     }
@@ -141,10 +188,7 @@ mod tests {
         let show = Show { outputs: Show::default().outputs, ..Show::default() };
         let mut cue = Cue::new(CueKind::Sound(SoundCue::new("a.wav")));
         cue.second_trigger = SecondTrigger::NextItem;
-        assert_eq!(
-            check_values(&cue, &show),
-            ["“Next item” on a second trigger only exists for playlists – ignored"]
-        );
+        assert_eq!(check_values(&cue, &show), [NextItemOnlyPlaylist]);
         let mut list = Cue::new(CueKind::Playlist(crate::model::PlaylistCue::new(vec!["a.wav".into()])));
         list.second_trigger = SecondTrigger::NextItem;
         assert!(check_values(&list, &show).is_empty());
@@ -165,13 +209,13 @@ mod tests {
         assert_eq!(
             check_values(&cue, &show),
             [
-                "Pre-wait is negative – counts as 0",
-                "Start is negative – counts as 0",
-                "Fade-in is negative – counts as 0",
-                "Rate is outside 50–150 % – will be limited",
-                "Transposition is outside ±12 semitones – will be limited",
-                "Pan is outside −1…+1 – will be limited",
-                "Output “gone” does not exist in the show – plays on channels 1/2",
+                negative(TimeField::PreWait),
+                negative(TimeField::Start),
+                negative(TimeField::FadeIn),
+                RATE,
+                TRANSPOSE,
+                PAN,
+                OutputUnknown { output: "gone".into() },
             ]
         );
     }
@@ -185,52 +229,47 @@ mod tests {
             edit(&mut kind);
             check_values(&Cue::new(kind), &show)
         };
-        let negative = |name: &str| format!("{name} is negative – counts as 0");
 
         assert!(control(ControlKind::Rate, |_| {}).is_empty(), "new cues are fine");
         assert_eq!(
             control(ControlKind::Rate, |k| if let CueKind::Rate(r) = k {
                 (r.duration, r.rate, r.transpose) = (-1.0, Some(200.0), Some(20.0));
             }),
-            [
-                negative("Duration"),
-                "Rate is outside 50–150 % – will be limited".into(),
-                "Transposition is outside ±12 semitones – will be limited".into()
-            ]
+            [negative(TimeField::Duration), RATE, TRANSPOSE]
         );
         assert_eq!(
             control(ControlKind::Volume, |k| if let CueKind::Volume(v) = k {
                 v.duration = Some(-2.0);
             }),
-            [negative("Fade duration")]
+            [negative(TimeField::FadeDuration)]
         );
         assert_eq!(
             control(ControlKind::Pan, |k| if let CueKind::Pan(p) = k {
                 (p.duration, p.pan) = (-1.0, 1.5);
             }),
-            [negative("Duration"), "Pan is outside −1…+1 – will be limited".into()]
+            [negative(TimeField::Duration), PAN]
         );
         assert_eq!(
             control(ControlKind::Reset, |k| if let CueKind::Reset(r) = k {
                 r.duration = -1.0;
             }),
-            [negative("Duration")]
+            [negative(TimeField::Duration)]
         );
         assert_eq!(
             control(ControlKind::StartStop, |k| if let CueKind::StartStop(s) = k {
                 s.from = Some(-4.0);
             }),
-            [negative("Start from")]
+            [negative(TimeField::StartFrom)]
         );
         assert_eq!(
             control(ControlKind::Position, |k| if let CueKind::Position(p) = k {
                 p.crossfade_ms = -10.0;
             }),
-            [negative("Crossfade")]
+            [negative(TimeField::Crossfade)]
         );
         let mut wait = Cue::new(CueKind::Wait(WaitCue { duration: -1.0 }));
         wait.advance = crate::model::Advance::new(AdvanceAt::After { secs: -2.0 });
-        assert_eq!(check_values(&wait, &show), [negative("Follow time"), negative("Wait time")]);
+        assert_eq!(check_values(&wait, &show), [negative(TimeField::FollowTime), negative(TimeField::Wait)]);
     }
 
     #[test]
@@ -242,11 +281,11 @@ mod tests {
         assert_eq!(
             check_values(&Cue::new(CueKind::Playlist(p)), &show),
             [
-                "Fade-out is negative – counts as 0",
-                "Gap is negative – counts as 0",
-                "Transposition is outside ±12 semitones – will be limited",
-                "Pan is outside −1…+1 – will be limited",
-                "Output “gone” does not exist in the show – plays on channels 1/2",
+                negative(TimeField::FadeOut),
+                negative(TimeField::Gap),
+                TRANSPOSE,
+                PAN,
+                OutputUnknown { output: "gone".into() },
             ]
         );
     }

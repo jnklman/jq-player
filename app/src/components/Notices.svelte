@@ -3,7 +3,7 @@
   import { Button } from '$lib/components/ui/button';
 
   import { t } from '../lib/i18n/index.svelte';
-  import { dismiss, ui } from '../lib/store.svelte';
+  import { dismiss, noticeMessage, ui } from '../lib/store.svelte';
 </script>
 
 <!-- Above dialogs (z-50), and clickable while one is open (it turns off pointer events on the body):
@@ -21,7 +21,7 @@
       ]}
     >
       <!-- Long paths break anywhere, so the close button stays inside. -->
-      <span class="min-w-0 grow wrap-break-word">{notice.message}</span>
+      <span class="min-w-0 grow wrap-break-word">{noticeMessage(notice)}</span>
       <Button
         variant="ghost"
         size="icon-xs"

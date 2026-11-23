@@ -542,7 +542,7 @@ export interface Output {
 
 export interface OutputInfo {
   host: string;
-  /** Short device name. */
+  /** Short device name (see `SILENT_DEVICE`). */
   device: string;
   /** Full description (manufacturer, type, connection) for tooltips. */
   device_detail: string;
@@ -784,14 +784,27 @@ export interface MidiBinding {
 /** What the next MIDI control is learned for: a global action or a cue's `midi_trigger` (an undoable edit). */
 export type LearnTarget = { kind: 'action'; action: ControlAction } | { kind: 'cue'; cue: CueId };
 
+export interface DefaultConfig {
+  sample_rate: number;
+  channels: number;
+  sample_format: string;
+}
+
+/**
+ * A device name (and description) the program gives itself: the silent output that stands in when no device opens,
+ * and PipeWire's default output. `deviceName`/`deviceDetail` (lib/format.ts) word them; any other is the system's.
+ */
+export const SILENT_DEVICE = '@silent';
+export const DEFAULT_DEVICE = '@default';
+
 export interface DeviceInfo {
   id: string;
-  /** Short name for lists. */
+  /** Short name for lists (see `SILENT_DEVICE`). */
   name: string;
   /** Full description (manufacturer, type, connection). */
   description: string;
-  /** e.g. "48000 Hz, 2 Kanäle, F32"; null if it cannot be opened. */
-  default_config: string | null;
+  /** Null if it cannot be opened. */
+  default_config: DefaultConfig | null;
   /** Most channels the device takes; null if it cannot tell. */
   max_channels: number | null;
   /** Smallest and largest callback buffer in frames; null if the host does not tell. */
@@ -828,14 +841,14 @@ export interface CueInfo {
   /** The volume is below `level_limits.min_db` without being set to silence (−120), so the cue is silent; e.g. after
    * editing the show file by hand. */
   level_silenced: boolean;
-  /** Further problems as messages: values only a hand-edited show file has (negative times, pan out of range, unknown
-   * output), a hotkey or MIDI trigger that never fires (inside a group, fixed key, bound globally) or a release that
-   * does nothing, a file that is there but no audio, a start cue's `from` past a target's end
-   * or before its start (or on a target that is no sound cue), control-cue targets that act on nothing (none chosen,
-   * deleted, no previous entry, unknown output, "all"/output on a start cue, a deleted or unset stopwatch) and start
-   * cues starting themselves without a pre-wait, and position jumps a target cannot make (past its end, a mark it
-   * lacks, anything but a relative jump on a playlist). */
-  problems: string[];
+  /** Further problems (worded by `lib/problems.ts`): values only a hand-edited show file has (negative times, pan out
+   * of range, unknown output), a hotkey or MIDI trigger that never fires (inside a group, fixed key, bound globally) or
+   * a release that does nothing, a file that is there but no audio, a start cue's `from` past a target's end or before
+   * its start (or on a target that is no sound cue), control-cue targets that act on nothing (none chosen, deleted, no
+   * previous entry, unknown output, "all"/output on a start cue, a deleted or unset stopwatch) and start cues starting
+   * themselves without a pre-wait, and position jumps a target cannot make (past its end, a mark it lacks, anything
+   * but a relative jump on a playlist). */
+  problems: Problem[];
   /** Per file (a playlist's in order); null until measured. */
   loudness: (FileLoudness | null)[];
   /** Some file's loudness is still being measured in the background (waits while cues play). */
@@ -874,9 +887,264 @@ export type TimingIssue =
   | { kind: 'mark_outside'; index: number }
   | { kind: 'mark_duplicate'; index: number }
   | { kind: 'fade_in_too_long' }
-  | { kind: 'end_fade_too_long' };
+  | { kind: 'end_fade_too_long' }
+  | { kind: 'loop_overlap_cut' };
 
-export type TimingWarning = TimingIssue & { message: string };
+/** `index`/`other` count from 0. */
+export type TimingWarning = TimingIssue;
+
+/** A time field a hand-edited show file can hold a negative value in. */
+export type TimeField =
+  | 'pre_wait'
+  | 'follow_time'
+  | 'start'
+  | 'fade_in'
+  | 'fade_out'
+  | 'gap'
+  | 'duration'
+  | 'fade_duration'
+  | 'start_from'
+  | 'crossfade'
+  | 'wait';
+
+/** A value only a hand-edited show file holds; `item`: of a playlist item's overrides (from 1). */
+export type ValueIssue =
+  | { kind: 'negative'; field: TimeField; item: number | null }
+  | { kind: 'pan_range'; item: number | null }
+  | { kind: 'rate_range'; item: number | null; min: number; max: number }
+  | { kind: 'transpose_range'; item: number | null; max: number }
+  | { kind: 'output_unknown'; output: string }
+  | { kind: 'next_item_only_playlist' };
+
+/** `time`, `end`, `start` in seconds; `index` of a mark from 1, `item` of a playlist from 1. */
+export type CueProblem =
+  | { kind: 'start_from_sound_only'; cue: CueName }
+  | { kind: 'start_from_after_end'; time: number; cue: CueName; end: number }
+  | { kind: 'start_from_before_start'; time: number; cue: CueName; start: number }
+  | { kind: 'no_stopwatch' }
+  | { kind: 'stopwatch_deleted' }
+  | { kind: 'target_deleted' }
+  | { kind: 'targets_deleted'; gone: number; total: number }
+  | { kind: 'no_previous' }
+  | { kind: 'start_needs_chosen' }
+  | { kind: 'output_missing'; output: string }
+  | { kind: 'starts_itself' }
+  | { kind: 'position_playlist'; cue: CueName }
+  | { kind: 'position_after_end'; time: number; cue: CueName; end: number }
+  | { kind: 'position_before_start'; time: number; cue: CueName; start: number }
+  | { kind: 'no_marks'; cue: CueName }
+  | { kind: 'mark_missing'; index: number; cue: CueName; count: number }
+  | { kind: 'hotkey_no_key' }
+  | { kind: 'hotkey_outside_main'; key: Chord }
+  | { kind: 'hotkey_reserved'; key: Chord }
+  | { kind: 'hotkey_taken_globally'; key: Chord; action: ControlAction }
+  | { kind: 'midi_outside_main' }
+  | { kind: 'midi_taken_globally'; action: ControlAction }
+  | { kind: 'release_ignored' }
+  | { kind: 'file_unreadable'; item: number | null; reason: Detail };
+
+export type Problem = ValueIssue | CueProblem;
+
+/** A setting a number is checked for. */
+export type CheckedSetting =
+  'fade_all' | 'end_warning' | 'panic_fade' | 'go_lockout' | 'volume_step' | 'pan_step' | 'rate_step';
+
+/**
+ * Why a command failed (a command's rejection; `lib/errors.ts` words it), or a `Detail` of one. `error` fields that are
+ * `string` hold a system's text.
+ */
+export type CommandError =
+  // The app and its show thread
+  | { kind: 'no_show' }
+  | { kind: 'no_reply' }
+  | { kind: 'backend_locked' }
+  | { kind: 'thread_ended' }
+  | { kind: 'writer_panicked' }
+  | { kind: 'peak_cache_not_cleared'; error: string }
+  | { kind: 'media_dir_not_found'; path: string }
+  | { kind: 'file_manager_failed'; error: string }
+  // Editing and the show's folders
+  | { kind: 'show_mode_locked' }
+  | { kind: 'media_dir_busy_cue' }
+  | { kind: 'media_dir_busy_files' }
+  | { kind: 'decide_recovery' }
+  | { kind: 'media_dir_unreachable'; error: string }
+  | { kind: 'not_a_folder'; path: string }
+  | { kind: 'show_dir_unreachable'; error: string }
+  | { kind: 'media_dir_not_storable'; path: string }
+  | { kind: 'media_dir_has_show' }
+  | { kind: 'name_empty' }
+  | { kind: 'save_as_busy_cue' }
+  | { kind: 'save_as_busy_files' }
+  | { kind: 'save_as_changed' }
+  | { kind: 'media_not_copied'; error: Detail }
+  | { kind: 'convert_control_only' }
+  | { kind: 'countdown_range'; name: string }
+  | { kind: 'stopwatch_id'; id: string }
+  | { kind: 'stopwatch_name' }
+  | { kind: 'device_id'; id: string }
+  | { kind: 'device_address'; name: string }
+  | { kind: 'playlist_not_found' }
+  | { kind: 'item_not_found' }
+  | { kind: 'sound_not_found' }
+  | { kind: 'file_unused' }
+  | { kind: 'loudness_range'; min: number; max: number }
+  | { kind: 'search_running' }
+  | { kind: 'invalid_file_name' }
+  | { kind: 'no_group_in_group' }
+  | { kind: 'group_not_found' }
+  | { kind: 'output_id'; id: string }
+  | { kind: 'output_name' }
+  | { kind: 'main_output' }
+  | { kind: 'output_in_use'; output: string; cue: CueName }
+  | { kind: 'level_limits'; min: number; max: number }
+  | { kind: 'level_gap' }
+  | { kind: 'next_item_playlist_only' }
+  | { kind: 'scene_main_only' }
+  | { kind: 'goto_top_level' }
+  | { kind: 'others_fade'; max: number }
+  | { kind: 'others_duck' }
+  | { kind: 'hotkey_main_only' }
+  | { kind: 'hotkey_fixed'; key: Chord }
+  | { kind: 'hotkey_global'; key: Chord; action: ControlAction }
+  | { kind: 'midi_main_only' }
+  | { kind: 'midi_global'; action: ControlAction }
+  | { kind: 'no_midi_input' }
+  | { kind: 'keyboard_only'; action: ControlAction }
+  // Settings
+  | { kind: 'setting_negative'; setting: CheckedSetting }
+  | { kind: 'setting_positive'; setting: CheckedSetting }
+  | { kind: 'jump_times' }
+  | { kind: 'keep_alive_level'; min: number; max: number }
+  | { kind: 'msc_device' }
+  | { kind: 'buffer_size'; min: number; max: number }
+  | { kind: 'osc_port' }
+  | { kind: 'channels_from_one' }
+  | { kind: 'min_channels' }
+  | { kind: 'settings_show_mode_locked' }
+  | { kind: 'audio_device_busy' }
+  | { kind: 'device_too_few_channels'; name: string; max: number; channels: number }
+  /** An output (`null`: the preview) on channels the device `name` lacks: it is set to (`set`) or has `limit`. */
+  | {
+      kind: 'pair_missing';
+      output: string | null;
+      first: number;
+      second: number;
+      name: string;
+      limit: number;
+      set: boolean;
+    }
+  // Updates
+  | { kind: 'update_check_failed'; error: string }
+  | { kind: 'update_install_failed'; error: string }
+  | { kind: 'update_busy' }
+  | { kind: 'update_locked' }
+  | { kind: 'update_installing' }
+  | { kind: 'update_unsaved' }
+  | { kind: 'update_none_pending' }
+  | { kind: 'update_writes_pending' }
+  | { kind: 'update_portable' }
+  | { kind: 'update_rpm' }
+  | { kind: 'update_not_bundled' }
+  // Show edits and show files
+  | { kind: 'cue_not_found' }
+  | { kind: 'link_needs_two' }
+  | { kind: 'link_not_groups' }
+  | { kind: 'link_same_type' }
+  | { kind: 'nothing_selected' }
+  | { kind: 'group_main_only' }
+  | { kind: 'group_not_scenes' }
+  | { kind: 'group_not_nested' }
+  | { kind: 'file_io'; path: string; error: string }
+  | { kind: 'file_invalid'; path: string; error: string }
+  | { kind: 'file_wrong_format'; path: string; found: string }
+  | { kind: 'file_too_new'; path: string; found: number; current: number }
+  | { kind: 'invalid_name'; name: string }
+  | { kind: 'exists'; path: string }
+  // Key bindings
+  | { kind: 'key_missing'; action: ControlAction }
+  | { kind: 'key_fixed'; key: Chord }
+  | { kind: 'key_taken'; key: Chord; action: ControlAction }
+  | { kind: 'too_many_keys'; action: ControlAction; max: number }
+  | LayerMessage;
+
+/** What the backend's layers (audio, engine, media files, MIDI, OSC, playback) say, worded by `lib/errors.ts`. */
+export type LayerMessage =
+  // Audio devices
+  | { kind: 'audio_host_unavailable'; name: string; available: string }
+  | { kind: 'audio_no_default_device' }
+  | { kind: 'audio_device_not_found'; name: string }
+  | { kind: 'audio_unsupported_format'; format: string }
+  | { kind: 'audio_cpal'; error: string }
+  | { kind: 'audio_stopped' }
+  | { kind: 'audio_channels' }
+  | { kind: 'audio_xruns'; count: number }
+  | { kind: 'audio_device_gone' }
+  | { kind: 'audio_stream_invalidated' }
+  | { kind: 'audio_host_lost' }
+  | { kind: 'audio_default_changed' }
+  | { kind: 'audio_no_data' }
+  | { kind: 'audio_lost_recovering'; reason: Detail }
+  | { kind: 'audio_lost_last_attempt'; reason: Detail; error: Detail }
+  // Audio engine
+  | { kind: 'engine_queue_full' }
+  | { kind: 'engine_sample_rate_mismatch'; buffer: number; engine: number }
+  | {
+      kind: 'engine_invalid_region';
+      problem: 'start_after_end' | 'loop_backwards' | 'loop_past_end' | 'loops_unordered' | 'marks_unsorted';
+    }
+  | { kind: 'engine_output_channel'; first: number; second: number; channels: number }
+  // Media files
+  | { kind: 'media_file'; path: string; reason: Detail }
+  | { kind: 'media_no_audio_track' }
+  | { kind: 'media_unsupported_codec'; codec: string }
+  | { kind: 'media_midi' }
+  | { kind: 'media_resample_failed'; message: string }
+  | { kind: 'media_cancelled' }
+  | { kind: 'media_read_error'; error: string }
+  | { kind: 'media_unsupported' }
+  | { kind: 'media_corrupt' }
+  | { kind: 'media_seek_failed' }
+  | { kind: 'media_too_large' }
+  | { kind: 'media_decode_error' }
+  | { kind: 'copy_no_file_name' }
+  | { kind: 'copy_cancelled' }
+  | { kind: 'outside_media' }
+  // MIDI
+  | { kind: 'midi_unavailable'; error: string }
+  | { kind: 'midi_no_input'; name: string }
+  | { kind: 'midi_input_error'; name: string; error: string }
+  | { kind: 'midi_no_output'; name: string }
+  | { kind: 'midi_output_error'; name: string; error: string }
+  | { kind: 'midi_msc_no_cue'; number: string }
+  | {
+      kind: 'midi_out_of_range';
+      what: 'program' | 'controller' | 'value' | 'note' | 'velocity' | 'msc_device';
+      value: number;
+    }
+  | { kind: 'midi_bad_channel'; channel: number }
+  | { kind: 'midi_msc_cue_digits'; text: string }
+  // OSC
+  | { kind: 'osc_sender_stopped'; target: string }
+  | { kind: 'osc_address_not_found'; target: string }
+  | { kind: 'osc_address_slash'; address: string }
+  | { kind: 'osc_encode_failed'; error: string }
+  // Playback
+  | { kind: 'runner_still_copying' }
+  | { kind: 'runner_file_not_loadable'; error: Detail }
+  | { kind: 'runner_no_osc_device' }
+  | { kind: 'runner_osc_device_missing'; device: string }
+  | { kind: 'runner_osc_unavailable' }
+  | { kind: 'runner_no_midi_output' }
+  // Windows and the keyboard
+  | { kind: 'panels_locked' }
+  | { kind: 'panels_not_opened'; panels: string[] }
+  | { kind: 'keylabels_no_display' }
+  | { kind: 'keylabels_no_layout' }
+  | { kind: 'keylabels_unavailable' };
+
+/** What the UI words (`errorText`): a message of a kind, or a system's text shown as it is. */
+export type Detail = string | CommandError;
 
 /**
  * Number of a show view, counted up by the backend for every view it sends (from 1, across shows, until the program
@@ -906,12 +1174,12 @@ export interface ShowView {
   audio: OutputInfo;
   /** Frames per callback as the device runs it (latency = frames / sample_rate); null before the first. */
   audio_frames: number | null;
-  audio_error: string | null;
+  audio_error: Detail | null;
   /**
    * Why the open device stopped playing (unplugged, driver reset, …). Cues
    * run silently meanwhile; the device is opened again as soon as it can be.
    */
-  audio_lost: string | null;
+  audio_lost: Detail | null;
   keep_alive: KeepAliveState;
   settings: LocalSettings;
   /** Sound, playlist and group cues have an entry, others only with `target_missing` or `repeat_blocked`. */
@@ -925,24 +1193,24 @@ export interface ShowView {
   osc: {
     /** UDP port incoming OSC is received on. */
     listening: number | null;
-    error: string | null;
+    error: Detail | null;
   };
   preview: {
     /** Name of the separate preview device, if open. */
     device: string | null;
-    error: string | null;
+    error: Detail | null;
     /** Like `audio_lost`, for the preview device. */
-    lost: string | null;
+    lost: Detail | null;
   };
   midi: {
     /** Name of the open input port. */
     port: string | null;
-    error: string | null;
+    error: Detail | null;
     /** Waiting for a control to learn for this. */
     learning: LearnTarget | null;
     /** Name of the open output port (MIDI cues). */
     out: string | null;
-    out_error: string | null;
+    out_error: Detail | null;
   };
   /** Keys the app keeps for itself (Ctrl+S/N/O/Z/Y/C/X/V/A by the letter on the key, Esc for panic, arrows, Home,
    * End, Delete, Tab, Enter); they cannot be bound. */
@@ -1086,7 +1354,91 @@ export interface CloseCheck {
   imports: number;
 }
 
-export type Notice = { level: 'warning' | 'error'; message: string };
+/** How a notice names a cue (`lib/notices.ts` builds the label). */
+export type CueName = { number: string; title: string };
+export type DeviceRole = 'main' | 'preview';
+
+/**
+ * The `notice` event: a kind with its data; `lib/notices.ts` words it and decides which notices replace each other.
+ * `error` and `reason` are texts from the backend (device, file and network errors), or a `CommandError`. Warnings fade out,
+ * errors stay until dismissed.
+ */
+export type Notice = { level: 'warning' | 'error' } & NoticeKind;
+
+export type NoticeKind =
+  // Runner
+  | { kind: 'already_fading'; cue: CueName }
+  /** `ms` of silence in `file` (a file name): the disk was too slow. */
+  | { kind: 'underrun'; file: string; ms: number }
+  | { kind: 'too_many_stretchers'; cue: CueName }
+  | { kind: 'too_many_voices' }
+  | { kind: 'already_running'; cue: CueName }
+  | { kind: 'placeholder'; cue: CueName }
+  | { kind: 'no_stopwatch_chosen'; cue: CueName }
+  | { kind: 'stopwatch_missing'; cue: CueName }
+  /** A cue (or a playlist `item`, from 1) could not do what it should. */
+  | { kind: 'cue_failed'; cue: CueName; item: number | null; error: Detail }
+  | { kind: 'no_target'; cue: CueName }
+  | { kind: 'target_in_group'; cue: CueName; target: CueName }
+  | { kind: 'target_missing'; cue: CueName }
+  | { kind: 'goto_loop'; cue: CueName }
+  | { kind: 'start_loop'; cue: CueName }
+  | { kind: 'not_preloaded'; cue: CueName }
+  | { kind: 'fading_no_effect'; cue: CueName; ignores: 'fade_to_level' | 'reset' }
+  | { kind: 'mark_missing'; cue: CueName }
+  | { kind: 'preview_placeholder' }
+  | { kind: 'no_preview_output' }
+  | { kind: 'preview_not_loadable'; error: Detail }
+  | { kind: 'preview_failed'; error: Detail }
+  | { kind: 'engine_failed'; error: Detail }
+  | { kind: 'watcher_unavailable'; error: Detail }
+  // Devices and connections
+  | { kind: 'audio_unavailable'; error: Detail }
+  | { kind: 'preview_unavailable'; error: Detail }
+  /** An error of the running stream. */
+  | { kind: 'stream_error'; device: DeviceRole; error: Detail }
+  | { kind: 'device_lost'; device: DeviceRole; name: string; reason: Detail }
+  | { kind: 'device_back'; device: DeviceRole; name: string }
+  /** Now on another device (the system default changed). */
+  | { kind: 'device_switched'; device: DeviceRole; name: string }
+  /** An output (`null`: the preview) is routed to channels the device lacks. */
+  | { kind: 'output_channels'; output: string | null; first: number; second: number; channels: number }
+  | { kind: 'keep_awake_failed'; error: Detail }
+  | { kind: 'osc_listen_failed'; port: number; error: Detail }
+  | { kind: 'osc_send_unavailable'; error: Detail }
+  | { kind: 'midi_in_failed'; error: Detail }
+  | { kind: 'midi_out_failed'; error: Detail }
+  | { kind: 'msc_failed'; error: Detail }
+  | { kind: 'learn_failed'; error: Detail }
+  // Show and media files
+  | { kind: 'writes_pending' }
+  | { kind: 'settings_ignored'; error: Detail }
+  | { kind: 'link_synced'; cue: CueName }
+  | { kind: 'autosave_unreadable'; error: Detail }
+  | { kind: 'autosave_not_deleted'; error: Detail }
+  | { kind: 'file_missing'; file: string }
+  | { kind: 'case_mismatch'; file: string; actual: string }
+  | { kind: 'changed_while_playing'; cue: CueName }
+  | { kind: 'file_now_missing'; file: string }
+  | { kind: 'file_back'; file: string }
+  | { kind: 'file_changed'; file: string }
+  /** A position that does not fit the file (of a playlist `item`, from 1). */
+  | { kind: 'timing'; cue: CueName; item: number | null; issue: TimingIssue }
+  | { kind: 'lock_failed'; count: number; file: string; error: Detail }
+  | { kind: 'not_copied'; file: string; error: Detail }
+  | { kind: 'search_aborted' }
+  | { kind: 'import_failed'; error: Detail }
+  | { kind: 'relinked_some'; relinked: number; missing: number }
+  | { kind: 'normalize_waiting'; count: number }
+  | { kind: 'outside_show_folder'; path: string }
+  | { kind: 'name_taken'; name: string; stored: string }
+  | { kind: 'save_as_missing'; count: number; file: string }
+  | { kind: 'save_as_outside'; count: number; file: string }
+  | { kind: 'startup_open_failed'; path: string; error: Detail }
+  | { kind: 'settings_not_saved'; error: Detail }
+  | { kind: 'autosave_failed'; error: Detail }
+  | { kind: 'writer_panicked' }
+  | { kind: 'internal_error' };
 
 export type Action =
   | { action: 'go' }
@@ -1162,7 +1514,7 @@ export interface UnusedFile {
 export interface CleanedMedia {
   deleted: number;
   /** Files that could not be deleted, each as "path: reason". */
-  failed: string[];
+  failed: Detail[];
 }
 
 /** Files of a pick that need a question before they are added. */

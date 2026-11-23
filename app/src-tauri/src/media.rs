@@ -11,6 +11,7 @@ use serde::Serialize;
 use tauri::State;
 
 use crate::backend::Request;
+use crate::error::{AppError, Error};
 use crate::{Backend, REPLY_TIMEOUT};
 
 #[derive(Serialize)]
@@ -24,17 +25,17 @@ pub struct UnusedFile {
 pub struct Cleaned {
     deleted: usize,
     /// Files that could not be deleted, with the reason.
-    failed: Vec<String>,
+    failed: Vec<jq_i18n::Detail>,
 }
 
 /// The media folder and the stored paths the show may still need.
-async fn used_media(backend: &Backend) -> Result<(PathBuf, Vec<String>), String> {
+async fn used_media(backend: &Backend) -> Result<(PathBuf, Vec<String>), Error> {
     let (tx, rx) = mpsc::channel();
     backend.send(Request::UsedMedia(tx))?;
     tauri::async_runtime::spawn_blocking(move || rx.recv_timeout(REPLY_TIMEOUT))
         .await
-        .map_err(|e| e.to_string())?
-        .map_err(|_| jq_i18n::t!("app.no_reply"))?
+        .map_err(|e| Error::from(e.to_string()))?
+        .map_err(|_| Error::from(AppError::NoReply))?
 }
 
 fn unused(media_dir: &std::path::Path, used: &[String]) -> Vec<(String, u64)> {
@@ -44,19 +45,19 @@ fn unused(media_dir: &std::path::Path, used: &[String]) -> Vec<(String, u64)> {
 /// Files in the media folder that neither the show (as edited or as saved)
 /// nor the clipboard uses. Fails in show mode.
 #[tauri::command]
-pub async fn unused_media(backend: State<'_, Backend>) -> Result<Vec<UnusedFile>, String> {
+pub async fn unused_media(backend: State<'_, Backend>) -> Result<Vec<UnusedFile>, Error> {
     let (media_dir, used) = used_media(&backend).await?;
     tauri::async_runtime::spawn_blocking(move || {
         unused(&media_dir, &used).into_iter().map(|(file, bytes)| UnusedFile { file, bytes }).collect()
     })
     .await
-    .map_err(|e| e.to_string())
+    .map_err(|e| Error::from(e.to_string()))
 }
 
 /// Deletes `files` (from `unused_media`) for good, leaving out those the
 /// show has started using meanwhile, and the folders left empty.
 #[tauri::command]
-pub async fn clean_media(backend: State<'_, Backend>, files: Vec<String>) -> Result<Cleaned, String> {
+pub async fn clean_media(backend: State<'_, Backend>, files: Vec<String>) -> Result<Cleaned, Error> {
     let (media_dir, used) = used_media(&backend).await?;
     tauri::async_runtime::spawn_blocking(move || {
         let unused: HashSet<String> = unused(&media_dir, &used).into_iter().map(|(file, _)| file).collect();
@@ -64,21 +65,21 @@ pub async fn clean_media(backend: State<'_, Backend>, files: Vec<String>) -> Res
         let failed = paths::remove_media(&media_dir, &files);
         Cleaned {
             deleted: files.len() - failed.len(),
-            failed: failed.into_iter().map(|(file, e)| format!("{file}: {e}")).collect(),
+            failed: failed.into_iter().map(|(file, e)| jq_show::paths::file_detail(file, e)).collect(),
         }
     })
     .await
-    .map_err(|e| e.to_string())
+    .map_err(|e| Error::from(e.to_string()))
 }
 
 /// Opens the selected media folder in the system file manager.
 #[tauri::command]
-pub async fn open_media_dir(backend: State<'_, Backend>) -> Result<(), String> {
+pub async fn open_media_dir(backend: State<'_, Backend>) -> Result<(), Error> {
     let dir = backend.ask(Request::MediaDir).await?;
 
     tauri::async_runtime::spawn_blocking(move || {
         if !dir.is_dir() {
-            return Err(jq_i18n::t!("media.dir_not_found", path = dir.display()));
+            return Err(AppError::MediaDirNotFound { path: dir.display().to_string() }.into());
         }
         #[cfg(target_os = "windows")]
         let mut command = {
@@ -93,8 +94,11 @@ pub async fn open_media_dir(backend: State<'_, Backend>) -> Result<(), String> {
             command
         };
 
-        command.spawn().map(|_| ()).map_err(|e| jq_i18n::t!("media.file_manager_failed", error = e))
+        command
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| Error::from(AppError::FileManagerFailed { error: e.to_string() }))
     })
     .await
-    .map_err(|e| e.to_string())?
+    .map_err(|e| Error::from(e.to_string()))?
 }

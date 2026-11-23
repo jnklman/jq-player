@@ -17,7 +17,8 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::Duration;
 
 use jq_core::Notice;
-use jq_i18n::t;
+
+use crate::error::{AppError, Error};
 
 /// What a queued write is for: a newer job with the same key replaces one
 /// still waiting. Jobs with different keys may share a file (settings of a
@@ -35,7 +36,7 @@ impl Key {
     }
 }
 
-type Run = Box<dyn FnOnce() -> Result<(), String> + Send>;
+type Run = Box<dyn FnOnce() -> Result<(), Notice> + Send>;
 
 enum Item {
     /// `None`: never replaced, and nothing queued later moves before it.
@@ -71,7 +72,7 @@ impl Writer {
     /// Queues `job`; an error it returns is reported as a warning (it is
     /// shown as it is, so it should be a full message). A job still queued
     /// with the same `key` is dropped in favour of this one.
-    pub fn submit(&self, key: Option<Key>, job: impl FnOnce() -> Result<(), String> + Send + 'static) {
+    pub fn submit(&self, key: Option<Key>, job: impl FnOnce() -> Result<(), Notice> + Send + 'static) {
         if let Err(mpsc::SendError(Item::Job(_, job))) = self.tx.send(Item::Job(key, Box::new(job))) {
             execute(job, &self.notices);
         }
@@ -79,17 +80,18 @@ impl Writer {
 
     /// Runs `job` on the writer thread after everything queued before it and
     /// waits for its result. A panic in it comes back as an error.
-    pub fn wait<T: Send + 'static>(&self, job: impl FnOnce() -> T + Send + 'static) -> Result<T, String> {
+    pub fn wait<T: Send + 'static>(&self, job: impl FnOnce() -> T + Send + 'static) -> Result<T, Error> {
         let (tx, rx) = mpsc::channel();
         let run: Run = Box::new(move || {
-            let result = catch_unwind(AssertUnwindSafe(job)).map_err(|_| t!("writer.panicked"));
+            let result =
+                catch_unwind(AssertUnwindSafe(job)).map_err(|_| Error::from(AppError::WriterPanicked));
             let _ = tx.send(result);
             Ok(())
         });
         if let Err(mpsc::SendError(Item::Job(_, run))) = self.tx.send(Item::Job(None, run)) {
             let _ = run();
         }
-        rx.recv().unwrap_or_else(|_| Err(t!("writer.panicked")))
+        rx.recv().unwrap_or_else(|_| Err(AppError::WriterPanicked.into()))
     }
 
     /// Waits until everything queued so far is written, at most `timeout`.
@@ -177,8 +179,8 @@ fn push(pending: &mut VecDeque<Item>, item: Item) {
 fn execute(job: Run, notices: &Sender<Notice>) {
     let notice = match catch_unwind(AssertUnwindSafe(job)) {
         Ok(Ok(())) => return,
-        Ok(Err(e)) => Notice::Warning(e),
-        Err(_) => Notice::Error(t!("writer.panicked")),
+        Ok(Err(notice)) => notice,
+        Err(_) => Notice::WriterPanicked,
     };
     let _ = notices.send(notice);
 }
@@ -196,7 +198,7 @@ mod tests {
     fn note(
         log: &Arc<Mutex<Vec<String>>>,
         text: &str,
-    ) -> impl FnOnce() -> Result<(), String> + Send + 'static {
+    ) -> impl FnOnce() -> Result<(), Notice> + Send + 'static {
         let (log, text) = (log.clone(), text.to_owned());
         move || {
             log.lock().unwrap().push(text);
@@ -267,15 +269,17 @@ mod tests {
     fn errors_and_panics_are_reported_and_later_jobs_still_run() {
         let (writer, notices) = Writer::spawn();
         let done = log();
-        writer.submit(None, || Err("disk full".into()));
+        writer.submit(None, || Err(Notice::SettingsNotSaved { error: "disk full".into() }));
         writer.submit(None, || panic!("bug in a job"));
         writer.submit(None, note(&done, "after"));
         writer.flush_all();
         assert_eq!(*done.lock().unwrap(), ["after"]);
         let reported: Vec<Notice> = notices.try_iter().collect();
         assert_eq!(reported.len(), 2);
-        assert!(matches!(&reported[0], Notice::Warning(e) if e == "disk full"));
-        assert!(matches!(&reported[1], Notice::Error(_)));
+        assert!(
+            matches!(&reported[0], Notice::SettingsNotSaved { error } if error.as_text() == Some("disk full"))
+        );
+        assert!(matches!(&reported[1], Notice::WriterPanicked));
     }
 
     #[test]

@@ -3,7 +3,7 @@
   import { Button } from '$lib/components/ui/button';
 
   import { t } from '../lib/i18n/index.svelte';
-  import { escapeAnswers, type Leaving, notify } from '../lib/store.svelte';
+  import { escapeAnswers, type Leaving, notifyError } from '../lib/store.svelte';
 
   let { leaving, onclose }: { leaving: Leaving; onclose: () => void } = $props();
 
@@ -27,7 +27,7 @@
       onclose();
     } catch (error) {
       // E.g. saving failed: the show stays open.
-      notify({ level: 'error', message: String(error) });
+      notifyError(error);
     } finally {
       busy = false;
     }

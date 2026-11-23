@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use jq_i18n::t;
+use jq_i18n::{Detail, detail};
 use jq_show::{OscArg, OscMessage, PositionTo, Show, StopwatchAction};
 use rosc::{OscPacket, OscType};
 
@@ -26,11 +26,11 @@ const RESOLVE_TTL: Duration = Duration::from_secs(60);
 /// Where OSC packets go; a trait so tests can record them.
 pub trait OscOut: Send {
     /// `target` is `host:port`.
-    fn send(&self, target: &str, packet: &[u8]) -> Result<(), String>;
+    fn send(&self, target: &str, packet: &[u8]) -> Result<(), Detail>;
 }
 
 /// Host name → address (or why there is none), and when it was looked up.
-type Lookups = Mutex<HashMap<String, (Result<SocketAddr, String>, Instant)>>;
+type Lookups = Mutex<HashMap<String, (Result<SocketAddr, Detail>, Instant)>>;
 
 /// Sends from one unbound UDP socket; never waits for the network. Host
 /// names are looked up on a thread of their own, as a lookup can take
@@ -77,8 +77,10 @@ impl UdpOut {
 }
 
 impl OscOut for UdpOut {
-    fn send(&self, target: &str, packet: &[u8]) -> Result<(), String> {
-        let send = |addr| self.socket.send_to(packet, addr).map(|_| ()).map_err(|e| format!("{target}: {e}"));
+    fn send(&self, target: &str, packet: &[u8]) -> Result<(), Detail> {
+        let send = |addr| {
+            self.socket.send_to(packet, addr).map(|_| ()).map_err(|e| Detail::text(format!("{target}: {e}")))
+        };
         if let Ok(addr) = target.parse::<SocketAddr>() {
             return send(addr);
         }
@@ -90,32 +92,33 @@ impl OscOut for UdpOut {
         self.queued.fetch_add(1, Ordering::AcqRel);
         self.resolver.send((target.to_owned(), packet.to_vec())).map_err(|_| {
             self.queued.fetch_sub(1, Ordering::AcqRel);
-            t!("osc.sender_stopped", target = target)
+            detail!("osc_sender_stopped", target = target)
         })
     }
 }
 
 /// A recent lookup of `target`, if there is one.
-fn lookup(lookups: &Lookups, target: &str, now: Instant) -> Option<Result<SocketAddr, String>> {
+fn lookup(lookups: &Lookups, target: &str, now: Instant) -> Option<Result<SocketAddr, Detail>> {
     let lookups = lookups.lock().unwrap_or_else(PoisonError::into_inner);
     let (addr, at) = lookups.get(target)?;
     (now.duration_since(*at) < RESOLVE_TTL).then(|| addr.clone())
 }
 
 /// Looks up `host:port`; the socket sends over IPv4, so that address wins.
-fn resolve(target: &str) -> Result<SocketAddr, String> {
-    let addrs: Vec<SocketAddr> = target.to_socket_addrs().map_err(|e| format!("{target}: {e}"))?.collect();
+fn resolve(target: &str) -> Result<SocketAddr, Detail> {
+    let addrs: Vec<SocketAddr> =
+        target.to_socket_addrs().map_err(|e| Detail::text(format!("{target}: {e}")))?.collect();
     addrs
         .iter()
         .find(|a| a.is_ipv4())
         .or(addrs.first())
         .copied()
-        .ok_or_else(|| t!("osc.address_not_found", target = target))
+        .ok_or_else(|| detail!("osc_address_not_found", target = target))
 }
 
-pub fn encode(message: &OscMessage) -> Result<Vec<u8>, String> {
+pub fn encode(message: &OscMessage) -> Result<Vec<u8>, Detail> {
     if !message.address.starts_with('/') {
-        return Err(t!("osc.address_slash", address = message.address));
+        return Err(detail!("osc_address_slash", address = message.address));
     }
     let args = message
         .args
@@ -127,7 +130,7 @@ pub fn encode(message: &OscMessage) -> Result<Vec<u8>, String> {
         })
         .collect();
     let packet = OscPacket::Message(rosc::OscMessage { addr: message.address.clone(), args });
-    rosc::encoder::encode(&packet).map_err(|e| t!("osc.encode_failed", error = e))
+    rosc::encoder::encode(&packet).map_err(|e| detail!("osc_encode_failed", error = e.to_string()))
 }
 
 /// `host:port` of a show device, with this machine's override from

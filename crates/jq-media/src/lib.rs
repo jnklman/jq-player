@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 use jq_engine::AudioBuffer;
-use jq_i18n::t;
+use jq_i18n::{Detail, detail};
 use symphonia::core::codecs::audio::well_known::*;
 use symphonia::core::codecs::audio::{AudioCodecId, AudioCodecParameters, AudioDecoder, AudioDecoderOptions};
 use symphonia::core::codecs::registry::CodecRegistry;
@@ -57,16 +57,24 @@ pub enum MediaError {
 }
 
 impl MediaError {
-    /// What went wrong, without the path.
-    pub fn reason(&self) -> String {
+    /// What went wrong, without the path (the UI words it).
+    pub fn reason(&self) -> Detail {
         match self {
-            Self::Io { source, .. } => source.to_string(),
+            Self::Io { source, .. } => Detail::text(source.to_string()),
             Self::Decode { source, .. } => describe(source),
-            Self::NoAudioTrack { .. } => t!("media.no_audio_track"),
-            Self::UnsupportedCodec { codec, .. } => t!("media.unsupported_codec", codec = codec),
-            Self::Midi { .. } => t!("media.midi"),
-            Self::Resample { message, .. } => t!("media.resample_failed", message = message),
-            Self::Cancelled => t!("media.cancelled"),
+            Self::NoAudioTrack { .. } => detail!("media_no_audio_track"),
+            Self::UnsupportedCodec { codec, .. } => detail!("media_unsupported_codec", codec = codec),
+            Self::Midi { .. } => detail!("media_midi"),
+            Self::Resample { message, .. } => detail!("media_resample_failed", message = message),
+            Self::Cancelled => detail!("media_cancelled"),
+        }
+    }
+
+    /// What went wrong with which file (the UI words it).
+    pub fn detail(&self) -> Detail {
+        match self.path() {
+            Some(path) => detail!("media_file", path = path.display().to_string(), reason = self.reason()),
+            None => self.reason(),
         }
     }
 
@@ -83,12 +91,10 @@ impl MediaError {
     }
 }
 
+/// For logs; the UI words [`MediaError::detail`].
 impl std::fmt::Display for MediaError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.path() {
-            Some(path) => write!(f, "{}: {}", path.display(), self.reason()),
-            None => f.write_str(&self.reason()),
-        }
+        write!(f, "{}", self.detail())
     }
 }
 
@@ -104,14 +110,14 @@ impl std::error::Error for MediaError {
 
 /// A decoder error in a few words; its own (English) text adds nothing a
 /// user could act on.
-fn describe(error: &SymError) -> String {
+fn describe(error: &SymError) -> Detail {
     match error {
-        SymError::IoError(e) => t!("media.read_error", error = e),
-        SymError::Unsupported(_) => t!("media.unsupported"),
-        SymError::DecodeError(_) => t!("media.corrupt"),
-        SymError::SeekError(_) => t!("media.seek_failed"),
-        SymError::LimitError(_) => t!("media.too_large"),
-        _ => t!("media.decode_error"),
+        SymError::IoError(e) => detail!("media_read_error", error = e.to_string()),
+        SymError::Unsupported(_) => detail!("media_unsupported"),
+        SymError::DecodeError(_) => detail!("media_corrupt"),
+        SymError::SeekError(_) => detail!("media_seek_failed"),
+        SymError::LimitError(_) => detail!("media_too_large"),
+        _ => detail!("media_decode_error"),
     }
 }
 
@@ -485,22 +491,27 @@ mod tests {
         let missing = dir.join("missing.wav");
         let error = load(&missing, 48_000).unwrap_err();
         assert!(matches!(error, MediaError::Io { .. }) && error.source().is_some());
-        assert!(error.to_string().starts_with(&format!("{}: ", missing.display())), "{error}");
+        assert_eq!(error.detail().kind(), Some("media_file"));
+        assert_eq!(
+            error.detail().get("path").and_then(|p| p.as_str()),
+            Some(&*missing.display().to_string())
+        );
 
         let text = dir.join("notes.wav");
         std::fs::write(&text, "no audio in here, just some words to fill a header or two").unwrap();
         let error = load(&text, 48_000).unwrap_err();
-        assert_eq!(error.to_string(), format!("{}: not a supported audio format", text.display()));
-        assert_eq!(error.reason(), "not a supported audio format", "without the path");
+        assert_eq!(error.reason(), detail!("media_unsupported"), "without the path");
+        let path = text.display().to_string();
+        assert_eq!(error.detail(), detail!("media_file", path = path, reason = detail!("media_unsupported")));
 
         let midi = dir.join("song.mid");
         std::fs::write(&midi, b"MThd\x00\x00\x00\x06\x00\x01\x00\x01\x01\xe0").unwrap();
-        assert_eq!(load(&midi, 48_000).unwrap_err().reason(), "a MIDI file holds notes, not sound");
+        assert_eq!(load(&midi, 48_000).unwrap_err().reason(), detail!("media_midi"));
 
-        assert_eq!(MediaError::Cancelled.to_string(), "cancelled");
+        assert_eq!(MediaError::Cancelled.detail(), detail!("media_cancelled"));
         assert!(MediaError::Cancelled.source().is_none());
         let resample = MediaError::Resample { path: text.clone(), message: "ratio".into() };
-        assert_eq!(resample.reason(), "Converting the sample rate failed: ratio");
+        assert_eq!(resample.reason(), detail!("media_resample_failed", message = "ratio"));
         std::fs::remove_dir_all(dir).ok();
     }
 

@@ -5,7 +5,8 @@
 
   import type { LocalSettings } from '../../lib/api';
   import type { AudioSetup } from '../../lib/audioSetup.svelte';
-  import { fmtDb } from '../../lib/format';
+  import { errorText } from '../../lib/errors';
+  import { deviceDetail, fmtDb, fmtDefaultConfig } from '../../lib/format';
   import { t } from '../../lib/i18n/index.svelte';
   import { liveNumber } from '../../lib/input';
   import { KEEP_ALIVE_RANGE, positiveOrNull } from '../../lib/settings';
@@ -41,7 +42,7 @@
         ]}
       ></span>
       {#if view.audio_error}
-        <span class="text-stop-soft">{t('device.unavailable', { error: view.audio_error })}</span>
+        <span class="text-stop-soft">{t('device.unavailable', { error: errorText(view.audio_error) })}</span>
       {:else}
         {t('device.running')} · {view.audio.sample_rate} Hz · {t('header.channels', { count: view.audio.channels })}
         {#if view.audio_frames !== null}
@@ -69,7 +70,7 @@
           class="min-w-0 grow"
           aria-label={t('midi_fields.device')}
           value={draft.device ?? ''}
-          tip={setup.selectedDevice?.description}
+          tip={setup.selectedDevice && deviceDetail(setup.selectedDevice.description)}
           disabled={setup.loading}
           options={setup.deviceOptions}
           onchange={(device) => setup.setDevice(device)}
@@ -96,7 +97,9 @@
           <span class="text-xs text-stop-soft">{t('device.only_channels', { count: setup.mainMax ?? 0 })}</span>
         {:else}
           <span class={hint}>
-            {setup.selectedDevice?.default_config ?? t('device.currently', { count: view.audio.channels })}
+            {setup.selectedDevice?.default_config
+              ? fmtDefaultConfig(setup.selectedDevice.default_config)
+              : t('device.currently', { count: view.audio.channels })}
             {#if setup.mainMax !== null}· {t('device.up_to', { count: setup.mainMax })}{/if}
           </span>
         {/if}

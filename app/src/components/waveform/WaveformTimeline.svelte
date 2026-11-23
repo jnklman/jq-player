@@ -5,6 +5,7 @@
   import { Tooltip } from '$lib/components/ui/tooltip';
 
   import { api } from '../../lib/api';
+  import { errorText } from '../../lib/errors';
   import { fmtPosition } from '../../lib/format';
   import { t } from '../../lib/i18n/index.svelte';
   import { roundMs } from '../../lib/input';
@@ -95,7 +96,7 @@
     let current = true;
     api.waveform(mediaDir, file, buckets).then(
       (peaks) => current && (data = peaks),
-      (e) => current && (error = String(e)),
+      (e) => current && (error = errorText(e)),
     );
     return () => {
       current = false;

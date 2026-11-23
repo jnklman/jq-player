@@ -9,6 +9,7 @@ import { isPlaceholder, loopLabel, passLabel } from './cue';
 import { fmtDb, fmtRunning, fmtSecs, fmtTime, nearEnd } from './format';
 import { t } from './i18n/index.svelte';
 import { midiSummary } from './midi';
+import { problemText, timingText } from './problems';
 import { speedSummary } from './speed';
 import { activeFor, allCues, cues, fadingFor, gapFor, importFor, isRunning, previousOf, ui } from './store.svelte';
 
@@ -165,11 +166,11 @@ export function cueWarnings(cue: Cue): string[] {
   const info = ui.view?.cue_info[cue.id];
   const limits = ui.view?.show.level_limits;
   if (!info || !limits) return [];
-  const warnings = (info.timing ?? []).map((warning) => warning.message);
+  const warnings = (info.timing ?? []).map(timingText);
   if (info.missing) {
     warnings.unshift(cue.type === 'group' ? t('status.warn.group_file_missing') : t('status.file_missing'));
   }
-  warnings.push(...(info.problems ?? []));
+  warnings.push(...(info.problems ?? []).map(problemText));
   if (info.case_mismatch) warnings.push(t('inspector.notice.case_mismatch', { name: info.case_mismatch }));
   if (info.level_silenced) warnings.push(t('status.warn.level_silenced', { level: fmtDb(limits.min_db) }));
   if (info.level_capped) {

@@ -8,6 +8,7 @@
   import { hasOverrides, type ItemPatch, withItem } from '../../lib/cue';
   import type { CueEdit } from '../../lib/cueEdit';
   import { fmtNumber, options, t } from '../../lib/i18n/index.svelte';
+  import { timingText } from '../../lib/problems';
   import { RATE_MAX, RATE_MIN, speedOf, TRANSPOSE_MAX } from '../../lib/speed';
   import { field } from '../../lib/ui';
   import NumberField from '../fields/NumberField.svelte';
@@ -39,7 +40,7 @@
 <Popover.Root>
   <Tooltip
     tip={timing.length > 0
-      ? timing.map((warning) => warning.message).join(' · ')
+      ? timing.map(timingText).join(' · ')
       : changed
         ? t('overrides.own_settings')
         : t('overrides.settings_only')}
@@ -89,8 +90,8 @@
         value={own.end}
         onchange={(end) => set({ end })}
       />
-      {#each timing as warning (warning.message)}
-        <span class="col-span-2 text-xs text-stop-soft">{warning.message}</span>
+      {#each timing.map(timingText) as warning (warning)}
+        <span class="col-span-2 text-xs text-stop-soft">{warning}</span>
       {/each}
       <NumberField
         label={t('control.volume')}

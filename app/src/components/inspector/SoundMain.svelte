@@ -12,6 +12,7 @@
   import { t } from '../../lib/i18n/index.svelte';
   import { roundMs } from '../../lib/input';
   import { loopKind, loopOptions } from '../../lib/options';
+  import { timingText } from '../../lib/problems';
   import { nextMarkAt, nextVamp } from '../../lib/soundTimes';
   import { importFor, ui } from '../../lib/store.svelte';
   import { hint } from '../../lib/ui';
@@ -127,8 +128,8 @@
         onchange={(value) => edit.set({ end: value })}
       />
     </span>
-    {#each info?.timing ?? [] as warning (warning.message)}
-      <span class="text-xs text-stop-soft">{warning.message}</span>
+    {#each (info?.timing ?? []).map(timingText) as warning (warning)}
+      <span class="text-xs text-stop-soft">{warning}</span>
     {/each}
   </FieldRow>
   <FadeRows {edit} />

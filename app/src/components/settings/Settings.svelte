@@ -3,6 +3,7 @@
 
   import { api, type LocalSettings } from '../../lib/api';
   import { AudioSetup } from '../../lib/audioSetup.svelte';
+  import { errorText } from '../../lib/errors';
   import { t } from '../../lib/i18n/index.svelte';
   import { changedFields, settingsProblem, tabProblems, withEdits } from '../../lib/settings';
   import { provideSettingsView, SettingsView } from '../../lib/settingsView.svelte';
@@ -70,7 +71,7 @@
     if (!applied) return false;
     initial.midi_port = port;
     if (applied.midi.port) return true;
-    notify({ level: 'error', message: applied.midi.error ?? t('settings.midi_failed') });
+    notify({ level: 'error', message: applied.midi.error ? errorText(applied.midi.error) : t('settings.midi_failed') });
     return false;
   }
 

@@ -6,6 +6,8 @@
 
   import { api, type LocalSettings } from '../lib/api';
   import { AudioSetup } from '../lib/audioSetup.svelte';
+  import { errorText } from '../lib/errors';
+  import { deviceDetail } from '../lib/format';
   import { t } from '../lib/i18n/index.svelte';
   import { liveNumber } from '../lib/input';
   import { positiveOrNull } from '../lib/settings';
@@ -65,9 +67,9 @@
 <div class="flex flex-col gap-1">
   <span class="font-medium">{t('header.audio_title')}</span>
   {#if view.audio_error}
-    <span class="text-xs text-stop-soft">{t('header.audio_unavailable', { error: view.audio_error })}</span>
+    <span class="text-xs text-stop-soft">{t('header.audio_unavailable', { error: errorText(view.audio_error) })}</span>
   {:else}
-    <span class="text-xs wrap-break-word text-fg-2">{view.audio.device_detail}</span>
+    <span class="text-xs wrap-break-word text-fg-2">{deviceDetail(view.audio.device_detail)}</span>
     <span class="{hint} tabular-nums">
       {view.audio.host} · {view.audio.sample_rate} Hz · {t('header.channels', { count: view.audio.channels })}
       {#if view.audio_frames !== null}· {t('device.frames', {
@@ -77,7 +79,7 @@
     </span>
     {#if view.audio_lost}
       <span class="text-xs whitespace-pre-line text-stop-soft">
-        {t('header.audio_lost', { reason: view.audio_lost })}
+        {t('header.audio_lost', { reason: errorText(view.audio_lost) })}
       </span>
     {/if}
   {/if}
@@ -105,7 +107,7 @@
         class="min-w-0 grow"
         aria-label={t('midi_fields.device')}
         value={draft.device ?? ''}
-        tip={setup.selectedDevice?.description}
+        tip={setup.selectedDevice && deviceDetail(setup.selectedDevice.description)}
         disabled={fieldsLocked || setup.loading}
         options={setup.deviceOptions}
         onchange={(device) => {

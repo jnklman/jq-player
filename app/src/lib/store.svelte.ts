@@ -7,6 +7,7 @@ import {
   type ActiveState,
   api,
   type CloseCheck,
+  type CommandError,
   type Cue,
   type CueId,
   events,
@@ -23,7 +24,9 @@ import {
   type UpdateInfo,
 } from './api';
 import { revealRow } from './cueScroll';
+import { errorText, isCommandError } from './errors';
 import { setLanguage, t } from './i18n/index.svelte';
+import { noticeKey, noticeText } from './notices';
 import { Revisions } from './revision';
 
 export type Mode = 'edit' | 'show';
@@ -63,8 +66,23 @@ export interface ClashQuestion {
   answer: (choices: Record<string, OnClash> | null) => void;
 }
 
-export interface ShownNotice extends Notice {
+/** A notice of the UI itself, already worded. */
+export interface TextNotice {
+  level: Notice['level'];
+  message: string;
+}
+
+export interface ShownNotice {
   id: number;
+  level: Notice['level'];
+  /** A newer notice with the same key takes its place (see `noticeKey`). */
+  key: string;
+  /** From the backend: worded when shown (`noticeMessage`), so it follows the language. */
+  notice?: Notice;
+  /** A command that failed; worded when shown, like `notice`. */
+  error?: CommandError;
+  /** Of the UI itself. */
+  message?: string;
 }
 
 // The backend replaces these whole (a large show's view is several hundred
@@ -155,13 +173,34 @@ export async function attemptChange(promise: Promise<Revision>): Promise<ShowVie
 
 let noticeId = 0;
 
-export function notify(notice: Notice) {
-  ui.notices = [...ui.notices.slice(-4), { ...notice, id: ++noticeId }];
+/**
+ * Shows a notice, in place of a shown one with the same key (the same text, for one of the UI): a repeated warning or
+ * error does not pile up, and the newer one starts its time again.
+ */
+export function notify(notice: Notice | TextNotice) {
+  show(
+    'kind' in notice
+      ? { id: ++noticeId, level: notice.level, key: noticeKey(notice), notice }
+      : { id: ++noticeId, level: notice.level, key: `text:${notice.message}`, message: notice.message },
+  );
+}
+
+/** Shows why something failed: a command's error (the same one again takes its place), else the text of it. */
+export function notifyError(error: unknown) {
+  if (isCommandError(error)) show({ id: ++noticeId, level: 'error', key: `error:${JSON.stringify(error)}`, error });
+  else notify({ level: 'error', message: String(error) });
+}
+
+function show(shown: ShownNotice) {
+  ui.notices = [...ui.notices.filter((other) => other.key !== shown.key).slice(-4), shown];
   // Warnings fade out on their own, errors stay until dismissed.
-  if (notice.level === 'warning') {
-    const id = noticeId;
-    setTimeout(() => dismiss(id), 8000);
-  }
+  if (shown.level === 'warning') setTimeout(() => dismiss(shown.id), 8000);
+}
+
+/** The text of a shown notice, in the current language. */
+export function noticeMessage(notice: ShownNotice): string {
+  if (notice.notice) return noticeText(notice.notice);
+  return notice.error ? errorText(notice.error) : (notice.message ?? '');
 }
 
 export function dismiss(id: number) {
@@ -173,7 +212,7 @@ export async function attempt<T>(promise: Promise<T>): Promise<T | undefined> {
   try {
     return await promise;
   } catch (error) {
-    notify({ level: 'error', message: String(error) });
+    notifyError(error);
     return undefined;
   }
 }
@@ -287,9 +326,9 @@ export async function saveShow() {
 /** Takes the language from the backend's settings (the config file) and follows its changes; awaited before the UI is mounted. */
 export async function initLanguage() {
   await events.onLanguageChanged((info) => {
-    // Shown notices are in the old language and the backend repeats what still applies in the new one; the
-    // event comes before those, so only the old ones go.
-    ui.notices = [];
+    // The UI's own notices are in the old language; the backend's are worded when shown, and what the new settings
+    // cause comes after this event (in place of the same ones).
+    ui.notices = ui.notices.filter((notice) => notice.notice || notice.error);
     setLanguage(info);
   });
   const language = await attempt(api.getLanguage());

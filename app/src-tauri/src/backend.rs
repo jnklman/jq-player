@@ -15,6 +15,7 @@ use serde::Serialize;
 use serde_json::value::RawValue;
 use tauri::{AppHandle, Emitter, Manager};
 
+use crate::error::{AppError, Error};
 use crate::language;
 use crate::session::{EditOp, ImportState, LearnTarget, Session, ShowView};
 use crate::writer::{Key, Writer};
@@ -51,7 +52,7 @@ const INTERNAL_ERROR_INTERVAL: Duration = Duration::from_secs(5);
 /// Machine settings, in the app's config folder.
 const SETTINGS_FILE: &str = "settings.json";
 
-pub type Reply<T = serde_json::Value> = Sender<Result<T, String>>;
+pub type Reply<T = serde_json::Value> = Sender<Result<T, Error>>;
 
 pub enum Request {
     Open(PathBuf, Reply),
@@ -76,7 +77,7 @@ pub enum Request {
     Rename(String, Reply),
     /// The media folder and the stored paths to copy for "save as"
     /// (see [`Session::save_as_plan`]).
-    SaveAsPlan(Sender<Result<(PathBuf, Vec<String>), String>>),
+    SaveAsPlan(Sender<Result<(PathBuf, Vec<String>), Error>>),
     /// Goes on in a new show folder (see [`Session::save_as`]); `warnings`
     /// from preparing it are shown once it worked.
     SaveAs {
@@ -84,7 +85,7 @@ pub enum Request {
         media_root: String,
         /// The files copied into the new media folder (`None`: linked).
         copied: Option<Vec<String>>,
-        warnings: Vec<String>,
+        warnings: Vec<Notice>,
         reply: Reply,
     },
     /// Restore (`true`) or discard the autosave found on opening.
@@ -112,7 +113,7 @@ pub enum Request {
     CloseCheck(Sender<Option<CloseCheck>>),
     /// The media folder and the stored paths the show may still need
     /// (see [`Session::used_media`]), for tidying up the media folder.
-    UsedMedia(Sender<Result<(PathBuf, Vec<String>), String>>),
+    UsedMedia(Sender<Result<(PathBuf, Vec<String>), Error>>),
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
@@ -222,10 +223,10 @@ fn run(app: AppHandle, rx: Receiver<Request>, midi_tx: Sender<Request>, writes: 
         failed |= ticked.is_err();
         notices.extend(writes.try_iter());
         if failed && internal_errors.due(Instant::now()) {
-            notices.push(Notice::Error(jq_i18n::t!("backend.internal_error")));
+            notices.push(Notice::InternalError);
         }
         for n in notices {
-            let _ = app.emit_to(crate::panel_windows::MAIN, EVENT_NOTICE, n);
+            let _ = app.emit_to(crate::panel_windows::MAIN, EVENT_NOTICE, n.sent());
         }
     }
 }
@@ -258,20 +259,19 @@ fn handle(
     midi_tx: &Sender<Request>,
     notices: &mut Vec<Notice>,
 ) {
-    let no_show = || Err::<serde_json::Value, String>(jq_i18n::t!("app.no_show"));
+    let no_show = || Err::<serde_json::Value, Error>(AppError::NoShow.into());
     match request {
         Request::Open(path, reply) => {
             // A show opens ready to run; a new one ready to fill.
-            let result = ShowFile::load(&path).map_err(|e| e.to_string()).map(|file| {
+            let result = ShowFile::load(&path).map_err(Error::from).map(|file| {
                 replace(app, session, file, true, midi_tx, notices);
             });
             let _ = reply.send(result.and_then(|()| publish(app, session)));
         }
         Request::New { dir, name, create_folder, reply } => {
-            let result =
-                ShowFile::create(&dir, &name, create_folder).map_err(|e| e.to_string()).map(|file| {
-                    replace(app, session, file, false, midi_tx, notices);
-                });
+            let result = ShowFile::create(&dir, &name, create_folder).map_err(Error::from).map(|file| {
+                replace(app, session, file, false, midi_tx, notices);
+            });
             let _ = reply.send(result.and_then(|()| publish(app, session)));
         }
         Request::Save(reply) => {
@@ -288,7 +288,7 @@ fn handle(
             }
             // Numbered like the last `show` event: a window takes whichever of the two is newer.
             let event = ShowEvent { revision: revision(), view: session.as_ref().map(|s| s.view()) };
-            let _ = reply.send(serde_json::to_value(event).map_err(|e| e.to_string()));
+            let _ = reply.send(serde_json::to_value(event).map_err(|e| Error::from(e.to_string())));
         }
         Request::Action(action) => {
             if let Some(s) = session.as_mut() {
@@ -361,7 +361,7 @@ fn handle(
             let path = settings_path(app);
             app.state::<Writer>().submit(Some(Key::new(path.clone(), "startup")), move || {
                 Startup::set_pending(&path, false)
-                    .map_err(|e| jq_i18n::t!("session.settings_not_saved", error = e))
+                    .map_err(|e| Notice::SettingsNotSaved { error: e.to_string().into() })
             });
         }
         Request::Rename(name, reply) => {
@@ -375,7 +375,7 @@ fn handle(
         }
         Request::SaveAsPlan(reply) => {
             let _ = reply.send(
-                session.as_ref().ok_or_else(|| jq_i18n::t!("app.no_show")).and_then(Session::save_as_plan),
+                session.as_ref().ok_or_else(|| Error::from(AppError::NoShow)).and_then(Session::save_as_plan),
             );
         }
         Request::SaveAs { path, media_root, copied, warnings, reply } => {
@@ -387,7 +387,7 @@ fn handle(
                 None => no_show(),
             };
             if result.is_ok() {
-                notices.extend(warnings.into_iter().map(Notice::Warning));
+                notices.extend(warnings);
             }
             let _ = reply.send(result);
         }
@@ -403,20 +403,17 @@ fn handle(
         }
         Request::UsedMedia(reply) => {
             let _ = reply.send(
-                session.as_ref().ok_or_else(|| jq_i18n::t!("app.no_show")).and_then(Session::used_media),
+                session.as_ref().ok_or_else(|| Error::from(AppError::NoShow)).and_then(Session::used_media),
             );
         }
         Request::SetSettings(settings, reply) => {
-            // Before the settings are applied: what they cause (errors, notices) is said in the new language.
+            // Before the settings are applied: what the backend still words itself (native dialogs, titles of new
+            // cues) is in the new language.
             let before = language::current();
             let after = language::apply(&settings.language);
             let changed = before.setting != after.setting || before.resolved != after.resolved;
             let result = match session.as_mut() {
-                Some(s) => s.set_settings(*settings, notices).map(|()| {
-                    if changed {
-                        s.language_changed();
-                    }
-                }),
+                Some(s) => s.set_settings(*settings, notices),
                 None => no_show().map(|_| ()),
             }
             .and_then(|()| publish(app, session));
@@ -457,9 +454,9 @@ fn handle(
         }
         Request::CheckLevelLimits(limits, reply) => {
             let result = match session.as_ref() {
-                Some(s) => s
-                    .check_level_limits(limits)
-                    .and_then(|changes| serde_json::to_value(changes).map_err(|e| e.to_string())),
+                Some(s) => s.check_level_limits(limits).and_then(|changes| {
+                    serde_json::to_value(changes).map_err(|e| Error::from(e.to_string()))
+                }),
                 None => no_show(),
             };
             let _ = reply.send(result);
@@ -486,7 +483,7 @@ fn handle(
         }
         Request::MediaDir(reply) => {
             let result =
-                session.as_ref().ok_or_else(|| jq_i18n::t!("app.no_show")).map(|s| s.view().media_dir);
+                session.as_ref().ok_or_else(|| Error::from(AppError::NoShow)).map(|s| s.view().media_dir);
             let _ = reply.send(result);
         }
     }
@@ -505,7 +502,7 @@ fn replace(
     if let Some(old) = session.take()
         && let Err(e) = old.discard_autosave()
     {
-        notices.push(Notice::Warning(jq_i18n::t!("backend.autosave_not_deleted", error = e)));
+        notices.push(Notice::AutosaveNotDeleted { error: e.to_string().into() });
     }
     let peaks = app.state::<Arc<PeakCache>>().inner().clone();
     let writer = app.state::<Writer>().inner().clone();
@@ -547,8 +544,8 @@ struct ShowEvent<V> {
 }
 
 /// The `show` event as JSON, serialized once for every window.
-fn show_event(revision: u64, view: impl Serialize) -> Result<Box<RawValue>, String> {
-    serde_json::value::to_raw_value(&ShowEvent { revision, view }).map_err(|e| e.to_string())
+fn show_event(revision: u64, view: impl Serialize) -> Result<Box<RawValue>, Error> {
+    serde_json::value::to_raw_value(&ShowEvent { revision, view }).map_err(|e| Error::from(e.to_string()))
 }
 
 /// Sends the current show view as event to every window and returns its
@@ -558,7 +555,7 @@ fn show_event(revision: u64, view: impl Serialize) -> Result<Box<RawValue>, Stri
 /// point the new view at a cue it no longer has until the next tick (GO
 /// flashes disabled), while the new playhead is almost always in the old
 /// view too.
-fn publish(app: &AppHandle, session: &Option<Session>) -> Result<serde_json::Value, String> {
+fn publish(app: &AppHandle, session: &Option<Session>) -> Result<serde_json::Value, Error> {
     if let Some(s) = session {
         let _ = app.emit(EVENT_STATE, state_event(s, Instant::now()));
     }

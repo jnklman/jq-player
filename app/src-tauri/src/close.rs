@@ -16,6 +16,7 @@ use jq_i18n::t;
 
 use crate::Backend;
 use crate::backend::{CloseCheck, Request};
+use crate::error::Error;
 use crate::writer::Writer;
 
 /// A hanging show thread counts as "something may be running".
@@ -134,14 +135,16 @@ pub async fn confirm_close(
     window: Window,
     backend: tauri::State<'_, Backend>,
     save: bool,
-) -> Result<(), String> {
+) -> Result<(), Error> {
     if save {
         backend.ask(Request::Save).await?;
     } else {
         backend.ask(Request::DiscardAutosave).await?;
     }
     // Waiting for the writes (and maybe a dialog) must not block the async runtime.
-    tauri::async_runtime::spawn_blocking(move || destroy(&window)).await.map_err(|e| e.to_string())
+    tauri::async_runtime::spawn_blocking(move || destroy(&window))
+        .await
+        .map_err(|e| Error::from(e.to_string()))
 }
 
 /// Fallback while the UI hangs.
@@ -202,7 +205,7 @@ fn save_and_close(window: &Window) {
         Some(Ok(_)) => destroy(window),
         failed => {
             let error = match failed {
-                Some(Err(e)) => e,
+                Some(Err(e)) => e.to_string(),
                 _ => t!("app.no_reply"),
             };
             window

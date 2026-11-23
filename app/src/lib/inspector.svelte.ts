@@ -6,6 +6,7 @@ import type { Cue, CueInfo } from './api';
 import { isControl } from './control';
 import { fmtDb } from './format';
 import { t, type TextKey } from './i18n/index.svelte';
+import { problemText, timingText } from './problems';
 
 export type InspectorTab = 'main' | 'sound' | 'flow' | 'trigger' | 'notes';
 
@@ -80,7 +81,7 @@ export interface InspectorNotice {
 /** Everything wrong with `cue`, for the notice box at the top of the inspector. */
 export function noticesOf(cue: Cue, info: CueInfo | undefined, maxDb: number): InspectorNotice[] {
   if (!info) return [];
-  const notices: InspectorNotice[] = info.problems.map((text) => ({ text }));
+  const notices: InspectorNotice[] = info.problems.map((problem) => ({ text: problemText(problem) }));
   if (info.missing) notices.push({ text: t('inspector.notice.missing'), tab: 'main', field: 'file' });
   if (info.case_mismatch) {
     notices.push({
@@ -89,7 +90,7 @@ export function noticesOf(cue: Cue, info: CueInfo | undefined, maxDb: number): I
       field: 'file',
     });
   }
-  for (const warning of info.timing) notices.push({ text: warning.message, tab: 'main', field: 'range' });
+  for (const issue of info.timing) notices.push({ text: timingText(issue), tab: 'main', field: 'range' });
   if (info.normalize_stale) {
     notices.push({
       text: t('inspector.notice.normalize_stale'),

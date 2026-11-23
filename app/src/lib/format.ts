@@ -1,6 +1,6 @@
 // Display formatting; numbers follow the language (decimal comma in German, point in English).
 
-import type { LevelLimits, MidiTrigger } from './api';
+import { DEFAULT_DEVICE, type DefaultConfig, type LevelLimits, type MidiTrigger, SILENT_DEVICE } from './api';
 import { fmtNumber, i18n, t } from './i18n/index.svelte';
 
 export function fmtTime(secs: number | null | undefined): string {
@@ -89,7 +89,29 @@ export function meterPercent(db: number | null | undefined, limits: LevelLimits)
 /** Device name without the adapter in parentheses:
  * "Lautsprecher (Realtek High Definition Audio)" → "Lautsprecher". */
 export function shortDevice(name: string): string {
-  return name.replace(/\s*\([^()]*\)$/, '') || name;
+  const named = deviceName(name);
+  return named.replace(/\s*\([^()]*\)$/, '') || named;
+}
+
+/** A device's name; the program's own (`SILENT_DEVICE`, `DEFAULT_DEVICE`) in the current language. */
+export function deviceName(name: string): string {
+  if (name === SILENT_DEVICE) return t('device_name.silent');
+  return name === DEFAULT_DEVICE ? t('device_name.default') : name;
+}
+
+/** A device's description, like `deviceName`. */
+export function deviceDetail(detail: string): string {
+  if (detail === SILENT_DEVICE) return t('device_name.silent_detail');
+  return detail === DEFAULT_DEVICE ? t('device_name.default_detail') : detail;
+}
+
+/** A device's default format, e.g. "48000 Hz, 2 channels, F32". */
+export function fmtDefaultConfig(config: DefaultConfig): string {
+  return t('device_name.default_config', {
+    rate: config.sample_rate,
+    channels: config.channels,
+    format: config.sample_format,
+  });
 }
 
 export function clock(date: Date): string {

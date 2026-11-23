@@ -4,7 +4,6 @@
 //! (it has the selection and must stop the browser's default at once); the
 //! bindings and their checks live here.
 
-use jq_i18n::t;
 use jq_show::{Chord, CueId};
 use serde::{Deserialize, Serialize};
 
@@ -94,40 +93,6 @@ impl ControlAction {
             }
         })
     }
-
-    /// Name for messages, in the current language.
-    pub fn name(self) -> String {
-        use ControlAction as C;
-        match self {
-            C::Go => t!("action.go"),
-            C::StopAll => t!("action.stop_all"),
-            C::Panic => t!("action.panic"),
-            C::FadeAll => t!("action.fade_all"),
-            C::PauseAll => t!("action.pause_all"),
-            C::ResumeAll => t!("action.resume_all"),
-            C::TogglePauseAll => t!("action.toggle_pause_all"),
-            C::PlayheadNext => t!("action.playhead_next"),
-            C::PlayheadPrev => t!("action.playhead_prev"),
-            C::StopPreview => t!("action.stop_preview"),
-            C::Preview => t!("action.preview"),
-            C::TogglePauseCue => t!("action.toggle_pause_cue"),
-            C::StopCue => t!("action.stop_cue"),
-            C::FadeCue => t!("action.fade_cue"),
-            C::RestartCue => t!("action.restart_cue"),
-            C::ExitLoopCue => t!("action.exit_loop_cue"),
-            C::NextItem => t!("action.next_item"),
-            C::JumpBack => t!("action.jump_back"),
-            C::JumpForward => t!("action.jump_forward"),
-            C::JumpEnd => t!("action.jump_end"),
-            C::VolumeUp => t!("action.volume_up"),
-            C::VolumeDown => t!("action.volume_down"),
-            C::PanLeft => t!("action.pan_left"),
-            C::PanRight => t!("action.pan_right"),
-            C::RateUp => t!("action.rate_up"),
-            C::RateDown => t!("action.rate_down"),
-            C::FocusGoto => t!("action.focus_goto"),
-        }
-    }
 }
 
 /// A key bound to a global action.
@@ -192,21 +157,42 @@ pub fn bound(keys: &[KeyBinding], chord: &Chord) -> Option<ControlAction> {
     keys.iter().find(|b| b.chord.same(chord)).map(|b| b.action)
 }
 
+/// Why key bindings are refused (the UI words it).
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum KeyError {
+    KeyMissing {
+        action: ControlAction,
+    },
+    /// The key is reserved (Esc, the editing shortcuts, …).
+    KeyFixed {
+        key: Chord,
+    },
+    KeyTaken {
+        key: Chord,
+        action: ControlAction,
+    },
+    TooManyKeys {
+        action: ControlAction,
+        max: usize,
+    },
+}
+
 /// Refuses bindings with an empty or fixed key, a key used twice, or more
 /// than [`KEYS_PER_ACTION`] keys for one action.
-pub fn check_keys(keys: &[KeyBinding]) -> Result<(), String> {
+pub fn check_keys(keys: &[KeyBinding]) -> Result<(), KeyError> {
     for (i, b) in keys.iter().enumerate() {
         if b.chord.code.trim().is_empty() {
-            return Err(t!("keys.key_missing", action = b.action.name()));
+            return Err(KeyError::KeyMissing { action: b.action });
         }
         if is_fixed(&b.chord) {
-            return Err(t!("keys.fixed", key = b.chord.text()));
+            return Err(KeyError::KeyFixed { key: b.chord.clone() });
         }
         if let Some(other) = keys[..i].iter().find(|o| o.chord.same(&b.chord)) {
-            return Err(t!("keys.taken", key = b.chord.text(), action = other.action.name()));
+            return Err(KeyError::KeyTaken { key: b.chord.clone(), action: other.action });
         }
         if keys[..=i].iter().filter(|o| o.action == b.action).count() > KEYS_PER_ACTION {
-            return Err(t!("keys.too_many", action = b.action.name(), max = KEYS_PER_ACTION));
+            return Err(KeyError::TooManyKeys { action: b.action, max: KEYS_PER_ACTION });
         }
     }
     Ok(())
@@ -302,13 +288,6 @@ mod tests {
     };
 
     #[test]
-    fn every_action_has_its_own_name() {
-        let names: std::collections::HashSet<String> = ALL.iter().map(|a| a.name()).collect();
-        assert_eq!(names.len(), ALL.len(), "{names:?}");
-        assert!(names.iter().all(|n| !n.starts_with("action.")), "{names:?}");
-    }
-
-    #[test]
     fn cue_actions_act_on_the_selected_cue() {
         let id = CueId::new();
         for action in ALL {
@@ -347,20 +326,24 @@ mod tests {
         let bind = |chord: Chord, action| KeyBinding { chord, action };
         assert_eq!(
             check_keys(&[bind(Chord::new(" ", ""), ControlAction::FadeAll)]),
-            Err("FADE ALL: key missing".into())
+            Err(KeyError::KeyMissing { action: ControlAction::FadeAll })
         );
+        let save = Chord::new("KeyS", "s").ctrl();
         assert_eq!(
-            check_keys(&[bind(Chord::new("KeyS", "s").ctrl(), ControlAction::Go)]),
-            Err("Ctrl+S is reserved and cannot be assigned".into())
+            check_keys(&[bind(save.clone(), ControlAction::Go)]),
+            Err(KeyError::KeyFixed { key: save })
         );
         assert_eq!(
             check_keys(&[
                 bind(Chord::new("F1", ""), ControlAction::Go),
                 bind(Chord::new("F1", ""), ControlAction::StopAll)
             ]),
-            Err("F1 is already assigned to “GO”".into())
+            Err(KeyError::KeyTaken { key: Chord::new("F1", ""), action: ControlAction::Go })
         );
         let go = |code| bind(Chord::new(code, ""), ControlAction::Go);
-        assert_eq!(check_keys(&[go("F1"), go("F2"), go("F3")]), Err("“GO”: at most 2 keys".into()));
+        assert_eq!(
+            check_keys(&[go("F1"), go("F2"), go("F3")]),
+            Err(KeyError::TooManyKeys { action: ControlAction::Go, max: 2 })
+        );
     }
 }

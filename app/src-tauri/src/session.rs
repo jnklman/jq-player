@@ -11,23 +11,25 @@ use jq_core::keys::{self, ControlAction};
 use jq_core::midi::{self, MidiDecoder, MidiSink};
 use jq_core::osc::{self, OscListener, UdpOut};
 use jq_core::{
-    FileLoader, KeepAlive, KeepAliveState, LocalSettings, MediaLock, MediaWatcher, Notice, PeakCache,
-    Prewarmer, Runner, SelectionMode, Stamps,
+    CueName, DeviceRole, FileLoader, KeepAlive, KeepAliveState, LocalSettings, MediaLock, MediaWatcher,
+    Notice, PeakCache, Prewarmer, Runner, SelectionMode, Stamps,
 };
 use jq_engine::Controller;
-use jq_i18n::t;
+use jq_i18n::{Detail, t};
 use jq_media::loudness::Loudness;
 use jq_midi::{MidiIn, MidiOut};
 use jq_show::paths::{self, FileStamp, MediaIssue, NameCheck};
 use jq_show::{
     Advance, AdvanceAt, Chord, ControlKind, Cue, CueId, CueKind, Editor, GoToCue, GroupCue, LevelChanges,
     LevelLimits, LoopMode, MidiCue, MidiMessage, NetDevice, OscCue, OscMessage, OthersEffect, Output,
-    PlaylistCue, PositionTo, PreviousKeyword, Repeat, SceneCue, SecondTrigger, Show, ShowFile, SoundCue,
-    StartStopAction, Stopwatch, Targets, TimingIssue, WaitCue, check_timing, check_values, new_numbers,
+    PlaylistCue, PositionTo, PreviousKeyword, Repeat, SceneCue, SecondTrigger, Show, ShowError, ShowFile,
+    SoundCue, StartStopAction, Stopwatch, Targets, TimingIssue, ValueIssue, WaitCue, check_timing,
+    check_values, new_numbers,
 };
 use serde::{Deserialize, Serialize};
 
 use crate::backend::{CloseCheck, Request};
+use crate::error::{AppError, Error, Setting};
 use crate::jobs::{self, Copier, Copy, Found, Prober};
 use crate::writer::{Key, Writer};
 
@@ -337,7 +339,7 @@ pub struct ImportClash {
 /// Which of `paths` lie outside `media_dir` and which of those clash when
 /// copied in. Reads whole files to compare them, so it must not run on the
 /// show thread.
-pub fn check_import(media_dir: &Path, paths: &[PathBuf]) -> Result<ImportCheck, String> {
+pub fn check_import(media_dir: &Path, paths: &[PathBuf]) -> Result<ImportCheck, Error> {
     let media_canonical = real_path(media_dir).unwrap_or(media_dir.to_path_buf());
     let mut check = ImportCheck::default();
     let mut canonical = Vec::new();
@@ -348,7 +350,7 @@ pub fn check_import(media_dir: &Path, paths: &[PathBuf]) -> Result<ImportCheck, 
             canonical.push(c);
         }
     }
-    let names = paths::name_clashes(media_dir, &canonical).map_err(|e| e.to_string())?;
+    let names = paths::name_clashes(media_dir, &canonical).map_err(|e| Error::from(e.to_string()))?;
     for (path, name) in check.outside.iter().zip(names) {
         match name {
             NameCheck::Free => {}
@@ -377,10 +379,10 @@ pub struct ShowView<'a> {
     pub audio: &'a OutputInfo,
     /// Frames per callback as the device runs it; `None` before the first.
     pub audio_frames: Option<u32>,
-    pub audio_error: Option<String>,
+    pub audio_error: Option<Detail>,
     /// Why the open device stopped playing; cues run silently meanwhile and
     /// the device is opened again as soon as it can be.
-    pub audio_lost: Option<String>,
+    pub audio_lost: Option<Detail>,
     pub keep_alive: &'a KeepAliveState,
     pub settings: &'a LocalSettings,
     pub cue_info: HashMap<CueId, CueInfo>,
@@ -400,28 +402,28 @@ pub struct ShowView<'a> {
 pub struct OscView<'a> {
     /// UDP port incoming OSC is received on.
     pub listening: Option<u16>,
-    pub error: Option<&'a str>,
+    pub error: Option<&'a Detail>,
 }
 
 #[derive(Debug, Serialize)]
 pub struct PreviewView<'a> {
     /// Name of the separate preview device, if one is open.
     pub device: Option<&'a str>,
-    pub error: Option<&'a str>,
+    pub error: Option<&'a Detail>,
     /// Like `ShowView::audio_lost`, for the preview device.
-    pub lost: Option<String>,
+    pub lost: Option<Detail>,
 }
 
 #[derive(Debug, Serialize)]
 pub struct MidiView<'a> {
     /// Name of the open input port.
     pub port: Option<&'a str>,
-    pub error: Option<&'a str>,
+    pub error: Option<&'a Detail>,
     /// What waits for a MIDI control to be learned.
     pub learning: Option<LearnTarget>,
     /// Name of the open output port (for MIDI cues).
     pub out: Option<&'a str>,
-    pub out_error: Option<&'a str>,
+    pub out_error: Option<&'a Detail>,
 }
 
 /// What the next MIDI control is learned for.
@@ -466,7 +468,7 @@ pub struct CueInfo {
     pub level_silenced: bool,
     /// Further problems, as messages: values only a hand-edited show file
     /// has, a hotkey that never fires, a file that is no audio.
-    pub problems: Vec<String>,
+    pub problems: Vec<Problem>,
     /// Per file (a playlist's in order); `None` until measured.
     pub loudness: Vec<Option<FileLoudness>>,
     /// Some file is still being measured.
@@ -494,11 +496,94 @@ pub struct FileLoudness {
     pub suggested_db: Option<f64>,
 }
 
+/// A further problem of a cue (the UI words it): values only a hand-edited
+/// show file has, a trigger that never fires, a target it cannot act on, a
+/// file that is no audio. `time`, `end` and `start` are seconds.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(untagged)]
+pub enum Problem {
+    Value(ValueIssue),
+    Cue(CueProblem),
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum CueProblem {
+    StartFromSoundOnly {
+        cue: CueName,
+    },
+    StartFromAfterEnd {
+        time: f64,
+        cue: CueName,
+        end: f64,
+    },
+    StartFromBeforeStart {
+        time: f64,
+        cue: CueName,
+        start: f64,
+    },
+    NoStopwatch,
+    StopwatchDeleted,
+    TargetDeleted,
+    TargetsDeleted {
+        gone: usize,
+        total: usize,
+    },
+    NoPrevious,
+    StartNeedsChosen,
+    OutputMissing {
+        output: String,
+    },
+    StartsItself,
+    PositionPlaylist {
+        cue: CueName,
+    },
+    PositionAfterEnd {
+        time: f64,
+        cue: CueName,
+        end: f64,
+    },
+    PositionBeforeStart {
+        time: f64,
+        cue: CueName,
+        start: f64,
+    },
+    NoMarks {
+        cue: CueName,
+    },
+    /// Mark `index` (from 1) of `count`.
+    MarkMissing {
+        index: usize,
+        cue: CueName,
+        count: usize,
+    },
+    HotkeyNoKey,
+    HotkeyOutsideMain {
+        key: Chord,
+    },
+    HotkeyReserved {
+        key: Chord,
+    },
+    HotkeyTakenGlobally {
+        key: Chord,
+        action: ControlAction,
+    },
+    MidiOutsideMain,
+    MidiTakenGlobally {
+        action: ControlAction,
+    },
+    ReleaseIgnored,
+    /// The file (of playlist `item`, from 1) is no audio the program reads.
+    FileUnreadable {
+        item: Option<usize>,
+        reason: Detail,
+    },
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct TimingWarning {
     #[serde(flatten)]
     pub issue: TimingIssue,
-    pub message: String,
 }
 
 /// A media file as last read from disk; reading happens in the background.
@@ -508,7 +593,7 @@ struct MediaFile {
     /// Seconds.
     duration: Option<f64>,
     /// Why the file cannot be read, though it is there.
-    unreadable: Option<String>,
+    unreadable: Option<Detail>,
     version: u32,
     /// Version the latest read under way brings; older results are dropped.
     requested: u32,
@@ -554,9 +639,9 @@ pub struct Session {
     audio_error: Option<AudioError>,
     /// Separate preview device; `None` = off or a pair of the main device.
     pub preview_output: Option<AudioOutput>,
-    preview_error: Option<String>,
+    preview_error: Option<Detail>,
     /// `lost` of the main and preview output as last reported.
-    lost_seen: (Option<String>, Option<String>),
+    lost_seen: (Option<Detail>, Option<Detail>),
     /// `callback_frames` of the output as last published; the first callback
     /// comes after the view of a (re)opened device went out.
     frames_seen: Option<u32>,
@@ -589,16 +674,16 @@ pub struct Session {
     /// Last editor revision seen and when, for the quiet time.
     seen: (u64, Instant),
     midi: Option<MidiIn>,
-    midi_error: Option<String>,
+    midi_error: Option<Detail>,
     /// Where the MIDI callback sends messages (the show thread).
     midi_tx: Sender<Request>,
     midi_decoder: MidiDecoder,
     learning: Option<LearnTarget>,
     osc_in: Option<OscListener>,
-    osc_error: Option<String>,
+    osc_error: Option<Detail>,
     /// The port itself belongs to the runner.
     midi_out_name: Option<String>,
-    midi_out_error: Option<String>,
+    midi_out_error: Option<Detail>,
     /// The `midi_out` setting the current port was opened for.
     midi_out_setting: Option<String>,
     /// Cues copied or cut, as they were then; kept until the show is closed.
@@ -635,24 +720,23 @@ impl Session {
         // The settings file and the autosave are read back below: what is
         // still queued for them (the previous show's) goes first.
         if !writer.flush(OPEN_FLUSH_TIMEOUT) {
-            notices.push(Notice::Warning(t!("writer.pending")));
+            notices.push(Notice::WritesPending);
         }
         let mut settings =
             LocalSettings::load(&settings_path, &file.show.id.to_string()).unwrap_or_else(|e| {
-                notices.push(Notice::Warning(t!("session.settings_ignored", error = e)));
+                notices.push(Notice::SettingsIgnored { error: e.to_string().into() });
                 LocalSettings::default()
             });
         settings.show_mode = show_mode || file.show.show_mode_locked;
         for id in file.show.sync_links(None) {
-            let label = file.show.cue(id).map_or(String::new(), |c| {
-                if c.number.is_empty() { t!("cue.label_title", title = c.title) } else { c.number.clone() }
-            });
-            notices.push(Notice::Warning(t!("session.link_synced", cue = label)));
+            if let Some(cue) = file.show.cue(id) {
+                notices.push(Notice::LinkSynced { cue: CueName::of(cue) });
+            }
         }
         let (output, controller, audio_error) = open_output(&settings, notices);
         let mut keep_alive = KeepAlive::new();
         if let jq_core::KeepAliveState::Failed(e) = keep_alive.set_enabled(settings.keep_awake) {
-            notices.push(Notice::Warning(t!("session.keep_awake_failed", error = e)));
+            notices.push(Notice::KeepAwakeFailed { error: e.to_string().into() });
         }
         let mut runner = Runner::new(
             file.show.clone(),
@@ -710,17 +794,17 @@ impl Session {
         session.connect_midi(notices);
         session.open_preview(notices);
         session.recovery = session.file.load_autosave().unwrap_or_else(|e| {
-            notices.push(Notice::Warning(t!("session.autosave_unreadable", error = e)));
+            notices.push(Notice::AutosaveUnreadable { error: e.to_string().into() });
             None
         });
         session.refresh_media(true);
         for issue in &session.issues {
-            notices.push(Notice::Warning(match issue {
-                MediaIssue::Missing { stored, .. } => t!("session.file_missing", file = stored),
+            notices.push(match issue {
+                MediaIssue::Missing { stored, .. } => Notice::FileMissing { file: stored.clone() },
                 MediaIssue::CaseMismatch { stored, actual, .. } => {
-                    t!("session.case_mismatch", file = stored, actual = actual)
+                    Notice::CaseMismatch { file: stored.clone(), actual: actual.clone() }
                 }
-            }));
+            });
         }
         session.update_lock(notices);
         session
@@ -733,14 +817,14 @@ impl Session {
             self.output
                 .take_errors()
                 .into_iter()
-                .map(|e| Notice::Warning(t!("session.audio_error", error = e))),
+                .map(|e| Notice::StreamError { device: DeviceRole::Main, error: e }),
         );
         if let Some(preview) = &self.preview_output {
             notices.extend(
                 preview
                     .take_errors()
                     .into_iter()
-                    .map(|e| Notice::Warning(t!("session.preview_error", error = e))),
+                    .map(|e| Notice::StreamError { device: DeviceRole::Preview, error: e }),
             );
         }
         // A device opened again may be another one: "Standardgerät" follows the system default.
@@ -754,31 +838,17 @@ impl Session {
             return frames_changed;
         }
         let preview = self.preview_output.as_ref().map_or("", |o| o.info().device.as_str());
-        for (label, device, before, now, switched) in [
-            (
-                t!("session.audio_output"),
-                self.output.info().device.as_str(),
-                &self.lost_seen.0,
-                &lost.0,
-                switched.0,
-            ),
-            (t!("session.preview_output"), preview, &self.lost_seen.1, &lost.1, switched.1),
+        for (device, name, before, now, switched) in [
+            (DeviceRole::Main, self.output.info().device.as_str(), &self.lost_seen.0, &lost.0, switched.0),
+            (DeviceRole::Preview, preview, &self.lost_seen.1, &lost.1, switched.1),
         ] {
+            let name = name.to_string();
             match (before, now) {
-                (None, Some(reason)) => notices.push(Notice::Error(t!(
-                    "session.device_lost",
-                    label = label,
-                    device = device,
-                    reason = reason
-                ))),
-                (Some(_), None) => {
-                    notices.push(Notice::Warning(t!("session.device_back", label = label, device = device)))
+                (None, Some(reason)) => {
+                    notices.push(Notice::DeviceLost { device, name, reason: reason.clone() })
                 }
-                (None, None) if switched => notices.push(Notice::Warning(t!(
-                    "session.device_switched",
-                    label = label,
-                    device = device
-                ))),
+                (Some(_), None) => notices.push(Notice::DeviceBack { device, name }),
+                (None, None) if switched => notices.push(Notice::DeviceSwitched { device, name }),
                 _ => {}
             }
         }
@@ -801,7 +871,7 @@ impl Session {
         if !self.runner.take_suspect_files().is_empty() {
             self.watcher.rescan();
         }
-        notices.extend(self.watcher.take_warnings().into_iter().map(Notice::Warning));
+        notices.extend(self.watcher.take_warnings());
         if let Some(stamps) = self.watcher.poll() {
             changed |= self.files_changed(stamps, notices);
         }
@@ -817,27 +887,28 @@ impl Session {
     }
 
     /// Selects and immediately saves an existing media folder.
-    pub fn set_media_dir(&mut self, dir: PathBuf) -> Result<(), String> {
+    pub fn set_media_dir(&mut self, dir: PathBuf) -> Result<(), Error> {
         if self.settings.show_mode {
-            return Err(t!("session.show_mode_locked"));
+            return Err(AppError::ShowModeLocked.into());
         }
         if !self.runner.is_idle() {
-            return Err(t!("session.media_dir_busy_cue"));
+            return Err(AppError::MediaDirBusyCue.into());
         }
         if !self.copies.is_empty() || self.search.is_some() {
-            return Err(t!("session.media_dir_busy_files"));
+            return Err(AppError::MediaDirBusyFiles.into());
         }
         if self.recovery.is_some() {
-            return Err(t!("session.decide_recovery"));
+            return Err(AppError::DecideRecovery.into());
         }
-        let dir = real_path(&dir).map_err(|e| t!("session.media_dir_unreachable", error = e))?;
+        let dir = real_path(&dir)
+            .map_err(|e| Error::from(AppError::MediaDirUnreachable { error: e.to_string() }))?;
         if !dir.is_dir() {
-            return Err(t!("session.not_a_folder", path = dir.display()));
+            return Err(AppError::NotAFolder { path: dir.display().to_string() }.into());
         }
-        let show_dir =
-            real_path(self.file.dir()).map_err(|e| t!("session.show_dir_unreachable", error = e))?;
+        let show_dir = real_path(self.file.dir())
+            .map_err(|e| Error::from(AppError::ShowDirUnreachable { error: e.to_string() }))?;
         let media_root = paths::media_root(&show_dir, &dir)
-            .ok_or_else(|| t!("session.media_dir_not_storable", path = dir.display()))?;
+            .ok_or_else(|| Error::from(AppError::MediaDirNotStorable { path: dir.display().to_string() }))?;
         if self.editor.show().media_root == media_root {
             return Ok(());
         }
@@ -873,7 +944,7 @@ impl Session {
         let show = self.editor.show();
         for id in playing {
             if let Some(cue) = show.cue(id) {
-                notices.push(Notice::Warning(t!("session.changed_while_playing", cue = cue_label(cue))));
+                notices.push(Notice::ChangedWhilePlaying { cue: CueName::of(cue) });
             }
         }
         let before = std::mem::take(&mut self.issues);
@@ -882,11 +953,12 @@ impl Session {
             let missing = |issues: &[MediaIssue]| {
                 issues.iter().any(|i| matches!(i, MediaIssue::Missing { stored, .. } if stored == file))
             };
-            notices.push(Notice::Warning(match (missing(&before), missing(&self.issues)) {
-                (false, true) => t!("session.file_now_missing", file = file),
-                (true, false) => t!("session.file_back", file = file),
-                _ => t!("session.file_changed", file = file),
-            }));
+            let file = file.clone();
+            notices.push(match (missing(&before), missing(&self.issues)) {
+                (false, true) => Notice::FileNowMissing { file },
+                (true, false) => Notice::FileBack { file },
+                _ => Notice::FileChanged { file },
+            });
         }
         true
     }
@@ -1015,7 +1087,7 @@ impl Session {
             let Some(i) = self.copies.iter().position(|c| c.target == target) else { continue };
             let copy = self.copies.remove(i);
             if let Err(e) = result {
-                notices.push(Notice::Error(t!("session.not_copied", file = copy.stored, error = e)));
+                notices.push(Notice::NotCopied { file: copy.stored, error: e });
                 continue;
             }
             // Seen as it is now, so the watcher reports no change.
@@ -1039,7 +1111,7 @@ impl Session {
             Err(TryRecvError::Empty) => return false,
             Err(TryRecvError::Disconnected) => {
                 self.search = None;
-                notices.push(Notice::Error(t!("session.search_aborted")));
+                notices.push(Notice::SearchAborted);
                 return true;
             }
         };
@@ -1057,7 +1129,7 @@ impl Session {
             match self.store_media(&path, &import, notices) {
                 Ok(Some(stored)) => changes.push((id, old, stored)),
                 Ok(None) => {}
-                Err(e) => notices.push(Notice::Warning(e)),
+                Err(error) => notices.push(Notice::ImportFailed { error: error.detail() }),
             }
         }
         let mut relinked = 0;
@@ -1086,11 +1158,7 @@ impl Session {
             })
             .count();
         if missing > 0 {
-            notices.push(Notice::Warning(t!(
-                "session.relinked_some",
-                relinked = relinked,
-                missing = missing
-            )));
+            notices.push(Notice::RelinkedSome { relinked, missing });
         }
         true
     }
@@ -1118,14 +1186,14 @@ impl Session {
     /// clipboard and in an undecided recovery. Copies under way are hidden
     /// files and their cues exist already. Refused in show mode and for a
     /// media folder holding the show file.
-    pub fn used_media(&self) -> Result<(PathBuf, Vec<String>), String> {
+    pub fn used_media(&self) -> Result<(PathBuf, Vec<String>), Error> {
         if self.settings.show_mode {
-            return Err(t!("session.show_mode_locked"));
+            return Err(AppError::ShowModeLocked.into());
         }
         let media = self.file.media_dir();
         let real = |p: &Path| real_path(p).unwrap_or_else(|_| p.to_path_buf());
         if real(self.file.dir()).starts_with(real(&media)) {
-            return Err(t!("session.media_dir_has_show"));
+            return Err(AppError::MediaDirHasShow.into());
         }
         let shows = self
             .editor
@@ -1147,11 +1215,7 @@ impl Session {
             match &cue.kind {
                 CueKind::Sound(s) if files(&s.file) => {
                     for issue in self.timing(s) {
-                        notices.push(Notice::Warning(t!(
-                            "session.timing_cue",
-                            cue = cue_label(cue),
-                            issue = issue
-                        )));
+                        notices.push(Notice::Timing { cue: CueName::of(cue), item: None, issue });
                     }
                 }
                 CueKind::Playlist(p) => {
@@ -1160,13 +1224,7 @@ impl Session {
                             continue;
                         }
                         for issue in self.timing(&item) {
-                            let label = cue_label(cue);
-                            notices.push(Notice::Warning(t!(
-                                "session.timing_item",
-                                cue = label,
-                                item = i + 1,
-                                issue = issue
-                            )));
+                            notices.push(Notice::Timing { cue: CueName::of(cue), item: Some(i + 1), issue });
                         }
                     }
                 }
@@ -1194,25 +1252,24 @@ impl Session {
         let (lock, failed) = MediaLock::new(self.watched.iter().cloned());
         self.lock = Some(lock);
         if let Some((path, e)) = failed.first() {
-            notices.push(Notice::Warning(t!(
-                "session.lock_failed",
-                count = failed.len(),
-                file = path.display(),
-                error = e
-            )));
+            notices.push(Notice::LockFailed {
+                count: failed.len(),
+                file: path.display().to_string(),
+                error: e.to_string().into(),
+            });
         }
     }
 
     /// Saves the show and waits until it is on disk. It runs on the writer
     /// thread, after an autosave still queued, so that one cannot land after
     /// the autosave is removed here.
-    pub fn save(&mut self) -> Result<(), String> {
+    pub fn save(&mut self) -> Result<(), Error> {
         self.file.show = self.editor.show().clone();
         let (file, remove_autosave) = (self.file.clone(), self.recovery.is_none());
         let (saved, removed) = self.writer.wait(move || {
-            let saved = file.save().map_err(|e| e.to_string());
+            let saved = file.save().map_err(Error::from);
             let removed = match (&saved, remove_autosave) {
-                (Ok(()), true) => file.remove_autosave().map_err(|e| e.to_string()),
+                (Ok(()), true) => file.remove_autosave().map_err(Error::from),
                 _ => Ok(()),
             };
             (saved, removed)
@@ -1231,9 +1288,9 @@ impl Session {
 
     /// Removes the autosave on the writer thread, after a write of it still
     /// queued, and waits for the result.
-    fn remove_autosave(&self) -> Result<(), String> {
+    fn remove_autosave(&self) -> Result<(), Error> {
         let (_, file) = self.autosave_target();
-        self.writer.wait(move || file.remove_autosave().map_err(|e| e.to_string()))?
+        self.writer.wait(move || file.remove_autosave().map_err(Error::from))?
     }
 
     /// Writes the autosave once edits have been quiet for a moment. Edits are
@@ -1260,13 +1317,13 @@ impl Session {
         }
         self.writer.submit(key, move || {
             let result = if write { file.write_autosave(&file.show) } else { file.remove_autosave() };
-            result.map_err(|e| t!("session.autosave_failed", error = e))
+            result.map_err(|e| Notice::AutosaveFailed { error: e.to_string().into() })
         });
     }
 
     /// Restores (one undo step) or discards the autosave found on opening.
     /// Allowed in show mode too: it is a deliberate decision after a crash.
-    pub fn recover(&mut self, apply: bool, notices: &mut Vec<Notice>) -> Result<(), String> {
+    pub fn recover(&mut self, apply: bool, notices: &mut Vec<Notice>) -> Result<(), Error> {
         let Some((show, _)) = self.recovery.take() else { return Ok(()) };
         if apply {
             self.editor.change(|s| *s = show);
@@ -1282,7 +1339,7 @@ impl Session {
 
     /// The operator left without saving: the autosave is no longer wanted.
     /// An undecided recovery is kept for the next opening.
-    pub fn discard_autosave(&self) -> Result<(), String> {
+    pub fn discard_autosave(&self) -> Result<(), Error> {
         if self.recovery.is_some() {
             return Ok(());
         }
@@ -1297,62 +1354,62 @@ impl Session {
         &mut self,
         mut settings: LocalSettings,
         notices: &mut Vec<Notice>,
-    ) -> Result<(), String> {
+    ) -> Result<(), Error> {
         settings.layout = self.settings.layout.clone();
         if !settings.fade_all.is_finite() || settings.fade_all < 0.0 {
-            return Err(t!("session.setting.not_negative", what = t!("session.setting.fade_all")));
+            return Err(AppError::SettingNegative { setting: Setting::FadeAll }.into());
         }
         if [settings.jump_back, settings.jump_forward, settings.jump_end]
             .iter()
             .any(|j| !j.is_finite() || *j <= 0.0)
         {
-            return Err(t!("session.setting.jump_times"));
+            return Err(AppError::JumpTimes.into());
         }
         for (secs, what) in [
-            (settings.end_warning, t!("session.setting.end_warning")),
-            (settings.panic_fade, t!("session.setting.panic_fade")),
-            (settings.go_lockout, t!("session.setting.go_lockout")),
+            (settings.end_warning, Setting::EndWarning),
+            (settings.panic_fade, Setting::PanicFade),
+            (settings.go_lockout, Setting::GoLockout),
         ] {
             if !secs.is_finite() || secs < 0.0 {
-                return Err(t!("session.setting.not_negative", what = what));
+                return Err(AppError::SettingNegative { setting: what }.into());
             }
         }
         keys::check_keys(&settings.keys)?;
         for (step, what) in [
-            (settings.volume_step, t!("session.setting.volume_step")),
-            (settings.pan_step, t!("session.setting.pan_step")),
-            (settings.rate_step, t!("session.setting.rate_step")),
+            (settings.volume_step, Setting::VolumeStep),
+            (settings.pan_step, Setting::PanStep),
+            (settings.rate_step, Setting::RateStep),
         ] {
             if !step.is_finite() || step <= 0.0 {
-                return Err(t!("session.setting.positive", what = what));
+                return Err(AppError::SettingPositive { setting: what }.into());
             }
         }
         if !jq_core::KEEP_ALIVE_RANGE.contains(&settings.keep_alive_level) {
             let (min, max) = jq_core::KEEP_ALIVE_RANGE.into_inner();
-            return Err(t!("session.setting.keep_alive_level", min = min, max = max));
+            return Err(AppError::KeepAliveLevel { min, max }.into());
         }
         if settings.msc_device.is_some_and(|d| d > 126) {
-            return Err(t!("session.setting.msc_device"));
+            return Err(AppError::MscDevice.into());
         }
         if let Some(frames) = settings.buffer_frames
             && !(frames.is_power_of_two() && (MIN_BUFFER_FRAMES..=MAX_BUFFER_FRAMES).contains(&frames))
         {
-            return Err(t!("session.setting.buffer", min = MIN_BUFFER_FRAMES, max = MAX_BUFFER_FRAMES));
+            return Err(AppError::BufferSize { min: MIN_BUFFER_FRAMES, max: MAX_BUFFER_FRAMES }.into());
         }
         // Set by the backend on opening a show.
         settings.last_show = self.settings.last_show.clone();
         settings.device_names = self.settings.device_names.clone();
         if settings.osc_listen == Some(0) {
-            return Err(t!("session.setting.osc_port"));
+            return Err(AppError::OscPort.into());
         }
         if settings.outputs.values().any(|&c| c == 0) || settings.preview_channel == Some(0) {
-            return Err(t!("session.setting.channels_from_one"));
+            return Err(AppError::ChannelsFromOne.into());
         }
         if settings.channels.is_some_and(|c| c < 2) {
-            return Err(t!("session.setting.min_channels"));
+            return Err(AppError::MinChannels.into());
         }
         if !settings.show_mode && self.editor.show().show_mode_locked {
-            return Err(t!("session.setting.show_mode_locked"));
+            return Err(AppError::SettingsShowModeLocked.into());
         }
         self.check_channels(&settings)?;
         let show_mode_changed = settings.show_mode != self.settings.show_mode;
@@ -1372,7 +1429,7 @@ impl Session {
         if settings.keep_awake != self.settings.keep_awake
             && let KeepAliveState::Failed(e) = self.keep_alive.set_enabled(settings.keep_awake)
         {
-            notices.push(Notice::Warning(t!("session.keep_awake_failed", error = e)));
+            notices.push(Notice::KeepAwakeFailed { error: e.to_string().into() });
         }
         self.settings = settings;
         self.save_settings();
@@ -1418,20 +1475,23 @@ impl Session {
     /// plays there stays silent.
     fn warn_missing_channels(&self, notices: &mut Vec<Notice>) {
         let channels = self.output.info().channels as usize;
-        let outputs =
-            self.editor.show().outputs.iter().map(|o| (o.name.clone(), self.settings.output_channel(&o.id)));
+        let outputs = self
+            .editor
+            .show()
+            .outputs
+            .iter()
+            .map(|o| (Some(o.name.clone()), self.settings.output_channel(&o.id)));
         let preview =
             self.settings.preview_device.is_none().then_some(self.settings.preview_channel).flatten();
-        let preview = preview.map(|_| (t!("session.preview"), self.settings.preview_first_channel()));
+        let preview = preview.map(|_| (None, self.settings.preview_first_channel()));
         for (output, first) in outputs.chain(preview) {
             if first + 2 > channels {
-                notices.push(Notice::Warning(t!(
-                    "session.output_channels",
-                    output = output,
-                    first = first + 1,
-                    second = first + 2,
-                    channels = channels
-                )));
+                notices.push(Notice::OutputChannels {
+                    output,
+                    first: first + 1,
+                    second: first + 2,
+                    channels,
+                });
             }
         }
     }
@@ -1466,7 +1526,7 @@ impl Session {
 
     /// Which cues new level limits would change (see
     /// [`Show::clamp_levels`]), so the UI can warn first.
-    pub fn check_level_limits(&self, limits: LevelLimits) -> Result<LevelChanges, String> {
+    pub fn check_level_limits(&self, limits: LevelLimits) -> Result<LevelChanges, Error> {
         check_limits(limits)?;
         let mut show = self.editor.show().clone();
         Ok(show.clamp_levels(show.level_limits, limits))
@@ -1489,18 +1549,18 @@ impl Session {
             (self.settings.clone(), self.settings_path.clone(), self.file.show.id.to_string());
         let key = Key::new(path.clone(), format!("settings {show}"));
         self.writer.submit(Some(key), move || {
-            settings.save(&path, &show).map_err(|e| t!("session.settings_not_saved", error = e))
+            settings.save(&path, &show).map_err(|e| Notice::SettingsNotSaved { error: e.to_string().into() })
         });
     }
 
     /// Changes the display name; refused in show mode.
-    pub fn rename(&mut self, name: &str) -> Result<(), String> {
+    pub fn rename(&mut self, name: &str) -> Result<(), Error> {
         if self.settings.show_mode {
-            return Err(t!("session.show_mode_locked"));
+            return Err(AppError::ShowModeLocked.into());
         }
         let name = name.trim();
         if name.is_empty() {
-            return Err(t!("session.name_empty"));
+            return Err(AppError::NameEmpty.into());
         }
         if self.editor.show().name != name {
             self.editor.change(|show| show.name = name.to_owned());
@@ -1511,23 +1571,23 @@ impl Session {
     /// The media folder and every stored path the show may need after
     /// saving it elsewhere: in its undo history too, and on the clipboard.
     /// Refused where renaming is.
-    pub fn save_as_plan(&self) -> Result<(PathBuf, Vec<String>), String> {
+    pub fn save_as_plan(&self) -> Result<(PathBuf, Vec<String>), Error> {
         self.check_save_as()?;
         Ok((self.file.media_dir(), media_in(self.editor.history(), &self.clipboard)))
     }
 
-    fn check_save_as(&self) -> Result<(), String> {
+    fn check_save_as(&self) -> Result<(), Error> {
         if self.settings.show_mode {
-            return Err(t!("session.show_mode_locked"));
+            return Err(AppError::ShowModeLocked.into());
         }
         if !self.runner.is_idle() {
-            return Err(t!("session.save_as_busy_cue"));
+            return Err(AppError::SaveAsBusyCue.into());
         }
         if !self.copies.is_empty() || self.search.is_some() {
-            return Err(t!("session.save_as_busy_files"));
+            return Err(AppError::SaveAsBusyFiles.into());
         }
         if self.recovery.is_some() {
-            return Err(t!("session.decide_recovery"));
+            return Err(AppError::DecideRecovery.into());
         }
         Ok(())
     }
@@ -1545,19 +1605,19 @@ impl Session {
         path: PathBuf,
         media_root: String,
         copied: Option<&[String]>,
-    ) -> Result<(), String> {
+    ) -> Result<(), Error> {
         let folder = path.parent().map(Path::to_path_buf);
         let result = self.check_save_as().and_then(|()| {
             if let Some(copied) = copied {
                 let copied: HashSet<&String> = copied.iter().collect();
                 if media_in(self.editor.history(), &self.clipboard).iter().any(|f| !copied.contains(f)) {
-                    return Err(t!("session.save_as_changed"));
+                    return Err(AppError::SaveAsChanged.into());
                 }
             }
             let name = path.file_stem().and_then(|name| name.to_str()).unwrap_or_default().to_owned();
             let show = Show { name, media_root: media_root.clone(), ..self.editor.show().clone() };
             let file = ShowFile { path, show };
-            file.save().map_err(|e| e.to_string())?;
+            file.save().map_err(Error::from)?;
             Ok(file)
         });
         let file = match result {
@@ -1590,11 +1650,11 @@ impl Session {
         Ok(())
     }
 
-    pub fn set_keep_awake(&mut self, enabled: bool, notices: &mut Vec<Notice>) -> Result<(), String> {
+    pub fn set_keep_awake(&mut self, enabled: bool, notices: &mut Vec<Notice>) -> Result<(), Error> {
         self.set_settings(LocalSettings { keep_awake: enabled, ..self.settings.clone() }, notices)
     }
 
-    pub fn set_show_mode(&mut self, enabled: bool, notices: &mut Vec<Notice>) -> Result<(), String> {
+    pub fn set_show_mode(&mut self, enabled: bool, notices: &mut Vec<Notice>) -> Result<(), Error> {
         self.set_settings(LocalSettings { show_mode: enabled, ..self.settings.clone() }, notices)
     }
 
@@ -1614,7 +1674,7 @@ impl Session {
     /// channels: what plays there stays silent, `set_settings` warns. The
     /// devices are only probed when they change; one that cannot be found
     /// passes, opening it reports the error.
-    fn check_channels(&self, settings: &LocalSettings) -> Result<(), String> {
+    fn check_channels(&self, settings: &LocalSettings) -> Result<(), Error> {
         let routing_changed = settings.outputs != self.settings.outputs
             || (&settings.preview_device, settings.preview_channel)
                 != (&self.settings.preview_device, self.settings.preview_channel);
@@ -1624,10 +1684,14 @@ impl Session {
             Some(probe_of(&self.output))
         };
         if let Some(main) = main {
-            let pairs =
-                self.editor.show().outputs.iter().map(|o| (o.name.clone(), settings.output_channel(&o.id)));
+            let pairs = self
+                .editor
+                .show()
+                .outputs
+                .iter()
+                .map(|o| (Some(o.name.clone()), settings.output_channel(&o.id)));
             let preview = settings.preview_device.is_none().then_some(settings.preview_channel).flatten();
-            let preview = preview.map(|_| (t!("session.preview"), settings.preview_first_channel()));
+            let preview = preview.map(|_| (None, settings.preview_first_channel()));
             let pairs = pairs.chain(preview).filter(|_| routing_changed);
             check_pairs(&main, settings.channels, pairs)?;
         }
@@ -1643,11 +1707,7 @@ impl Session {
                 .and_then(|spec| AudioOutput::probe(&spec).ok()),
         };
         if let Some(preview) = preview {
-            check_pairs(
-                &preview,
-                None,
-                [(t!("session.preview"), settings.preview_first_channel())].into_iter(),
-            )?;
+            check_pairs(&preview, None, [(None, settings.preview_first_channel())].into_iter())?;
         }
         Ok(())
     }
@@ -1666,9 +1726,9 @@ impl Session {
                 self.runner.set_preview_engine(Some(controller));
             }
             Err(e) => {
-                let e = t!("session.preview_unavailable", error = e);
-                notices.push(Notice::Warning(e.clone()));
-                self.preview_error = Some(e);
+                let error = e.detail();
+                notices.push(Notice::PreviewUnavailable { error: error.clone() });
+                self.preview_error = Some(error);
             }
         }
         self.remember_device_names();
@@ -1708,9 +1768,9 @@ impl Session {
         }) {
             Ok(listener) => self.osc_in = Some(listener),
             Err(e) => {
-                let e = t!("session.osc_listen_failed", port = port, error = e);
-                notices.push(Notice::Warning(e.clone()));
-                self.osc_error = Some(e);
+                let error = Detail::text(e.to_string());
+                notices.push(Notice::OscListenFailed { port, error: error.clone() });
+                self.osc_error = Some(error);
             }
         }
     }
@@ -1727,7 +1787,7 @@ impl Session {
                 self.runner.set_midi_out(Some(Box::new(MidiOutSink(out))));
             }
             Err(e) => {
-                notices.push(Notice::Warning(e.clone()));
+                notices.push(Notice::MidiOutFailed { error: e.clone() });
                 self.midi_out_error = Some(e);
             }
         }
@@ -1756,7 +1816,7 @@ impl Session {
         }) {
             Ok(input) => self.midi = Some(input),
             Err(e) => {
-                notices.push(Notice::Warning(e.clone()));
+                notices.push(Notice::MidiInFailed { error: e.clone() });
                 self.midi_error = Some(e);
             }
         }
@@ -1772,7 +1832,7 @@ impl Session {
         {
             match midi::msc_actions(self.editor.show(), &command) {
                 Ok(actions) => actions.into_iter().for_each(|a| self.runner.handle(a, now)),
-                Err(e) => notices.push(Notice::Warning(e)),
+                Err(error) => notices.push(Notice::MscFailed { error }),
             }
             return false;
         }
@@ -1790,7 +1850,7 @@ impl Session {
                     let Some(mut learned) = self.editor.show().cue(cue).cloned() else { return true };
                     learned.midi_trigger = Some(event.trigger);
                     if let Err(e) = self.edit(EditOp::UpdateCue { cue: Box::new(learned) }, notices) {
-                        notices.push(Notice::Warning(e));
+                        notices.push(Notice::LearnFailed { error: e.detail() });
                     }
                 }
             }
@@ -1804,20 +1864,20 @@ impl Session {
 
     /// Waits for the next MIDI control to bind it to a global action or a
     /// cue; `None` cancels.
-    pub fn midi_learn(&mut self, target: Option<LearnTarget>) -> Result<(), String> {
+    pub fn midi_learn(&mut self, target: Option<LearnTarget>) -> Result<(), Error> {
         if target.is_some() && self.midi.is_none() {
-            return Err(t!("session.no_midi_input"));
+            return Err(AppError::NoMidiInput.into());
         }
         match target {
             Some(LearnTarget::Action { action }) if action.keys_only() => {
-                return Err(t!("session.keyboard_only", action = action.name()));
+                return Err(AppError::KeyboardOnly { action }.into());
             }
             Some(LearnTarget::Cue { cue }) => {
                 if self.settings.show_mode {
-                    return Err(t!("session.show_mode_locked"));
+                    return Err(AppError::ShowModeLocked.into());
                 }
                 if self.editor.show().index_of(cue).is_none() {
-                    return Err(t!("session.midi_main_only"));
+                    return Err(AppError::MidiMainOnly.into());
                 }
             }
             _ => {}
@@ -1860,9 +1920,9 @@ impl Session {
         )
     }
 
-    pub fn edit(&mut self, op: EditOp, notices: &mut Vec<Notice>) -> Result<(), String> {
+    pub fn edit(&mut self, op: EditOp, notices: &mut Vec<Notice>) -> Result<(), Error> {
         if self.settings.show_mode && !matches!(op, EditOp::LockShowMode { .. }) {
-            return Err(t!("session.show_mode_locked"));
+            return Err(AppError::ShowModeLocked.into());
         }
         self.planned.clear();
         match op {
@@ -1874,7 +1934,7 @@ impl Session {
                 let show = self.editor.show();
                 cue.cap_changed_levels(show.cue(cue.id), show.level_limits.max_db);
                 if !self.editor.update(*cue) {
-                    return Err(t!("edit.cue_not_found"));
+                    return Err(ShowError::CueNotFound.into());
                 }
             }
             EditOp::UpdateCues { mut cues } => {
@@ -1887,7 +1947,7 @@ impl Session {
                 let show = self.editor.show();
                 cues.iter_mut().for_each(|c| c.cap_changed_levels(show.cue(c.id), show.level_limits.max_db));
                 if !self.editor.update_all(cues) {
-                    return Err(t!("edit.cue_not_found"));
+                    return Err(ShowError::CueNotFound.into());
                 }
             }
             EditOp::AddSounds { paths, index, import, group } => {
@@ -1927,26 +1987,31 @@ impl Session {
             EditOp::SetCueType { ids, kind } => {
                 let mut cues = Vec::new();
                 for id in ids {
-                    let mut cue =
-                        self.editor.show().cue(id).cloned().ok_or_else(|| t!("edit.cue_not_found"))?;
-                    cue.kind = cue.kind.convert(kind).ok_or_else(|| t!("session.convert_control_only"))?;
+                    let mut cue = self
+                        .editor
+                        .show()
+                        .cue(id)
+                        .cloned()
+                        .ok_or_else(|| Error::from(ShowError::CueNotFound))?;
+                    cue.kind =
+                        cue.kind.convert(kind).ok_or_else(|| Error::from(AppError::ConvertControlOnly))?;
                     cues.push(cue);
                 }
                 if !self.editor.update_all(cues) {
-                    return Err(t!("edit.cue_not_found"));
+                    return Err(ShowError::CueNotFound.into());
                 }
             }
             EditOp::SetStopwatches { stopwatches } => {
                 let mut ids = std::collections::HashSet::new();
                 for w in &stopwatches {
                     if w.countdown.is_some_and(|secs| !(secs > 0.0 && secs <= MAX_COUNTDOWN)) {
-                        return Err(t!("session.countdown_range", name = w.name));
+                        return Err(AppError::CountdownRange { name: w.name.to_string() }.into());
                     }
                     if w.id.trim().is_empty() || !ids.insert(w.id.as_str()) {
-                        return Err(t!("session.stopwatch_id", id = w.id));
+                        return Err(AppError::StopwatchId { id: w.id.to_string() }.into());
                     }
                     if w.name.trim().is_empty() {
-                        return Err(t!("session.stopwatch_name"));
+                        return Err(AppError::StopwatchName.into());
                     }
                 }
                 self.editor.change(|s| s.stopwatches = stopwatches);
@@ -1964,10 +2029,10 @@ impl Session {
                 let mut ids = std::collections::HashSet::new();
                 for d in &devices {
                     if d.id.trim().is_empty() || !ids.insert(d.id.as_str()) {
-                        return Err(t!("session.device_id", id = d.id));
+                        return Err(AppError::DeviceId { id: d.id.to_string() }.into());
                     }
                     if d.host.trim().is_empty() || d.port == 0 {
-                        return Err(t!("session.device_address", name = d.name));
+                        return Err(AppError::DeviceAddress { name: d.name.to_string() }.into());
                     }
                 }
                 self.editor.change(|s| s.devices = devices);
@@ -1988,7 +2053,7 @@ impl Session {
                 self.normalize_when_measured([id]);
             }
             EditOp::AddToPlaylist { id, paths, import } => {
-                self.editor.show().cue(id).ok_or_else(|| t!("edit.cue_not_found"))?;
+                self.editor.show().cue(id).ok_or_else(|| Error::from(ShowError::CueNotFound))?;
                 let files = self.store_all(&paths, &import, notices)?;
                 if files.is_empty() {
                     return Ok(());
@@ -2002,10 +2067,10 @@ impl Session {
             }
             EditOp::SetFile { id, path, item: Some(item), import, .. } => {
                 let Some(Cue { kind: CueKind::Playlist(p), .. }) = self.editor.show().cue(id) else {
-                    return Err(t!("session.playlist_not_found"));
+                    return Err(AppError::PlaylistNotFound.into());
                 };
                 if item >= p.items.len() {
-                    return Err(t!("session.item_not_found"));
+                    return Err(AppError::ItemNotFound.into());
                 }
                 let Some(stored) = self.store_media(&path, &import, notices)? else { return Ok(()) };
                 self.editor.change(|s| {
@@ -2019,7 +2084,7 @@ impl Session {
             }
             EditOp::SetFile { id, path, retitle, import, item: None } => {
                 let Some(Cue { kind: CueKind::Sound(_), .. }) = self.editor.show().cue(id) else {
-                    return Err(t!("session.sound_not_found"));
+                    return Err(AppError::SoundNotFound.into());
                 };
                 let Some(stored) = self.store_media(&path, &import, notices)? else { return Ok(()) };
                 let new_title = file_stem(&path);
@@ -2045,7 +2110,7 @@ impl Session {
                     collect_media_users(cue, &old_path, &mut ids);
                 }
                 if ids.is_empty() {
-                    return Err(t!("session.file_unused"));
+                    return Err(AppError::FileUnused.into());
                 }
                 let Some(stored) = self.store_media(&path, &import, notices)? else { return Ok(()) };
                 let auto = self.editor.show().normalize_on_import;
@@ -2096,16 +2161,16 @@ impl Session {
             EditOp::Normalize { ids } => {
                 let waiting = self.normalize(&ids, false);
                 if waiting > 0 {
-                    notices.push(Notice::Warning(t!("session.normalize_waiting", count = waiting)));
+                    notices.push(Notice::NormalizeWaiting { count: waiting });
                 }
             }
             EditOp::SetNormalization { target, on_import } => {
                 if !LOUDNESS_TARGETS.contains(&target) {
-                    return Err(t!(
-                        "session.loudness_range",
-                        min = LOUDNESS_TARGETS.start(),
-                        max = LOUDNESS_TARGETS.end()
-                    ));
+                    return Err(AppError::LoudnessRange {
+                        min: *LOUDNESS_TARGETS.start(),
+                        max: *LOUDNESS_TARGETS.end(),
+                    }
+                    .into());
                 }
                 self.editor.change(|s| (s.loudness_target, s.normalize_on_import) = (target, on_import));
             }
@@ -2141,7 +2206,7 @@ impl Session {
             EditOp::PasteReplace { ids, swap } => self.paste_replace(&ids, swap)?,
             EditOp::Relink { dir, copy_outside } => {
                 if self.search.is_some() {
-                    return Err(t!("session.search_running"));
+                    return Err(AppError::SearchRunning.into());
                 }
                 let search = jobs::search(self.editor.show().clone(), self.file.media_dir(), dir);
                 self.search = Some((search, copy_outside));
@@ -2196,16 +2261,6 @@ impl Session {
         }
     }
 
-    /// The language changed: texts the session holds (of the audio output) are put into it. True if the view
-    /// changed.
-    pub fn language_changed(&mut self) -> bool {
-        let mut changed = self.output.relocalize();
-        if let Some(preview) = &mut self.preview_output {
-            changed |= preview.relocalize();
-        }
-        changed
-    }
-
     pub fn view(&self) -> ShowView<'_> {
         let show = self.editor.show();
         let cue_info = show.all().into_iter().filter_map(|c| Some((c.id, self.cue_info(c)?))).collect();
@@ -2222,7 +2277,7 @@ impl Session {
             can_paste: !self.clipboard.is_empty(),
             audio: self.output.info(),
             audio_frames: self.output.callback_frames(),
-            audio_error: self.audio_error.as_ref().map(ToString::to_string),
+            audio_error: self.audio_error.as_ref().map(AudioError::detail),
             audio_lost: self.output.lost(),
             keep_alive: self.keep_alive.state(),
             settings: &self.settings,
@@ -2233,19 +2288,19 @@ impl Session {
                 .map(|(_, at)| at.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)),
             osc: OscView {
                 listening: self.osc_in.as_ref().map(OscListener::port),
-                error: self.osc_error.as_deref(),
+                error: self.osc_error.as_ref(),
             },
             preview: PreviewView {
                 device: self.preview_output.as_ref().map(|o| o.info().device.as_str()),
-                error: self.preview_error.as_deref(),
+                error: self.preview_error.as_ref(),
                 lost: self.preview_output.as_ref().and_then(AudioOutput::lost),
             },
             midi: MidiView {
                 port: self.midi.as_ref().map(MidiIn::name),
-                error: self.midi_error.as_deref(),
+                error: self.midi_error.as_ref(),
                 learning: self.learning,
                 out: self.midi_out_name.as_deref(),
-                out_error: self.midi_out_error.as_deref(),
+                out_error: self.midi_out_error.as_ref(),
             },
             fixed_keys: keys::fixed_keys(),
             default_keys: keys::default_keys(),
@@ -2274,24 +2329,24 @@ impl Session {
         info
     }
 
-    fn problems(&self, cue: &Cue) -> Vec<String> {
+    fn problems(&self, cue: &Cue) -> Vec<Problem> {
         let show = self.editor.show();
-        let mut problems = check_values(cue, show);
-        problems.extend(trigger_problems(show, &self.settings, cue));
-        problems.extend(target_problems(show, cue));
+        let mut problems: Vec<Problem> = check_values(cue, show).into_iter().map(Problem::Value).collect();
+        let mut more = Vec::new();
+        more.extend(trigger_problems(show, &self.settings, cue));
+        more.extend(target_problems(show, cue));
         let duration = |file: &String| self.media.get(file).and_then(|m| m.duration);
-        problems.extend(start_from_problems(show, cue, duration));
-        problems.extend(position_problems(show, cue, duration));
+        more.extend(start_from_problems(show, cue, duration));
+        more.extend(position_problems(show, cue, duration));
         // A group's files are its cues' (which report them).
         let files = if matches!(cue.kind, CueKind::Group(_)) { Vec::new() } else { cue.media_files() };
         for (i, file) in files.iter().enumerate() {
-            if let Some(reason) = self.media.get(*file).and_then(|m| m.unreadable.as_deref()) {
-                problems.push(match cue.kind {
-                    CueKind::Playlist(_) => t!("session.item_unreadable", item = i + 1, reason = reason),
-                    _ => t!("session.file_unreadable", reason = reason),
-                });
+            if let Some(reason) = self.media.get(*file).and_then(|m| m.unreadable.as_ref()) {
+                let item = matches!(cue.kind, CueKind::Playlist(_)).then_some(i + 1);
+                more.push(CueProblem::FileUnreadable { item, reason: reason.clone() });
             }
         }
+        problems.extend(more.into_iter().map(Problem::Cue));
         problems
     }
 
@@ -2470,7 +2525,7 @@ impl Session {
         path: &Path,
         import: &Import,
         notices: &mut Vec<Notice>,
-    ) -> Result<Option<String>, String> {
+    ) -> Result<Option<String>, Error> {
         let media = self.file.media_dir();
         let canonical = real_path(path).map_err(|e| format!("{}: {e}", path.display()))?;
         let media_canonical = real_path(&media).unwrap_or(media.clone());
@@ -2478,12 +2533,14 @@ impl Session {
             return Ok(Some(rel));
         }
         if !import.copy_outside {
-            notices.push(Notice::Warning(t!("session.outside_show_folder", path = path.display())));
+            notices.push(Notice::OutsideShowFolder { path: path.display().to_string() });
             return Ok(Some(canonical.to_string_lossy().replace('\\', "/")));
         }
         let choice = import.on_clash.get(path).copied();
-        let name =
-            canonical.file_name().and_then(|n| n.to_str()).ok_or_else(|| t!("session.invalid_file_name"))?;
+        let name = canonical
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| Error::from(AppError::InvalidFileName))?;
         // Names of copies under way or planned are taken, too.
         let taken = |n: &str| {
             self.copies.iter().any(|c| c.stored == n) || self.planned.iter().any(|(_, _, s)| s == n)
@@ -2498,7 +2555,7 @@ impl Session {
         let stored = paths::free_name(&media, name, taken);
         // A rename the operator chose needs no warning.
         if stored != name && choice != Some(OnClash::Rename) {
-            notices.push(Notice::Warning(t!("session.name_taken", name = name, stored = stored)));
+            notices.push(Notice::NameTaken { name: name.to_string(), stored: stored.clone() });
         }
         self.planned.push((canonical, paths::resolve(&media, &stored), stored.clone()));
         Ok(Some(stored))
@@ -2510,7 +2567,7 @@ impl Session {
         paths: &[PathBuf],
         import: &Import,
         notices: &mut Vec<Notice>,
-    ) -> Result<Vec<String>, String> {
+    ) -> Result<Vec<String>, Error> {
         let mut files = Vec::new();
         for path in paths {
             files.extend(self.store_media(path, import, notices)?);
@@ -2519,22 +2576,22 @@ impl Session {
     }
 
     /// Copies of the cues, in list order, replace the clipboard.
-    fn copy(&mut self, ids: &[CueId]) -> Result<(), String> {
+    fn copy(&mut self, ids: &[CueId]) -> Result<(), Error> {
         self.clipboard = self.copies(ids)?;
         Ok(())
     }
 
     /// Copies of the cues, in list order, as the clipboard holds them.
-    fn copies(&self, ids: &[CueId]) -> Result<Vec<Cue>, String> {
+    fn copies(&self, ids: &[CueId]) -> Result<Vec<Cue>, Error> {
         let cues: Vec<Cue> =
             self.editor.show().all().into_iter().filter(|c| ids.contains(&c.id)).cloned().collect();
         if cues.is_empty() {
-            return Err(t!("edit.cue_not_found"));
+            return Err(ShowError::CueNotFound.into());
         }
         Ok(cues)
     }
 
-    fn paste(&mut self, after: Option<CueId>, linked: bool) -> Result<(), String> {
+    fn paste(&mut self, after: Option<CueId>, linked: bool) -> Result<(), Error> {
         if self.clipboard.is_empty() {
             return Ok(());
         }
@@ -2542,7 +2599,7 @@ impl Session {
         let (group, index) = match after {
             None => (None, None),
             Some(id) => {
-                let list = show.siblings(id).ok_or_else(|| t!("edit.cue_not_found"))?;
+                let list = show.siblings(id).ok_or_else(|| Error::from(ShowError::CueNotFound))?;
                 let at = list.iter().position(|c| c.id == id).map(|i| i + 1);
                 (show.parent(id).map(|g| g.id), at)
             }
@@ -2552,15 +2609,19 @@ impl Session {
 
     /// Deletes `ids` and pastes at the place of the first of them, one undo
     /// step; `swap` puts the deleted cues on the clipboard.
-    fn paste_replace(&mut self, ids: &[CueId], swap: bool) -> Result<(), String> {
+    fn paste_replace(&mut self, ids: &[CueId], swap: bool) -> Result<(), Error> {
         if self.clipboard.is_empty() || ids.is_empty() {
             return Ok(());
         }
         let show = self.editor.show();
         // The first in list order: a group comes before its cues, so the
         // place is never inside a group that goes too.
-        let first =
-            show.all().into_iter().find(|c| ids.contains(&c.id)).ok_or_else(|| t!("edit.cue_not_found"))?.id;
+        let first = show
+            .all()
+            .into_iter()
+            .find(|c| ids.contains(&c.id))
+            .ok_or_else(|| Error::from(ShowError::CueNotFound))?
+            .id;
         let index = show.siblings(first).and_then(|list| list.iter().position(|c| c.id == first));
         let group = show.parent(first).map(|g| g.id);
         let removed = self.copies(ids)?;
@@ -2577,16 +2638,16 @@ impl Session {
     }
 
     /// Inserts the clipboard into the main list or `group`, at `index` (default: end).
-    fn paste_at(&mut self, group: Option<CueId>, index: Option<usize>, linked: bool) -> Result<(), String> {
+    fn paste_at(&mut self, group: Option<CueId>, index: Option<usize>, linked: bool) -> Result<(), Error> {
         if self.clipboard.is_empty() {
             return Ok(());
         }
         let show = self.editor.show();
         if group.is_some() && self.clipboard.iter().any(|c| matches!(c.kind, CueKind::Group(_))) {
-            return Err(t!("session.no_group_in_group"));
+            return Err(AppError::NoGroupInGroup.into());
         }
         if group.is_some() && self.clipboard.iter().any(Cue::is_scene) {
-            return Err(t!("session.scene_main_only"));
+            return Err(AppError::SceneMainOnly.into());
         }
         let taken: std::collections::HashSet<&str> =
             show.all().into_iter().map(|c| c.number.as_str()).collect();
@@ -2619,7 +2680,7 @@ impl Session {
     /// Inserts new cues (one undo step) into the main list or a group, at
     /// `index` (default: end), numbering those without a number by
     /// [`new_numbers`]: between 2 and 3 as 2.5, at the end of group 7 as 7.3 …
-    fn place(&mut self, group: Option<CueId>, index: Option<usize>, new: Vec<Cue>) -> Result<(), String> {
+    fn place(&mut self, group: Option<CueId>, index: Option<usize>, new: Vec<Cue>) -> Result<(), Error> {
         self.place_with(group, index, new, |_| {})
     }
 
@@ -2630,10 +2691,10 @@ impl Session {
         index: Option<usize>,
         mut new: Vec<Cue>,
         also: impl FnOnce(&mut Show),
-    ) -> Result<(), String> {
+    ) -> Result<(), Error> {
         let show = self.editor.show();
         if group.is_some() && new.iter().any(Cue::is_scene) {
-            return Err(t!("session.scene_main_only"));
+            return Err(AppError::SceneMainOnly.into());
         }
         let (list, prefix) = match group {
             None => (&show.cues, String::new()),
@@ -2641,7 +2702,7 @@ impl Session {
                 Some(Cue { kind: CueKind::Group(gr), number, .. }) => {
                     (&gr.cues, if number.is_empty() { String::new() } else { format!("{number}.") })
                 }
-                _ => return Err(t!("session.group_not_found")),
+                _ => return Err(AppError::GroupNotFound.into()),
             },
         };
         let at = index.unwrap_or(list.len()).min(list.len());
@@ -2724,18 +2785,18 @@ fn without_verbatim(path: &str) -> Option<String> {
 /// Output ids must be unique and not empty, names given. The main output
 /// (the default of new cues) stays, and an output still used by a cue
 /// cannot go.
-fn check_outputs(show: &Show, outputs: &[Output]) -> Result<(), String> {
+fn check_outputs(show: &Show, outputs: &[Output]) -> Result<(), Error> {
     let mut ids = std::collections::HashSet::new();
     for o in outputs {
         if o.id.trim().is_empty() || !ids.insert(o.id.as_str()) {
-            return Err(t!("session.output_id", id = o.id));
+            return Err(AppError::OutputId { id: o.id.to_string() }.into());
         }
         if o.name.trim().is_empty() {
-            return Err(t!("session.output_name"));
+            return Err(AppError::OutputName.into());
         }
     }
     if !ids.contains(Output::MAIN) {
-        return Err(t!("session.main_output"));
+        return Err(AppError::MainOutput.into());
     }
     for cue in show.all() {
         let used = match &cue.kind {
@@ -2748,7 +2809,7 @@ fn check_outputs(show: &Show, outputs: &[Output]) -> Result<(), String> {
         };
         if let Some(id) = used.filter(|id| !ids.contains(id.as_str())) {
             let name = show.outputs.iter().find(|o| &o.id == id).map_or(id.as_str(), |o| o.name.as_str());
-            return Err(t!("session.output_in_use", output = name, cue = cue_label(cue)));
+            return Err(AppError::OutputInUse { output: name.to_string(), cue: CueName::of(cue) }.into());
         }
     }
     Ok(())
@@ -2757,31 +2818,21 @@ fn check_outputs(show: &Show, outputs: &[Output]) -> Result<(), String> {
 /// A start cue's "start from" that its targets cannot play from: past a
 /// sound cue's end (it ends at once), before its start (it plays from
 /// there), or a target that is no sound cue (it starts from the top).
-fn start_from_problems(show: &Show, cue: &Cue, duration: impl Fn(&String) -> Option<f64>) -> Vec<String> {
+fn start_from_problems(show: &Show, cue: &Cue, duration: impl Fn(&String) -> Option<f64>) -> Vec<CueProblem> {
     let CueKind::StartStop(c) = &cue.kind else { return Vec::new() };
     let Some(from) = c.from.filter(|_| c.action == StartStopAction::Start) else { return Vec::new() };
     let targets = chosen_targets(show, cue);
     let mut problems = Vec::new();
     for target in targets.iter().filter_map(|t| show.cue(*t)) {
-        let name = cue_label(target);
+        let name = CueName::of(target);
         let CueKind::Sound(s) = &target.kind else {
-            problems.push(t!("problem.start_from_sound_only", cue = name));
+            problems.push(CueProblem::StartFromSoundOnly { cue: name });
             continue;
         };
         if let Some(end) = sound_end(s, &duration).filter(|end| from >= *end) {
-            problems.push(t!(
-                "problem.start_from_after_end",
-                time = secs_text(from),
-                cue = name,
-                end = secs_text(end)
-            ));
+            problems.push(CueProblem::StartFromAfterEnd { time: from, cue: name, end });
         } else if from < s.start {
-            problems.push(t!(
-                "problem.start_from_before_start",
-                time = secs_text(from),
-                cue = name,
-                start = secs_text(s.start)
-            ));
+            problems.push(CueProblem::StartFromBeforeStart { time: from, cue: name, start: s.start });
         }
     }
     problems
@@ -2801,14 +2852,14 @@ fn chosen_targets(show: &Show, cue: &Cue) -> Vec<CueId> {
 /// Targets a control cue cannot act on: none chosen, deleted ones, no entry
 /// before it, a stopwatch that is gone, "all" or an output for a start cue
 /// (which starts only chosen cues), or start cues starting themselves.
-fn target_problems(show: &Show, cue: &Cue) -> Vec<String> {
+fn target_problems(show: &Show, cue: &Cue) -> Vec<CueProblem> {
     let mut problems = Vec::new();
     let starts = matches!(&cue.kind, CueKind::StartStop(c) if c.action == StartStopAction::Start);
     match &cue.kind {
         CueKind::Stopwatch(w) => match &w.watch {
-            None => problems.push(t!("problem.no_stopwatch")),
+            None => problems.push(CueProblem::NoStopwatch),
             Some(id) if !show.stopwatches.iter().any(|s| &s.id == id) => {
-                problems.push(t!("problem.stopwatch_deleted"));
+                problems.push(CueProblem::StopwatchDeleted);
             }
             _ => {}
         },
@@ -2817,25 +2868,25 @@ fn target_problems(show: &Show, cue: &Cue) -> Vec<String> {
             Some(Targets::Cues(ids)) if !ids.is_empty() => {
                 let gone = ids.iter().filter(|id| show.cue(**id).is_none()).count();
                 if gone == ids.len() {
-                    problems.push(t!("problem.target_deleted"));
+                    problems.push(CueProblem::TargetDeleted);
                 } else if gone > 0 {
-                    problems.push(t!("problem.targets_deleted", gone = gone, total = ids.len()));
+                    problems.push(CueProblem::TargetsDeleted { gone, total: ids.len() });
                 }
             }
             Some(Targets::Previous(_)) if show.previous_control_target_before(cue.id).is_none() => {
-                problems.push(t!("problem.no_previous"));
+                problems.push(CueProblem::NoPrevious);
             }
             Some(Targets::All(_) | Targets::Output { .. }) if starts => {
-                problems.push(t!("problem.start_needs_chosen"));
+                problems.push(CueProblem::StartNeedsChosen);
             }
             Some(Targets::Output { output }) if !show.outputs.iter().any(|o| &o.id == output) => {
-                problems.push(t!("problem.output_missing", output = output));
+                problems.push(CueProblem::OutputMissing { output: output.clone() });
             }
             _ => {}
         },
     }
     if starts_itself(show, cue) {
-        problems.push(t!("problem.starts_itself"));
+        problems.push(CueProblem::StartsItself);
     }
     problems
 }
@@ -2864,7 +2915,7 @@ fn starts_itself(show: &Show, cue: &Cue) -> bool {
 }
 
 fn timing_warnings(issues: Vec<TimingIssue>) -> Vec<TimingWarning> {
-    issues.into_iter().map(|issue| TimingWarning { issue, message: issue.to_string() }).collect()
+    issues.into_iter().map(|issue| TimingWarning { issue }).collect()
 }
 
 /// Where a sound cue ends: its end position, else its file's end (`None`
@@ -2879,7 +2930,7 @@ fn sound_end(s: &SoundCue, duration: impl Fn(&String) -> Option<f64>) -> Option<
 /// A position cue's jump its targets cannot make: past a sound cue's end
 /// (it ends at once), a mark it does not have, or anything but a relative
 /// jump on a playlist (which is ignored). A group as target: its cues.
-fn position_problems(show: &Show, cue: &Cue, duration: impl Fn(&String) -> Option<f64>) -> Vec<String> {
+fn position_problems(show: &Show, cue: &Cue, duration: impl Fn(&String) -> Option<f64>) -> Vec<CueProblem> {
     let CueKind::Position(p) = &cue.kind else { return Vec::new() };
     let mut targets: Vec<&Cue> = Vec::new();
     for target in chosen_targets(show, cue).into_iter().filter_map(|t| show.cue(t)) {
@@ -2890,45 +2941,30 @@ fn position_problems(show: &Show, cue: &Cue, duration: impl Fn(&String) -> Optio
     }
     let mut problems = Vec::new();
     for target in targets {
-        let name = cue_label(target);
+        let name = CueName::of(target);
         match (&target.kind, p.to) {
             (CueKind::Playlist(_), PositionTo::Relative { .. }) => {}
-            (CueKind::Playlist(_), _) => problems.push(t!("problem.position_playlist", cue = name)),
+            (CueKind::Playlist(_), _) => problems.push(CueProblem::PositionPlaylist { cue: name }),
             (CueKind::Sound(s), PositionTo::Absolute { secs }) => {
                 if let Some(end) = sound_end(s, &duration).filter(|end| secs >= *end) {
-                    problems.push(t!(
-                        "problem.position_after_end",
-                        time = secs_text(secs),
-                        cue = name,
-                        end = secs_text(end)
-                    ));
+                    problems.push(CueProblem::PositionAfterEnd { time: secs, cue: name, end });
                 } else if secs < s.start {
-                    problems.push(t!(
-                        "problem.position_before_start",
-                        time = secs_text(secs),
-                        cue = name,
-                        start = secs_text(s.start)
-                    ));
+                    problems.push(CueProblem::PositionBeforeStart { time: secs, cue: name, start: s.start });
                 }
             }
             (
                 CueKind::Sound(s),
                 PositionTo::Mark { .. } | PositionTo::NextMark | PositionTo::PreviousMark,
             ) if s.marks.is_empty() => {
-                problems.push(t!("problem.no_marks", cue = name));
+                problems.push(CueProblem::NoMarks { cue: name });
             }
             (CueKind::Sound(s), PositionTo::Mark { index }) if index == 0 || index > s.marks.len() => {
-                problems.push(t!("problem.mark_missing", index = index, cue = name, count = s.marks.len()));
+                problems.push(CueProblem::MarkMissing { index, cue: name, count: s.marks.len() });
             }
             _ => {}
         }
     }
     problems
-}
-
-/// Seconds as shown in messages: "2.2 s" (with a decimal comma in German).
-fn secs_text(secs: f64) -> String {
-    format!("{secs:.1} s").replace('.', &t!("format.decimal"))
 }
 
 /// File name without extension, the title of a new sound cue.
@@ -2968,20 +3004,11 @@ fn replace_media_path(cue: &mut Cue, old: &str, new: &str, auto_normalize: bool)
         _ => {}
     }
 }
-
-fn cue_label(cue: &Cue) -> String {
-    match (cue.number.is_empty(), cue.title.is_empty()) {
-        (false, false) => t!("cue.label_both", number = cue.number, title = cue.title),
-        (false, true) => cue.number.clone(),
-        (true, _) => t!("cue.label_title", title = cue.title),
-    }
-}
-
 /// A MIDI output port as the runner's sink.
 struct MidiOutSink(MidiOut);
 
 impl MidiSink for MidiOutSink {
-    fn send(&mut self, message: &[u8]) -> Result<(), String> {
+    fn send(&mut self, message: &[u8]) -> Result<(), Detail> {
         self.0.send(message)
     }
 }
@@ -2990,7 +3017,7 @@ impl MidiSink for MidiOutSink {
 fn attach_osc_out(runner: &mut Runner, notices: &mut Vec<Notice>) {
     match UdpOut::new() {
         Ok(out) => runner.set_osc_out(Box::new(out)),
-        Err(e) => notices.push(Notice::Warning(t!("session.osc_send_failed", error = e))),
+        Err(e) => notices.push(Notice::OscSendUnavailable { error: e.to_string().into() }),
     }
 }
 
@@ -2999,9 +3026,9 @@ fn attach_osc_out(runner: &mut Runner, notices: &mut Vec<Notice>) {
 /// try a `failed` or lost device again only while nothing runs. Otherwise a
 /// device that drops mid-show would block every other setting (show mode,
 /// keep awake) until all cues are stopped; a lost one comes back by itself.
-fn audio_reopen(changed: bool, failed: bool, idle: bool) -> Result<bool, String> {
+fn audio_reopen(changed: bool, failed: bool, idle: bool) -> Result<bool, Error> {
     if changed && !idle {
-        return Err(t!("session.audio_device_busy"));
+        return Err(AppError::AudioDeviceBusy.into());
     }
     Ok(changed || (failed && idle))
 }
@@ -3018,7 +3045,7 @@ fn open_output(
             (output, controller, None)
         }
         Err(e) => {
-            notices.push(Notice::Error(t!("session.audio_unavailable", error = e)));
+            notices.push(Notice::AudioUnavailable { error: e.detail() });
             let (output, controller) = AudioOutput::null(48_000, 2, MAX_VOICES);
             (output, controller, Some(e))
         }
@@ -3053,12 +3080,12 @@ fn probe_of(output: &AudioOutput) -> DeviceProbe {
 }
 
 /// Level limits must lie in the range offered and leave room between them.
-fn check_limits(LevelLimits { max_db, min_db }: LevelLimits) -> Result<(), String> {
+fn check_limits(LevelLimits { max_db, min_db }: LevelLimits) -> Result<(), Error> {
     if !(max_db.is_finite() && min_db.is_finite()) || max_db > MAX_LEVEL_DB || min_db < MIN_LEVEL_DB {
-        return Err(t!("session.level_limits", min = MIN_LEVEL_DB, max = MAX_LEVEL_DB));
+        return Err(AppError::LevelLimits { min: MIN_LEVEL_DB, max: MAX_LEVEL_DB }.into());
     }
     if min_db >= max_db - 6.0 {
-        return Err(t!("session.level_gap"));
+        return Err(AppError::LevelGap.into());
     }
     Ok(())
 }
@@ -3136,66 +3163,56 @@ fn set_offsets(show: &mut Show, changes: &[(CueId, String, f64)], only_new: bool
 fn check_pairs(
     device: &DeviceProbe,
     channels: Option<u16>,
-    mut pairs: impl Iterator<Item = (String, usize)>,
-) -> Result<(), String> {
-    let name = &device.name;
+    mut pairs: impl Iterator<Item = (Option<String>, usize)>,
+) -> Result<(), Error> {
+    let name = device.name.clone();
     if let (Some(channels), Some(max)) = (channels, device.max_channels)
         && channels > max
     {
-        return Err(t!("session.device_too_few_channels", name = name, max = max, channels = channels));
+        return Err(AppError::DeviceTooFewChannels { name, max, channels }.into());
     }
     let Some(limit) = channels.or(device.max_channels) else { return Ok(()) };
     match pairs.find(|&(_, first)| first + 2 > limit as usize) {
-        Some((label, first)) => Err(if channels.is_some() {
-            t!(
-                "session.pair_missing_set",
-                label = label,
-                first = first + 1,
-                second = first + 2,
-                name = name,
-                limit = limit
-            )
-        } else {
-            t!(
-                "session.pair_missing_has",
-                label = label,
-                first = first + 1,
-                second = first + 2,
-                name = name,
-                limit = limit
-            )
-        }),
+        Some((output, first)) => Err(AppError::PairMissing {
+            output,
+            first: first + 1,
+            second: first + 2,
+            name,
+            limit,
+            set: channels.is_some(),
+        }
+        .into()),
         None => Ok(()),
     }
 }
 
 /// Refuses a hotkey or MIDI trigger outside the main list or on what the
 /// app or a global shortcut uses; an empty hotkey becomes none.
-fn check_triggers(show: &Show, settings: &LocalSettings, cue: &mut Cue) -> Result<(), String> {
+fn check_triggers(show: &Show, settings: &LocalSettings, cue: &mut Cue) -> Result<(), Error> {
     if cue.hotkey.as_ref().is_some_and(|k| k.code.trim().is_empty()) {
         cue.hotkey = None;
     }
     if cue.second_trigger == SecondTrigger::NextItem && !matches!(cue.kind, CueKind::Playlist(_)) {
-        return Err(t!("session.next_item_playlist_only"));
+        return Err(AppError::NextItemPlaylistOnly.into());
     }
     let main = show.index_of(cue.id).is_some();
     if let Some(key) = &cue.hotkey {
         if !main {
-            return Err(t!("session.hotkey_main_only"));
+            return Err(AppError::HotkeyMainOnly.into());
         }
         if keys::is_fixed(key) {
-            return Err(t!("keys.fixed", key = key.text()));
+            return Err(AppError::HotkeyFixed { key: key.clone() }.into());
         }
         if let Some(action) = keys::bound(&settings.keys, key) {
-            return Err(t!("keys.global", key = key.text(), action = action.name()));
+            return Err(AppError::HotkeyGlobal { key: key.clone(), action }.into());
         }
     }
     if let Some(trigger) = cue.midi_trigger {
         if !main {
-            return Err(t!("session.midi_main_only"));
+            return Err(AppError::MidiMainOnly.into());
         }
         if let Some(action) = midi::bound(&settings.midi, trigger) {
-            return Err(t!("session.midi_global", action = action.name()));
+            return Err(AppError::MidiGlobal { action }.into());
         }
     }
     Ok(())
@@ -3203,7 +3220,7 @@ fn check_triggers(show: &Show, settings: &LocalSettings, cue: &mut Cue) -> Resul
 
 /// Hotkeys and MIDI triggers that never fire, e.g. after this machine's
 /// global shortcuts changed or on a cue moved into a group.
-fn trigger_problems(show: &Show, settings: &LocalSettings, cue: &Cue) -> Vec<String> {
+fn trigger_problems(show: &Show, settings: &LocalSettings, cue: &Cue) -> Vec<CueProblem> {
     let mut problems = Vec::new();
     // Asked for every cue of the view: no list walk for the many without one.
     if cue.hotkey.is_none() && cue.midi_trigger.is_none() {
@@ -3211,29 +3228,28 @@ fn trigger_problems(show: &Show, settings: &LocalSettings, cue: &Cue) -> Vec<Str
     }
     let main = show.index_of(cue.id).is_some();
     if let Some(key) = &cue.hotkey {
-        let shown = key.text();
         if key.code.trim().is_empty() {
-            problems.push(t!("problem.hotkey_no_key"));
+            problems.push(CueProblem::HotkeyNoKey);
         } else if !main {
-            problems.push(t!("problem.hotkey_main_only", key = shown));
+            problems.push(CueProblem::HotkeyOutsideMain { key: key.clone() });
         } else if keys::is_fixed(key) {
-            problems.push(t!("problem.hotkey_fixed", key = shown));
+            problems.push(CueProblem::HotkeyReserved { key: key.clone() });
         } else if let Some(action) = keys::bound(&settings.keys, key) {
-            problems.push(t!("problem.hotkey_global", key = shown, action = action.name()));
+            problems.push(CueProblem::HotkeyTakenGlobally { key: key.clone(), action });
         }
     }
     if let Some(trigger) = cue.midi_trigger {
         if !main {
-            problems.push(t!("problem.midi_main_only"));
+            problems.push(CueProblem::MidiOutsideMain);
         } else if let Some(action) = midi::bound(&settings.midi, trigger) {
-            problems.push(t!("problem.midi_global", action = action.name()));
+            problems.push(CueProblem::MidiTakenGlobally { action });
         }
     }
     if cue.release_trigger
         && cue.second_trigger == SecondTrigger::Ignore
         && (cue.hotkey.is_some() || cue.midi_trigger.is_some())
     {
-        problems.push(t!("problem.release_ignored"));
+        problems.push(CueProblem::ReleaseIgnored);
     }
     problems
 }
@@ -3295,12 +3311,12 @@ const MAX_COUNTDOWN: f64 = 360_000.0;
 
 /// A scene marker stays in the main list and has nothing that plays: what
 /// a cue does when started or what starts it is dropped (it never runs).
-fn check_scene(show: &Show, cue: &mut Cue) -> Result<(), String> {
+fn check_scene(show: &Show, cue: &mut Cue) -> Result<(), Error> {
     if !cue.is_scene() {
         return Ok(());
     }
     if show.parent(cue.id).is_some() {
-        return Err(t!("session.scene_main_only"));
+        return Err(AppError::SceneMainOnly.into());
     }
     let blank = Cue::new(CueKind::Scene(SceneCue {}));
     cue.advance = blank.advance;
@@ -3317,22 +3333,22 @@ fn check_scene(show: &Show, cue: &mut Cue) -> Result<(), String> {
 
 /// A go-to cue's target is a top-level cue; one deleted meanwhile is left
 /// as it is (it counts as missing).
-fn check_go_to(show: &Show, cue: &Cue) -> Result<(), String> {
+fn check_go_to(show: &Show, cue: &Cue) -> Result<(), Error> {
     if let CueKind::GoTo(GoToCue { target: Some(t), .. }) = &cue.kind
         && show.cue(*t).is_some()
         && show.index_of(*t).is_none()
     {
-        return Err(t!("session.goto_top_level"));
+        return Err(AppError::GotoTopLevel.into());
     }
     Ok(())
 }
 
-fn check_others(others: &OthersEffect) -> Result<(), String> {
+fn check_others(others: &OthersEffect) -> Result<(), Error> {
     if !others.fade.is_finite() || !(0.0..=MAX_FADE).contains(&others.fade) {
-        return Err(t!("session.others_fade", max = MAX_FADE));
+        return Err(AppError::OthersFade { max: MAX_FADE }.into());
     }
     if !others.duck_db.is_finite() || !(-60.0..=0.0).contains(&others.duck_db) {
-        return Err(t!("session.others_duck"));
+        return Err(AppError::OthersDuck.into());
     }
     Ok(())
 }
@@ -3407,10 +3423,7 @@ mod tests {
         session.set_audio_dir(None, &mut Vec::new());
         writer.flush_all();
         let failed: Vec<Notice> = notices.try_iter().collect();
-        assert!(
-            matches!(&failed[..], [Notice::Warning(e)] if e.starts_with("Setting not saved")),
-            "{failed:?}"
-        );
+        assert!(matches!(&failed[..], [Notice::SettingsNotSaved { .. }]), "{failed:?}");
         drop(session);
         std::fs::remove_dir_all(dir).unwrap();
     }
@@ -3465,7 +3478,7 @@ mod tests {
         assert!(
             notices
                 .iter()
-                .any(|n| matches!(n, Notice::Warning(w) if w.starts_with("Preview on channels 3/4"))),
+                .any(|n| matches!(n, Notice::OutputChannels { output: None, first: 3, second: 4, .. })),
             "{notices:?}"
         );
         assert_eq!(session.settings.fade_all, 2.0);
@@ -3532,7 +3545,7 @@ mod tests {
             (Advance::default(), 0.0, None, Repeat::Off)
         );
         let show = Show { cues: vec![group], ..Show::default() };
-        assert_eq!(check_scene(&show, &mut marker.clone()), Err(t!("session.scene_main_only")));
+        assert_eq!(check_scene(&show, &mut marker.clone()), Err(AppError::SceneMainOnly.into()));
     }
 
     #[test]
@@ -3588,7 +3601,10 @@ mod tests {
         cue.hotkey = Some(Chord::new("Space", " ").ctrl());
         assert!(check(cue.clone()).is_ok(), "Ctrl+Space is free");
         cue.hotkey = Some(Chord::new("Space", " "));
-        assert_eq!(check(cue.clone()).unwrap_err(), "Space is assigned globally to “GO”");
+        assert_eq!(
+            check(cue.clone()).unwrap_err(),
+            AppError::HotkeyGlobal { key: Chord::new("Space", " "), action: ControlAction::Go }.into()
+        );
         cue.hotkey = Some(Chord::new("KeyY", "z").ctrl());
         assert!(check(cue.clone()).is_err(), "Ctrl+Z (QWERTZ) undoes");
         cue.hotkey = Some(Chord::new("", ""));
@@ -3602,21 +3618,21 @@ mod tests {
         cue.hotkey = Some(Chord::new("F5", ""));
         cue.midi_trigger = Some(note);
         assert!(check(cue.clone()).is_ok());
-        assert_eq!(trigger_problems(&show, &settings, &cue), Vec::<String>::new());
+        assert_eq!(trigger_problems(&show, &settings, &cue), []);
         let mut bound = settings.clone();
         midi::learn(&mut bound.midi, ControlAction::Go, note);
         bound.keys.push(keys::KeyBinding { chord: Chord::new("F5", ""), action: ControlAction::StopAll });
         assert_eq!(
             trigger_problems(&show, &bound, &cue),
             [
-                "Hotkey “F5” is assigned globally to “STOP ALL” – the global shortcut takes precedence",
-                "The MIDI trigger is assigned globally to “GO” – the global assignment takes precedence",
+                CueProblem::HotkeyTakenGlobally { key: Chord::new("F5", ""), action: ControlAction::StopAll },
+                CueProblem::MidiTakenGlobally { action: ControlAction::Go },
             ]
         );
         cue.release_trigger = true;
-        assert!(trigger_problems(&show, &settings, &cue)[0].starts_with("Release has no effect"));
+        assert_eq!(trigger_problems(&show, &settings, &cue), [CueProblem::ReleaseIgnored]);
         cue.hotkey = Some(Chord::new("", "ab"));
-        assert_eq!(trigger_problems(&show, &settings, &cue)[0], "Hotkey without a key – never triggered");
+        assert_eq!(trigger_problems(&show, &settings, &cue)[0], CueProblem::HotkeyNoKey);
     }
 
     #[test]
@@ -3699,6 +3715,11 @@ mod tests {
         assert!(!target_missing(&show, &watch));
     }
 
+    /// How problems name a cue with a number and no title.
+    fn number(number: &str) -> CueName {
+        CueName { number: number.into(), title: String::new() }
+    }
+
     #[test]
     fn a_start_from_past_the_end_is_a_problem() {
         let mut sound = Cue::new(CueKind::Sound(SoundCue { start: 1.0, ..SoundCue::new("kurz.wav") }));
@@ -3720,18 +3741,18 @@ mod tests {
         assert_eq!(
             start_from_problems(&show, &start(3.0, Targets::Cues(ids.clone())), length),
             [
-                "Start from 3.0 s is behind the end of cue 1 (2.2 s) – the cue ends at once",
-                "“Start from” only applies to sound cues – cue 3 starts from the beginning",
+                CueProblem::StartFromAfterEnd { time: 3.0, cue: number("1"), end: 2.2 },
+                CueProblem::StartFromSoundOnly { cue: number("3") },
             ]
         );
         assert_eq!(
             start_from_problems(&show, &start(5.0, Targets::Cues(ids.clone())), length)[1],
-            "Start from 5.0 s is behind the end of cue 2 (4.0 s) – the cue ends at once",
+            CueProblem::StartFromAfterEnd { time: 5.0, cue: number("2"), end: 4.0 },
             "its own end, not the file's"
         );
         assert_eq!(
             start_from_problems(&show, &start(0.5, Targets::Cues(vec![ids[0]])), length),
-            ["Start from 0.5 s is before the start point of cue 1 (1.0 s) – plays from the start point"]
+            [CueProblem::StartFromBeforeStart { time: 0.5, cue: number("1"), start: 1.0 }]
         );
         assert!(start_from_problems(&show, &start(1.5, Targets::Cues(vec![ids[0]])), length).is_empty());
         assert!(
@@ -3748,30 +3769,27 @@ mod tests {
         let mut show = Show { cues: vec![sound], ..Show::default() };
         let check = |show: &Show, cue: &Cue| target_problems(show, cue);
         let first = control(ControlKind::Pan, Targets::Previous(PreviousKeyword::Previous));
-        assert_eq!(check(&show, &first), ["No sound, playlist or group before it – the cue acts on nothing"]);
+        assert_eq!(check(&show, &first), [CueProblem::NoPrevious]);
         assert!(check(&show, &control(ControlKind::Pan, Targets::Cues(vec![]))).is_empty());
         let gone = CueId::new();
         assert_eq!(
             check(&show, &control(ControlKind::Pan, Targets::Cues(vec![gone]))),
-            ["Target missing (deleted)"]
+            [CueProblem::TargetDeleted]
         );
         assert_eq!(
             check(&show, &control(ControlKind::Pan, Targets::Cues(vec![sound_id, gone]))),
-            ["1 of 2 targets missing (deleted)"]
+            [CueProblem::TargetsDeleted { gone: 1, total: 2 }]
         );
         assert!(check(&show, &control(ControlKind::Pan, Targets::All(jq_show::AllKeyword::All))).is_empty());
         assert_eq!(
             check(&show, &control(ControlKind::Volume, Targets::Output { output: "weg".into() })),
-            ["Output “weg” does not exist in the show – the cue acts on nothing"]
+            [CueProblem::OutputMissing { output: "weg".into() }]
         );
         assert!(
             check(&show, &control(ControlKind::Volume, Targets::Output { output: "main".into() })).is_empty()
         );
         let mut start_all = control(ControlKind::StartStop, Targets::All(jq_show::AllKeyword::All));
-        assert_eq!(
-            check(&show, &start_all),
-            ["A start cue only starts chosen cues – with this target it starts nothing"]
-        );
+        assert_eq!(check(&show, &start_all), [CueProblem::StartNeedsChosen]);
         if let CueKind::StartStop(s) = &mut start_all.kind {
             s.action = jq_show::StartStopAction::Stop;
         }
@@ -3788,8 +3806,8 @@ mod tests {
             s.targets = Targets::Cues(vec![b.id]);
         }
         show.cues.extend([own.clone(), a.clone(), b]);
-        let looping = "Starts itself without a pre-wait – is aborted as a loop on GO";
-        assert_eq!(check(&show, &own), [looping]);
+        let looping = CueProblem::StartsItself;
+        assert_eq!(check(&show, &own), std::slice::from_ref(&looping));
         assert_eq!(check(&show, &a), [looping]);
         show.cues.last_mut().unwrap().pre_wait = 1.0;
         assert!(check(&show, &a).is_empty(), "b waits before it starts a again");
@@ -3800,8 +3818,8 @@ mod tests {
             }
             c
         };
-        assert_eq!(check(&show, &stopwatch(None)), ["No stopwatch chosen"]);
-        assert_eq!(check(&show, &stopwatch(Some("weg"))), ["The stopwatch was deleted"]);
+        assert_eq!(check(&show, &stopwatch(None)), [CueProblem::NoStopwatch]);
+        assert_eq!(check(&show, &stopwatch(Some("weg"))), [CueProblem::StopwatchDeleted]);
     }
 
     #[test]
@@ -3831,22 +3849,22 @@ mod tests {
         };
         assert_eq!(
             check(PositionTo::Absolute { secs: 99.0 }, vec![ids[0]]),
-            ["Position 99.0 s is behind the end of cue 1 (30.0 s) – the cue ends at once"]
+            [CueProblem::PositionAfterEnd { time: 99.0, cue: number("1"), end: 30.0 }]
         );
         assert_eq!(
             check(PositionTo::Absolute { secs: 0.5 }, vec![ids[0]]),
-            ["Position 0.5 s is before the start point of cue 1 (1.0 s) – jumps to the start point"]
+            [CueProblem::PositionBeforeStart { time: 0.5, cue: number("1"), start: 1.0 }]
         );
         assert!(check(PositionTo::Absolute { secs: 10.0 }, vec![ids[0]]).is_empty());
         assert_eq!(
             check(PositionTo::Mark { index: 3 }, vec![ids[0]]),
-            ["Mark 3 does not exist in cue 1 (2 marks) – no jump"]
+            [CueProblem::MarkMissing { index: 3, cue: number("1"), count: 2 }]
         );
         assert!(check(PositionTo::Mark { index: 2 }, vec![ids[0]]).is_empty());
-        assert_eq!(check(PositionTo::NextMark, vec![ids[1]]), ["Cue 2 has no marks – no jump"]);
+        assert_eq!(check(PositionTo::NextMark, vec![ids[1]]), [CueProblem::NoMarks { cue: number("2") }]);
         assert!(check(PositionTo::Relative { secs: 5.0 }, vec![ids[2]]).is_empty());
         let playlist = check(PositionTo::Absolute { secs: 5.0 }, vec![ids[2]]);
-        assert!(playlist.len() == 1 && playlist[0].starts_with("Cue 3 is a playlist"), "{playlist:?}");
+        assert_eq!(playlist, [CueProblem::PositionPlaylist { cue: number("3") }]);
         // A group as target: what is inside.
         assert_eq!(check(PositionTo::PreviousMark, vec![group_id]).len(), 2, "no marks on 2, playlist 3");
     }
@@ -3927,7 +3945,7 @@ mod tests {
         assert!(check_outputs(&show, &renamed).is_ok());
         assert_eq!(
             check_outputs(&show, &[output("main", "Main")]),
-            Err("Output “Monitor” is still used by cue 3".into())
+            Err(AppError::OutputInUse { output: "Monitor".into(), cue: number("3") }.into())
         );
         assert!(check_outputs(&show, &[output("mon", "Monitor")]).is_err(), "main stays");
         assert!(check_outputs(&show, &[output("main", "A"), output("main", "B")]).is_err(), "unique");
@@ -3938,29 +3956,50 @@ mod tests {
     fn pairs_must_fit_the_device() {
         let ag08 = device(Some(8));
         assert!(
-            check_pairs(&ag08, None, [("Main".to_string(), 0), ("Monitor".to_string(), 6)].into_iter())
-                .is_ok()
+            check_pairs(
+                &ag08,
+                None,
+                [(Some("Main".to_string()), 0), (Some("Monitor".to_string()), 6)].into_iter()
+            )
+            .is_ok()
         );
         assert_eq!(
-            check_pairs(&ag08, None, [("Main".to_string(), 0), ("Monitor".to_string(), 8)].into_iter()),
-            Err("Monitor: channels 9/10 do not exist, “AG08” has 8 channels".into())
+            check_pairs(
+                &ag08,
+                None,
+                [(Some("Main".to_string()), 0), (Some("Monitor".to_string()), 8)].into_iter()
+            ),
+            Err(AppError::PairMissing {
+                output: Some("Monitor".into()),
+                first: 9,
+                second: 10,
+                name: "AG08".into(),
+                limit: 8,
+                set: false
+            }
+            .into())
         );
-        assert!(
-            check_pairs(&device(None), None, [("Main".to_string(), 30)].into_iter()).is_ok(),
-            "unknown passes"
-        );
+        assert!(check_pairs(&device(None), None, [(None, 30)].into_iter()).is_ok(), "unknown passes");
     }
 
     #[test]
     fn pairs_must_fit_a_set_channel_count() {
         let ag08 = device(Some(8));
         assert_eq!(
-            check_pairs(&ag08, Some(4), [("Main".to_string(), 4)].into_iter()),
-            Err("Main: channels 5/6 do not exist, “AG08” is set to 4 channels".into())
+            check_pairs(&ag08, Some(4), [(Some("Main".to_string()), 4)].into_iter()),
+            Err(AppError::PairMissing {
+                output: Some("Main".into()),
+                first: 5,
+                second: 6,
+                name: "AG08".into(),
+                limit: 4,
+                set: true
+            }
+            .into())
         );
         assert_eq!(
-            check_pairs(&ag08, Some(10), [("Main".to_string(), 0)].into_iter()),
-            Err("“AG08” only has 8 channels, 10 are set".into())
+            check_pairs(&ag08, Some(10), [(Some("Main".to_string()), 0)].into_iter()),
+            Err(AppError::DeviceTooFewChannels { name: "AG08".into(), max: 8, channels: 10 }.into())
         );
     }
 
@@ -4066,13 +4105,10 @@ mod tests {
 
         let wait = Cue::new(CueKind::Wait(WaitCue { duration: 1.0 }));
         let show = Show { cues: vec![wait, fade.clone()], ..Show::default() };
-        assert_eq!(
-            target_problems(&show, &fade),
-            ["No sound, playlist or group before it – the cue acts on nothing"]
-        );
+        assert_eq!(target_problems(&show, &fade), [CueProblem::NoPrevious]);
     }
 
-    fn edit(session: &mut Session, op: EditOp) -> Result<(), String> {
+    fn edit(session: &mut Session, op: EditOp) -> Result<(), Error> {
         session.edit(op, &mut Vec::new())
     }
 
@@ -4158,9 +4194,9 @@ mod tests {
         assert!(session.settings.show_mode, "locking enters show mode");
         assert_eq!(
             edit(&mut session, EditOp::AddWait { index: None, group: None }),
-            Err(t!("session.show_mode_locked"))
+            Err(AppError::ShowModeLocked.into())
         );
-        assert_eq!(edit(&mut session, EditOp::Undo), Err(t!("session.show_mode_locked")));
+        assert_eq!(edit(&mut session, EditOp::Undo), Err(AppError::ShowModeLocked.into()));
         assert_eq!(session.editor.show().cues.len(), 1);
 
         // Unlocking is the one edit show mode takes.
@@ -4193,7 +4229,7 @@ mod tests {
         assert!(!session.view().can_paste);
         assert_eq!(
             edit(&mut session, EditOp::Copy { ids: vec![CueId::new()] }),
-            Err(t!("edit.cue_not_found"))
+            Err(ShowError::CueNotFound.into())
         );
         edit(&mut session, EditOp::Copy { ids: vec![a] }).unwrap();
         assert!(session.view().can_paste);
@@ -4218,14 +4254,14 @@ mod tests {
         edit(&mut session, EditOp::Copy { ids: vec![group] }).unwrap();
         assert_eq!(
             edit(&mut session, EditOp::Paste { after: Some(inner), linked: false }),
-            Err(t!("session.no_group_in_group"))
+            Err(AppError::NoGroupInGroup.into())
         );
         edit(&mut session, EditOp::AddScene { index: None }).unwrap();
         let scene = session.editor.show().cues.last().unwrap().id;
         edit(&mut session, EditOp::Copy { ids: vec![scene] }).unwrap();
         assert_eq!(
             edit(&mut session, EditOp::Paste { after: Some(inner), linked: false }),
-            Err(t!("session.scene_main_only"))
+            Err(AppError::SceneMainOnly.into())
         );
         drop(session);
         std::fs::remove_dir_all(dir).unwrap();
@@ -4340,11 +4376,11 @@ mod tests {
         let unknown = Cue::new(CueKind::Wait(WaitCue { duration: 1.0 }));
         assert_eq!(
             edit(&mut session, EditOp::UpdateCue { cue: Box::new(unknown.clone()) }),
-            Err(t!("edit.cue_not_found"))
+            Err(ShowError::CueNotFound.into())
         );
         assert_eq!(
             edit(&mut session, EditOp::UpdateCues { cues: vec![sound.clone(), unknown] }),
-            Err(t!("edit.cue_not_found"))
+            Err(ShowError::CueNotFound.into())
         );
         sound.hotkey = Some(Chord::new("Space", " "));
         assert!(edit(&mut session, EditOp::UpdateCue { cue: Box::new(sound.clone()) }).is_err(), "GO's key");
@@ -4362,7 +4398,7 @@ mod tests {
 
         assert_eq!(
             edit(&mut session, EditOp::SetCueType { ids: vec![wait], kind: ControlKind::Pan }),
-            Err(t!("session.convert_control_only"))
+            Err(AppError::ConvertControlOnly.into())
         );
         edit(
             &mut session,
@@ -4413,7 +4449,10 @@ mod tests {
         assert_eq!(session.editor.show().cues[0].title, "inside");
 
         let notices = add(&mut session, outside.join("far.wav"), Import::default());
-        assert!(matches!(&notices[..], [Notice::Warning(w)] if w.contains("far.wav")), "{notices:?}");
+        assert!(
+            matches!(&notices[..], [Notice::OutsideShowFolder { path }] if path.contains("far.wav")),
+            "{notices:?}"
+        );
         let linked = last_file(&session);
         assert!(Path::new(&linked).is_absolute() && !linked.contains('\\'), "{linked}");
 
@@ -4427,7 +4466,10 @@ mod tests {
         let notices = add(&mut session, outside.join("clash.wav"), copy(None));
         let renamed = last_file(&session);
         assert_ne!(renamed, "clash.wav");
-        assert!(matches!(&notices[..], [Notice::Warning(w)] if w.contains(&renamed)), "{notices:?}");
+        assert!(
+            matches!(&notices[..], [Notice::NameTaken { stored, .. }] if stored == &renamed),
+            "{notices:?}"
+        );
         assert!(session.view().cue_info.values().any(|i| i.importing), "plays once copied");
         let deadline = Instant::now() + Duration::from_secs(10);
         while !session.copies.is_empty() && Instant::now() < deadline {
@@ -4445,7 +4487,7 @@ mod tests {
             group: None,
         };
         let error = edit(&mut session, gone).unwrap_err();
-        assert!(error.contains("gone.wav"), "{error}");
+        assert!(error.to_string().contains("gone.wav"), "{error}");
         drop(session);
         std::fs::remove_dir_all(dir).unwrap();
     }

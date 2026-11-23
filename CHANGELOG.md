@@ -25,6 +25,10 @@ different in the app, not how the code changed). The Release workflow turns
 - Pressing Enter in a field now also leaves it, so the keys work for the cue list again right away.
 - The "Go to" field no longer shows its tooltip when focused with its shortcut, only when there is no
   cue with the number entered.
+- A warning or error that is already shown is no longer stacked again: the new one takes its place
+  (and a warning starts its time again). A newer message about the same device or file replaces the
+  older one, e.g. "reconnected" replaces "interrupted". This also goes for an action that is refused
+  again and again. Messages already shown switch with the language.
 
 ### Fixed
 

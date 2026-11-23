@@ -19,7 +19,7 @@ struct FakeLoader {
 }
 
 impl MediaLoader for FakeLoader {
-    fn load(&self, path: &Path, rate: u32) -> Result<AudioBuffer, String> {
+    fn load(&self, path: &Path, rate: u32) -> Result<AudioBuffer, jq_i18n::Detail> {
         self.loads.lock().unwrap().push(path.to_owned());
         let name = path.file_stem().unwrap().to_str().unwrap();
         if name.starts_with("missing") {
@@ -422,7 +422,7 @@ fn broken_cue_reports_error_and_keeps_chain() {
     rig.run(20);
     assert_eq!(rig.active(), ["2"]);
     let notices = rig.runner.take_notices();
-    assert!(matches!(&notices[..], [Notice::Error(m)] if m.contains("Cue 1")), "{notices:?}");
+    assert!(matches!(&notices[..], [Notice::CueFailed { cue, .. }] if cue.number == "1"), "{notices:?}");
 }
 
 #[test]
@@ -613,10 +613,7 @@ fn running_cue_is_not_triggered_twice() {
     rig.run(50);
     assert_eq!(rig.active(), ["1"]);
     assert!(
-        !rig.runner
-            .take_notices()
-            .iter()
-            .any(|n| matches!(n, Notice::Warning(w) if w.contains("is already running"))),
+        !rig.runner.take_notices().iter().any(|n| matches!(n, Notice::AlreadyRunning { .. })),
         "a GO on a running cue is swallowed silently"
     );
     assert_eq!(rig.playhead(), None, "GO still advances the playhead");
@@ -676,7 +673,7 @@ fn blocked_cue_keeps_auto_continue_chain() {
     let mut active = rig.active();
     active.sort();
     assert_eq!(active, ["1", "2", "3"]);
-    assert!(rig.runner.take_notices().contains(&Notice::Warning("Cue 2 is already running".into())));
+    assert!(rig.runner.take_notices().contains(&Notice::AlreadyRunning { cue: number("2") }));
 }
 
 fn edit_sound(rig: &mut Rig, number: &str, f: impl FnOnce(&mut SoundCue)) {
@@ -1422,7 +1419,7 @@ fn preview_needs_an_output() {
     rig.act(Action::Preview(id));
     assert!(rig.runner.state(rig.now()).preview.is_none());
     let notices = rig.runner.take_notices();
-    assert!(matches!(&notices[..], [Notice::Warning(m)] if m.contains("preview")), "{notices:?}");
+    assert!(matches!(&notices[..], [Notice::NoPreviewOutput | Notice::PreviewPlaceholder]), "{notices:?}");
 }
 
 #[test]
@@ -1467,7 +1464,7 @@ type Sent = Vec<(String, Vec<u8>)>;
 struct OscRecorder(Arc<Mutex<Sent>>);
 
 impl osc::OscOut for OscRecorder {
-    fn send(&self, target: &str, packet: &[u8]) -> Result<(), String> {
+    fn send(&self, target: &str, packet: &[u8]) -> Result<(), jq_i18n::Detail> {
         self.0.lock().unwrap().push((target.into(), packet.to_vec()));
         Ok(())
     }
@@ -1520,14 +1517,17 @@ fn broken_osc_cue_reports_and_keeps_the_chain() {
     rig.run(20);
     assert_eq!(rig.active(), ["2"]);
     let notices = rig.runner.take_notices();
-    assert!(notices.iter().any(|n| matches!(n, Notice::Error(m) if m.contains("weg"))), "{notices:?}");
+    assert!(
+        notices.iter().any(|n| matches!(n, Notice::CueFailed { error, .. } if error.get("device").and_then(|d| d.as_str()) == Some("weg"))),
+        "{notices:?}"
+    );
 }
 
 #[derive(Clone, Default)]
 struct MidiRecorder(Arc<Mutex<Vec<Vec<u8>>>>);
 
 impl midi::MidiSink for MidiRecorder {
-    fn send(&mut self, message: &[u8]) -> Result<(), String> {
+    fn send(&mut self, message: &[u8]) -> Result<(), jq_i18n::Detail> {
         self.0.lock().unwrap().push(message.to_vec());
         Ok(())
     }
@@ -1563,7 +1563,9 @@ fn midi_cue_without_output_reports_and_continues() {
     assert_eq!(rig.active(), ["2"]);
     let notices = rig.runner.take_notices();
     assert!(
-        notices.iter().any(|n| matches!(n, Notice::Error(m) if m.contains("MIDI output"))),
+        notices.iter().any(
+            |n| matches!(n, Notice::CueFailed { error, .. } if error.kind() == Some("runner_no_midi_output"))
+        ),
         "{notices:?}"
     );
 }
@@ -1609,12 +1611,7 @@ fn playlist_gap_and_repeat() {
     rig.act(Action::StartCue(id));
     rig.run(10);
     // Swallowed silently (second trigger "ignore").
-    assert!(
-        !rig.runner
-            .take_notices()
-            .iter()
-            .any(|n| matches!(n, Notice::Warning(m) if m.contains("is already running")))
-    );
+    assert!(!rig.runner.take_notices().iter().any(|n| matches!(n, Notice::AlreadyRunning { .. })));
     rig.run(100);
     assert_eq!(item(&rig), Some((1, 2)));
     rig.run(200);
@@ -1882,7 +1879,7 @@ fn broken_playlist_item_is_skipped() {
     rig.run(20);
     assert_eq!(item(&rig), Some((1, 2)));
     let notices = rig.runner.take_notices();
-    assert!(notices.iter().any(|n| matches!(n, Notice::Error(m) if m.contains("item 1"))), "{notices:?}");
+    assert!(notices.iter().any(|n| matches!(n, Notice::CueFailed { item: Some(1), .. })), "{notices:?}");
 }
 
 #[test]
@@ -1897,7 +1894,7 @@ fn a_broken_last_playlist_item_keeps_the_chain() {
         rig.run(200);
         assert_eq!(rig.active(), ["2"], "gap {gap}");
         let notices = rig.runner.take_notices();
-        assert!(notices.iter().any(|n| matches!(n, Notice::Error(m) if m.contains("item 2"))), "{notices:?}");
+        assert!(notices.iter().any(|n| matches!(n, Notice::CueFailed { item: Some(2), .. })), "{notices:?}");
     }
 }
 
@@ -2000,10 +1997,7 @@ fn shuffled_playlist_arms_the_item_it_starts_with() {
     let file = format!("len{}.wav", 1000 + item.file);
     assert!(loaded.iter().any(|p| p.ends_with(&file)), "{file} armed: {loaded:?}");
     let notices = rig.runner.take_notices();
-    assert!(
-        notices.iter().all(|n| !matches!(n, Notice::Warning(m) if m.contains("preloaded"))),
-        "{notices:?}"
-    );
+    assert!(notices.iter().all(|n| !matches!(n, Notice::NotPreloaded { .. })), "{notices:?}");
 }
 
 #[test]
@@ -2024,7 +2018,7 @@ fn streamed_cue_is_armed_only_where_loaded_and_reports_underruns() {
     // for as long as it plays.
     let silences = |rig: &mut Rig| {
         let notices = rig.runner.take_notices();
-        notices.iter().filter(|n| matches!(n, Notice::Warning(m) if m.contains("silence"))).count()
+        notices.iter().filter(|n| matches!(n, Notice::Underrun { .. })).count()
     };
     rig.run(1000);
     assert!(active_state(&rig, "2").unwrap().loading);
@@ -2057,13 +2051,11 @@ fn underruns_are_not_reported_by_default() {
     rig.act(Action::StopCue(late_id));
     rig.run(2000);
     let notices = rig.runner.take_notices();
-    assert!(!notices.iter().any(|n| matches!(n, Notice::Warning(m) if m.contains("silence"))), "{notices:?}");
+    assert!(!notices.iter().any(|n| matches!(n, Notice::Underrun { .. })), "{notices:?}");
     // Turned on later, the silence from before is not reported.
     rig.runner.set_settings(LocalSettings { underrun_warning: true, ..rig.runner.settings().clone() });
     rig.run(1000);
-    assert!(
-        !rig.runner.take_notices().iter().any(|n| matches!(n, Notice::Warning(m) if m.contains("silence")))
-    );
+    assert!(!rig.runner.take_notices().iter().any(|n| matches!(n, Notice::Underrun { .. })));
 }
 
 fn group_cues(group: &Cue) -> &[Cue] {
@@ -2099,9 +2091,7 @@ fn group_starts_all_its_cues_on_one_go() {
     active.sort();
     assert_eq!(active, ["1a", "1b"]);
     assert_eq!(rig.playhead().as_deref(), Some("2"));
-    assert!(
-        rig.runner.take_notices().iter().all(|n| !matches!(n, Notice::Warning(m) if m.contains("running")))
-    );
+    assert!(rig.runner.take_notices().iter().all(|n| !matches!(n, Notice::AlreadyRunning { .. })));
 }
 
 #[test]
@@ -2161,12 +2151,7 @@ fn stopping_or_fading_a_group_reaches_its_cues() {
     rig.run(20);
     rig.act(Action::StartCue(id));
     // Swallowed silently (second trigger "ignore").
-    assert!(
-        !rig.runner
-            .take_notices()
-            .iter()
-            .any(|n| matches!(n, Notice::Warning(m) if m.contains("is already running")))
-    );
+    assert!(!rig.runner.take_notices().iter().any(|n| matches!(n, Notice::AlreadyRunning { .. })));
     rig.act(Action::StopCue(id));
     rig.run(20);
     assert!(rig.active().is_empty());
@@ -2235,8 +2220,13 @@ fn changed_file_is_read_again_and_running_cue_reported() {
     assert_eq!(loads(&rig), 3);
 }
 
+/// How notices name a cue with a number and no title.
+fn number(number: &str) -> CueName {
+    CueName { number: number.into(), title: String::new() }
+}
+
 fn not_armed_warnings(rig: &mut Rig) -> Vec<Notice> {
-    rig.runner.take_notices().into_iter().filter(|n| format!("{n:?}").contains("not preloaded")).collect()
+    rig.runner.take_notices().into_iter().filter(|n| matches!(n, Notice::NotPreloaded { .. })).collect()
 }
 
 #[test]
@@ -2298,7 +2288,7 @@ fn streamed_cue_waits_for_its_start_instead_of_playing_silence() {
     let state = active_state(&rig, "1").expect("running");
     assert!(!state.loading && state.elapsed > 0.2, "{state:?}");
     assert!(streams.iter().all(|d| d.underruns() == 0), "no silence played");
-    assert!(!rig.runner.take_notices().iter().any(|n| format!("{n:?}").contains("Stille")));
+    assert!(!rig.runner.take_notices().iter().any(|n| matches!(n, Notice::Underrun { .. })));
 }
 
 #[test]
@@ -2392,7 +2382,10 @@ fn file_being_copied_is_neither_loaded_nor_played_until_done() {
     rig.run(50);
     rig.act(Action::Go);
     let notices = rig.runner.take_notices();
-    assert!(matches!(&notices[..], [Notice::Error(m)] if m.contains("copied")), "{notices:?}");
+    assert!(
+        matches!(&notices[..], [Notice::CueFailed { error, .. }] if error.kind() == Some("runner_still_copying")),
+        "{notices:?}"
+    );
 
     rig.runner.set_importing(Default::default());
     rig.act(Action::SetPlayhead(id));
@@ -2577,9 +2570,7 @@ fn second_trigger_modes() {
     start(&mut rig);
     rig.run(100);
     assert!((elapsed(&rig, "1") - 0.2).abs() < 0.015);
-    assert!(
-        rig.runner.take_notices().iter().all(|n| !matches!(n, Notice::Warning(w) if w.contains("running")))
-    );
+    assert!(rig.runner.take_notices().iter().all(|n| !matches!(n, Notice::AlreadyRunning { .. })));
 
     let mut rig = Rig::new(vec![with_second(sound("1", "len1000.wav"), SecondTrigger::Pause)]);
     start(&mut rig);
@@ -2729,7 +2720,7 @@ fn a_go_on_a_cue_fading_out_starts_it_again() {
     rig.act(Action::FadeCue(id));
     rig.run(100);
     rig.act(Action::FadeCue(id));
-    assert!(rig.runner.take_notices().contains(&Notice::Warning("Cue 1 is already fading out".into())));
+    assert!(rig.runner.take_notices().contains(&Notice::AlreadyFading { cue: number("1") }));
     rig.run(500);
     assert!(rig.active().is_empty());
 
@@ -2782,7 +2773,7 @@ fn second_trigger_by_go_on_the_playhead_and_not_by_auto_continue() {
     rig.act(Action::Go);
     rig.run(50);
     assert_eq!(sorted(rig.active()), ["0", "1"], "auto-continue does not stop it");
-    assert!(rig.runner.take_notices().contains(&Notice::Warning("Cue 1 is already running".into())));
+    assert!(rig.runner.take_notices().contains(&Notice::AlreadyRunning { cue: number("1") }));
     rig.act(Action::SetPlayhead(id));
     rig.act(Action::Go);
     rig.run(100);
@@ -3247,10 +3238,7 @@ fn the_loop_exit_starts_the_next_cue_when_the_vamp_is_left() {
     rig.run(70);
     assert_eq!(sorted(rig.active()), ["1", "3"], "at the end of the vamp's pass");
     let notices = rig.runner.take_notices();
-    assert!(
-        notices.iter().all(|n| matches!(n, Notice::Warning(m) if m.contains("preloaded"))),
-        "{notices:?}"
-    );
+    assert!(notices.iter().all(|n| matches!(n, Notice::NotPreloaded { .. })), "{notices:?}");
 }
 
 #[test]
@@ -3386,14 +3374,11 @@ fn a_missing_go_to_target_is_reported_and_keeps_the_chain() {
     rig.run(20);
     assert_eq!(rig.active(), ["2"]);
     let notices = rig.runner.take_notices();
-    assert!(
-        notices.iter().any(|n| matches!(n, Notice::Error(m) if m.contains("Target missing"))),
-        "{notices:?}"
-    );
+    assert!(notices.iter().any(|n| matches!(n, Notice::TargetMissing { .. })), "{notices:?}");
 
     let mut rig = Rig::new(vec![go_to("1", None, true)]);
     rig.act(Action::Go);
-    assert!(matches!(rig.runner.take_notices()[..], [Notice::Warning(_)]));
+    assert!(matches!(rig.runner.take_notices()[..], [Notice::NoTarget { .. }]));
 
     // A cue inside a group is there, but no valid target.
     let group = group_of("2", GroupMode::All, vec![sound("2a", "len300.wav")]);
@@ -3404,9 +3389,7 @@ fn a_missing_go_to_target_is_reported_and_keeps_the_chain() {
     assert!(rig.active().is_empty());
     let notices = rig.runner.take_notices();
     assert!(
-        notices
-            .iter()
-            .any(|n| matches!(n, Notice::Error(m) if m.contains("2a") && m.contains("inside a group"))),
+        notices.iter().any(|n| matches!(n, Notice::TargetInGroup { target, .. } if target.number == "2a")),
         "{notices:?}"
     );
 }
@@ -3436,7 +3419,10 @@ fn a_go_to_loop_without_a_pause_is_broken_off() {
     rig.runner.set_show(show);
     rig.act(Action::Go);
     let notices = rig.runner.take_notices();
-    assert!(notices.iter().any(|n| matches!(n, Notice::Error(m) if m.contains("loop"))), "{notices:?}");
+    assert!(
+        notices.iter().any(|n| matches!(n, Notice::GotoLoop { .. } | Notice::StartLoop { .. })),
+        "{notices:?}"
+    );
 }
 
 #[test]
@@ -3455,7 +3441,10 @@ fn a_go_to_loop_over_a_zero_timer_is_broken_off() {
         rig.act(Action::Go);
         rig.run(20);
         let notices = rig.runner.take_notices();
-        assert!(notices.iter().any(|n| matches!(n, Notice::Error(m) if m.contains("loop"))), "{notices:?}");
+        assert!(
+            notices.iter().any(|n| matches!(n, Notice::GotoLoop { .. } | Notice::StartLoop { .. })),
+            "{notices:?}"
+        );
         rig.run(20);
         assert!(rig.runner.take_notices().is_empty(), "the loop is over");
         rig.act(Action::SetPlayhead(rig.runner.show().cues[2].id));
@@ -3775,10 +3764,7 @@ fn a_playlist_arms_the_item_after_a_missing_one() {
     rig.run(600);
     assert_eq!(item(&rig), Some((2, 3)));
     let notices = rig.runner.take_notices();
-    assert!(
-        notices.iter().all(|n| !matches!(n, Notice::Warning(m) if m.contains("preloaded"))),
-        "{notices:?}"
-    );
+    assert!(notices.iter().all(|n| !matches!(n, Notice::NotPreloaded { .. })), "{notices:?}");
 }
 
 // --- M4: control cues -------------------------------------------------------
@@ -3863,7 +3849,7 @@ fn start_cue_resumes_a_paused_target_and_leaves_a_running_one() {
     rig.run(20);
     let state = rig.runner.state(rig.now());
     assert!(state.active[0].elapsed > elapsed, "plays on, no restart");
-    assert_eq!(rig.runner.take_notices(), [Notice::Warning("Cue 1 is already running".into())]);
+    assert_eq!(rig.runner.take_notices(), [Notice::AlreadyRunning { cue: number("1") }]);
 }
 
 #[test]
@@ -4154,7 +4140,7 @@ fn reset_leaves_a_cue_fading_out_to_a_stop() {
     rig.act(Action::ResetCue(id));
     assert_eq!(
         rig.runner.take_notices(),
-        [Notice::Warning("Cue 1 is fading out right now – Reset has no effect".into())]
+        [Notice::FadingNoEffect { cue: number("1"), ignores: FadingIgnores::Reset }]
     );
     rig.run(5200);
     assert!(rig.active().is_empty());
@@ -4180,7 +4166,7 @@ fn fade_to_on_a_cue_fading_out_warns_and_leaves_it() {
     rig.act(Action::Go);
     assert_eq!(
         rig.runner.take_notices(),
-        [Notice::Warning("Cue 1 is fading out right now – “Fade to level” has no effect".into())]
+        [Notice::FadingNoEffect { cue: number("1"), ignores: FadingIgnores::FadeToLevel }]
     );
     rig.act(Action::Go);
     assert_eq!(rig.runner.take_notices(), [], "all running cues: no warning");
@@ -4214,7 +4200,7 @@ fn position_cue_jumps_absolute_relative_and_to_marks() {
     go_on(&mut rig, "7");
     rig.run(20);
     assert!((progress(&rig) - 0.6).abs() < 0.01, "no mark 3: stays");
-    assert_eq!(rig.runner.take_notices(), [Notice::Warning("Cue 1: mark missing, no jump".into())]);
+    assert_eq!(rig.runner.take_notices(), [Notice::MarkMissing { cue: number("1") }]);
     go_on(&mut rig, "8");
     rig.run(20);
     assert!(rig.active().is_empty(), "to the end, which ends it");
@@ -4300,7 +4286,7 @@ fn stopwatches_run_by_cue_and_command_regardless_of_stop_all() {
     rig.runner.stopwatch("w", StopwatchAction::Reset, now);
     assert_eq!((watch(&rig).elapsed, watch(&rig).running), (0.0, false));
     rig.act(Action::Go);
-    assert_eq!(rig.runner.take_notices(), [Notice::Warning("Cue 3: no stopwatch chosen".into())]);
+    assert_eq!(rig.runner.take_notices(), [Notice::NoStopwatchChosen { cue: number("3") }]);
     show.stopwatches.clear();
     rig.runner.set_show(show);
     assert!(rig.runner.state(rig.now()).stopwatches.is_empty());
@@ -4378,14 +4364,10 @@ fn start_cues_starting_each_other_are_broken_off() {
     rig.act(Action::Go);
     rig.run(20);
     let notices = rig.runner.take_notices();
-    let broken = |m: &String| m.ends_with("start loop without a pause aborted");
-    assert!(matches!(&notices[..], [Notice::Error(m)] if broken(m)), "{notices:?}");
+    assert!(matches!(&notices[..], [Notice::StartLoop { .. }]), "{notices:?}");
     go_on(&mut rig, "3");
     rig.run(20);
-    assert_eq!(
-        rig.runner.take_notices(),
-        [Notice::Error("Cue 3: start loop without a pause aborted".into())]
-    );
+    assert_eq!(rig.runner.take_notices(), [Notice::StartLoop { cue: number("3") }]);
 }
 
 #[test]
@@ -4481,7 +4463,7 @@ fn rate_cue_with_transposition_only_keeps_the_rate() {
     assert_eq!(a.rate, 100.0);
     assert!((a.transpose - 3.0).abs() < 0.01, "{}", a.transpose);
     let notices = rig.runner.take_notices();
-    assert!(!notices.iter().any(|n| matches!(n, Notice::Warning(w) if w.contains("pitch"))), "{notices:?}");
+    assert!(!notices.iter().any(|n| matches!(n, Notice::TooManyStretchers { .. })), "{notices:?}");
 }
 
 #[test]
@@ -4603,19 +4585,13 @@ fn too_many_stretched_cues_play_varispeed_and_warn() {
         rig.act(Action::Go);
     }
     rig.run(100);
-    let warnings: Vec<String> = rig
+    let warnings: Vec<Notice> = rig
         .runner
         .take_notices()
         .into_iter()
-        .filter_map(|n| match n {
-            Notice::Warning(w) if w.contains("pitch") => Some(w),
-            _ => None,
-        })
+        .filter(|n| matches!(n, Notice::TooManyStretchers { .. }))
         .collect();
-    assert_eq!(
-        warnings,
-        ["Cue 5: too many cues with their own pitch at once – plays without pitch correction"]
-    );
+    assert_eq!(warnings, [Notice::TooManyStretchers { cue: number("5") }]);
 }
 
 #[test]
@@ -4752,7 +4728,10 @@ fn a_placeholder_plays_nothing_and_keeps_the_chain() {
     rig.run(20);
     assert_eq!(rig.active(), ["2"]);
     let notices = rig.runner.take_notices();
-    assert_eq!(notices, [Notice::Warning("Cue 1 “Gewitter”: placeholder without a file".into())]);
+    assert_eq!(
+        notices,
+        [Notice::Placeholder { cue: CueName { number: "1".into(), title: "Gewitter".into() } }]
+    );
     assert!(rig.loader.loads.lock().unwrap().iter().all(|p| p.ends_with("len500.wav")), "loads no file");
 }
 

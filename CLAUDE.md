@@ -17,6 +17,15 @@
   constants outside components hold keys or `labels()`/`options()`/getters, never finished texts.
   Multi-word abbreviations ("z. B.") take a narrow no-break space (U+202F: `\u202f` in `.ts`, the
   character itself in `.txt`).
+  What the backend tells the operator is typed (a kind with data) and worded by the UI, never by `t!`: notices
+  (`jq_core::Notice` → `app/src/lib/notices.ts`, which also gives the key by which a newer notice replaces a shown
+  one), command errors (`app/src-tauri/src/error.rs` `Error`, built from `AppError`, `jq_show::ShowError` and
+  `jq_core::keys::KeyError` → `lib/errors.ts`; text from below as `AppError::Other`) and a cue's problems and timing
+  issues in `CueInfo` (→ `lib/problems.ts`). The layers below (audio, engine, media, MIDI, OSC, playback, paths) report
+  a `jq_i18n::Detail` (`detail!("kind", name = value)`, or `Detail::text` for a system's error text), worded in
+  `lib/errors.ts`; never turn one into text with `to_string`/`format!` for the UI (their `Display` is for logs). The
+  program's own device names are `SILENT_DEVICE`/`DEFAULT_DEVICE` (`deviceName` in `lib/format.ts`). Backend `t!` is
+  left only for what never reaches the web UI (native dialogs, the OS) or is stored data (default cue titles).
   English is the fallback. The setting `LocalSettings.language` (`auto`/`en`/`de`) lives in the config file, not
   in localStorage. New language: add a catalog on each side, extend `Lang`/`LANGUAGES`. Code, comments and documentation
   are in English (German texts live only in the catalogs and the installer).

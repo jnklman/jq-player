@@ -8,7 +8,7 @@ use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::time::SystemTime;
 
-use jq_i18n::t;
+use jq_i18n::{Detail, detail};
 
 use crate::model::{Cue, CueId, CueKind, Show};
 
@@ -55,17 +55,51 @@ pub fn free_name(media_dir: &Path, name: &str, taken: impl Fn(&str) -> bool) -> 
     }
 }
 
+/// Why a copy failed.
+#[derive(Debug)]
+pub enum CopyError {
+    Io(io::Error),
+    NoFileName,
+    /// Stopped by `progress`.
+    Cancelled,
+    /// The target appeared meanwhile (it is never overwritten).
+    Exists(PathBuf),
+}
+
+impl From<io::Error> for CopyError {
+    fn from(e: io::Error) -> Self {
+        Self::Io(e)
+    }
+}
+
+impl CopyError {
+    /// For the UI, which words it.
+    pub fn detail(&self) -> Detail {
+        match self {
+            Self::Io(e) => Detail::text(e.to_string()),
+            Self::NoFileName => detail!("copy_no_file_name"),
+            Self::Cancelled => detail!("copy_cancelled"),
+            Self::Exists(path) => detail!("exists", path = path.display().to_string()),
+        }
+    }
+}
+
+/// Which file, what went wrong (the UI words it).
+pub fn file_detail(path: impl std::fmt::Display, reason: Detail) -> Detail {
+    detail!("media_file", path = path.to_string(), reason = reason)
+}
+
 /// Copies `from` to `to` without ever leaving a partial `to`: the data goes
 /// to a hidden file next to it, renamed once complete. `progress` gets the
 /// bytes copied so far and stops the copy by returning false. Never
 /// overwrites: fails if `to` appeared meanwhile.
-pub fn copy_file(from: &Path, to: &Path, mut progress: impl FnMut(u64) -> bool) -> io::Result<()> {
-    let name = to.file_name().ok_or_else(|| io::Error::other(t!("paths.no_file_name")))?;
+pub fn copy_file(from: &Path, to: &Path, mut progress: impl FnMut(u64) -> bool) -> Result<(), CopyError> {
+    let name = to.file_name().ok_or(CopyError::NoFileName)?;
     let mut part = OsString::from(".");
     part.push(name);
     part.push(".part");
     let part = to.with_file_name(part);
-    let result = (|| {
+    let result = (|| -> Result<(), CopyError> {
         if let Some(dir) = to.parent() {
             fs::create_dir_all(dir)?;
         }
@@ -78,23 +112,20 @@ pub fn copy_file(from: &Path, to: &Path, mut progress: impl FnMut(u64) -> bool) 
                 Ok(0) => break,
                 Ok(len) => len,
                 Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
-                Err(e) => return Err(e),
+                Err(e) => return Err(e.into()),
             };
             out.write_all(&buf[..len])?;
             done += len as u64;
             if !progress(done) {
-                return Err(io::Error::new(io::ErrorKind::Interrupted, t!("paths.cancelled")));
+                return Err(CopyError::Cancelled);
             }
         }
         out.sync_all()?;
         drop(out);
         if to.exists() {
-            return Err(io::Error::new(
-                io::ErrorKind::AlreadyExists,
-                t!("paths.exists", path = to.display()),
-            ));
+            return Err(CopyError::Exists(to.to_owned()));
         }
-        fs::rename(&part, to)
+        Ok(fs::rename(&part, to)?)
     })();
     if result.is_err() {
         let _ = fs::remove_file(&part);
@@ -411,7 +442,7 @@ pub fn copy_media<'a>(
     from: &Path,
     to: &Path,
     stored: impl IntoIterator<Item = &'a str>,
-) -> io::Result<MediaCopy> {
+) -> Result<MediaCopy, Detail> {
     let mut result = MediaCopy::default();
     let mut seen = HashSet::new();
     for file in stored {
@@ -431,8 +462,9 @@ pub fn copy_media<'a>(
         match copy_file(&source, &resolve(to, &rel), |_| true) {
             Ok(()) => result.copied += 1,
             // The same file in another spelling (`a.wav`, `./a.wav`, `A.wav` on Windows).
-            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
-            Err(e) => return Err(io::Error::new(e.kind(), format!("{}: {e}", source.display()))),
+            Err(CopyError::Exists(_)) => {}
+            Err(CopyError::Io(e)) if e.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(e) => return Err(file_detail(source.display(), e.detail())),
         }
     }
     Ok(result)
@@ -467,16 +499,16 @@ fn collect_unused(
 /// Deletes the media files `files` (stored paths) and the folders inside
 /// `media_dir` that are left empty. Returns the files that could not be
 /// deleted, with the reason.
-pub fn remove_media(media_dir: &Path, files: &[String]) -> Vec<(String, io::Error)> {
+pub fn remove_media(media_dir: &Path, files: &[String]) -> Vec<(String, Detail)> {
     let mut failed = Vec::new();
     for stored in files {
         let path = resolve(media_dir, stored);
         if relativize(media_dir, &path).is_none() {
-            failed.push((stored.clone(), io::Error::other(t!("paths.outside_media"))));
+            failed.push((stored.clone(), detail!("outside_media")));
             continue;
         }
         if let Err(e) = fs::remove_file(&path) {
-            failed.push((stored.clone(), e));
+            failed.push((stored.clone(), Detail::text(e.to_string())));
             continue;
         }
         // Fails, as wanted, while a folder still holds something.
@@ -555,7 +587,7 @@ pub(crate) mod tests {
         // Stopped halfway: nothing is left behind.
         let other = media.join("regen.wav");
         let stopped = copy_file(&source, &other, |done| done < 2 << 20);
-        assert_eq!(stopped.unwrap_err().kind(), io::ErrorKind::Interrupted);
+        assert!(matches!(stopped, Err(CopyError::Cancelled)));
         assert_eq!(fs::read_dir(&media).unwrap().count(), 1);
         fs::remove_dir_all(dir).unwrap();
     }

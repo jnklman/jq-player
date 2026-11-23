@@ -3,6 +3,8 @@
 //! Each runs on a thread of its own; the session collects the results.
 
 use std::path::PathBuf;
+
+use jq_i18n::Detail;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -20,7 +22,7 @@ pub struct Probed {
     /// Seconds; `None` if the file is missing, broken or does not say.
     pub duration: Option<f64>,
     /// Why a file that is there cannot be read (not audio, broken).
-    pub unreadable: Option<String>,
+    pub unreadable: Option<Detail>,
 }
 
 /// Reads file lengths from their headers, one after the other.
@@ -84,7 +86,7 @@ impl Copy {
 }
 
 /// A finished copy: its target and whether it worked.
-pub type Copied = (PathBuf, Result<(), String>);
+pub type Copied = (PathBuf, Result<(), Detail>);
 
 /// Copies files one after the other. Dropping it stops the copy under way
 /// (nothing half-written is left) and skips the rest.
@@ -111,7 +113,7 @@ impl Copier {
                         progress.store(bytes, Ordering::Relaxed);
                         !stopped.load(Ordering::Relaxed)
                     });
-                    let result = result.map_err(|e| format!("{}: {e}", from.display()));
+                    let result = result.map_err(|e| paths::file_detail(from.display(), e.detail()));
                     if done.send((to, result)).is_err() {
                         break;
                     }
@@ -247,6 +249,6 @@ mod tests {
         let probed = wait(|| prober.poll());
         std::fs::remove_dir_all(&dir).unwrap();
         assert!(probed[0].stamp.is_some());
-        assert_eq!(probed[0].unreadable.as_deref(), Some("not a supported audio format"));
+        assert_eq!(probed[0].unreadable, Some(jq_i18n::detail!("media_unsupported")));
     }
 }

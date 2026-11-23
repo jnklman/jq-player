@@ -2,9 +2,6 @@
 //! file, e.g. after the file was replaced by a shorter one. Playback clamps
 //! such values on its own; these warnings say what will sound different.
 
-use std::fmt;
-
-use jq_i18n::t;
 use serde::Serialize;
 
 use crate::model::SoundCue;
@@ -13,6 +10,8 @@ use crate::model::SoundCue;
 /// and decoded lengths differ by a few samples.
 const TOLERANCE: f64 = 0.001;
 
+/// A position or fade time that does not fit the file (the UI words it;
+/// `index` counts from 0).
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TimingIssue {
@@ -41,29 +40,6 @@ pub enum TimingIssue {
     /// The loop's passes would overlap by more than half the range; they
     /// overlap by half of it.
     LoopOverlapCut,
-}
-
-impl fmt::Display for TimingIssue {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::StartPastEnd => f.write_str(&t!("timing.start_past_end")),
-            Self::EndPastFile => f.write_str(&t!("timing.end_past_file")),
-            Self::VampEmpty { index } => f.write_str(&t!("timing.vamp_empty", number = index + 1)),
-            Self::VampBeforeStart { index } => {
-                f.write_str(&t!("timing.vamp_before_start", number = index + 1))
-            }
-            Self::VampOverlap { index, other } => {
-                f.write_str(&t!("timing.vamp_overlap", number = index + 1, other = other + 1))
-            }
-            Self::VampPastEnd { index } => f.write_str(&t!("timing.vamp_past_end", number = index + 1)),
-            Self::VampCut { index } => f.write_str(&t!("timing.vamp_cut", number = index + 1)),
-            Self::MarkOutside { index } => f.write_str(&t!("timing.mark_outside", number = index + 1)),
-            Self::MarkDuplicate { index } => f.write_str(&t!("timing.mark_duplicate", number = index + 1)),
-            Self::FadeInTooLong => f.write_str(&t!("timing.fade_in_too_long")),
-            Self::EndFadeTooLong => f.write_str(&t!("timing.end_fade_too_long")),
-            Self::LoopOverlapCut => f.write_str(&t!("timing.loop_overlap_cut")),
-        }
-    }
 }
 
 /// Checks `s` against its file's length in seconds.
@@ -230,44 +206,5 @@ mod tests {
         // Without a loop, the delay does nothing.
         s.loop_mode = LoopMode::Off;
         assert!(check_timing(&s, 10.0).is_empty());
-    }
-
-    #[test]
-    fn issues_read_with_numbers_counted_from_one() {
-        use TimingIssue as I;
-        let texts: Vec<String> = [
-            I::StartPastEnd,
-            I::EndPastFile,
-            I::VampEmpty { index: 0 },
-            I::VampBeforeStart { index: 1 },
-            I::VampPastEnd { index: 2 },
-            I::VampOverlap { index: 3, other: 0 },
-            I::VampCut { index: 4 },
-            I::MarkOutside { index: 5 },
-            I::MarkDuplicate { index: 6 },
-            I::FadeInTooLong,
-            I::EndFadeTooLong,
-            I::LoopOverlapCut,
-        ]
-        .iter()
-        .map(ToString::to_string)
-        .collect();
-        assert_eq!(
-            texts,
-            [
-                "Start is behind the end – the cue plays nothing",
-                "End is behind the end of the file",
-                "Vamp 1: its end is not behind its start – skipped",
-                "Vamp 2 is before the start",
-                "Vamp 3 is behind the end",
-                "Vamp 4 overlaps vamp 1 – skipped",
-                "Vamp 5 reaches beyond the end",
-                "Mark 6 is outside start–end",
-                "Mark 7 is there twice",
-                "Fade-in is longer than the section",
-                "End fade is longer than the section",
-                "The passes of the loop overlap by half the section at most",
-            ]
-        );
     }
 }

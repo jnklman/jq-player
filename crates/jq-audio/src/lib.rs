@@ -12,7 +12,7 @@ use cpal::{
     StreamConfig, SupportedBufferSize,
 };
 use jq_engine::{Controller, EngineConfig, Mixer};
-use jq_i18n::t;
+use jq_i18n::{Detail, detail};
 use serde::Serialize;
 
 mod com;
@@ -52,20 +52,27 @@ pub enum AudioError {
     Channels,
 }
 
+impl AudioError {
+    /// For the UI, which words it.
+    pub fn detail(&self) -> Detail {
+        match self {
+            Self::HostUnavailable { name, available } => {
+                detail!("audio_host_unavailable", name = name, available = available)
+            }
+            Self::NoDefaultDevice => detail!("audio_no_default_device"),
+            Self::DeviceNotFound(name) => detail!("audio_device_not_found", name = name),
+            Self::UnsupportedFormat(format) => detail!("audio_unsupported_format", format = format),
+            Self::Cpal(e) => detail!("audio_cpal", error = e.to_string()),
+            Self::Stopped => detail!("audio_stopped"),
+            Self::Channels => detail!("audio_channels"),
+        }
+    }
+}
+
+/// For logs; the UI words [`AudioError::detail`].
 impl std::fmt::Display for AudioError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let text = match self {
-            Self::HostUnavailable { name, available } => {
-                t!("audio.host_unavailable", name = name, available = available)
-            }
-            Self::NoDefaultDevice => t!("audio.no_default_device"),
-            Self::DeviceNotFound(name) => t!("audio.device_not_found", name = name),
-            Self::UnsupportedFormat(format) => t!("audio.unsupported_format", format = format),
-            Self::Cpal(e) => t!("audio.cpal", error = e),
-            Self::Stopped => t!("audio.stopped"),
-            Self::Channels => t!("audio.channels"),
-        };
-        f.write_str(&text)
+        write!(f, "{}", self.detail())
     }
 }
 
@@ -118,6 +125,19 @@ pub struct OutputInfo {
     pub buffer_frames: Option<u32>,
 }
 
+/// The name (and description) of a device the program names itself; the UI
+/// words it. The silent output stands in when no device can be opened.
+pub const SILENT_DEVICE: &str = "@silent";
+/// PipeWire's default output, which follows the system setting.
+pub const DEFAULT_DEVICE: &str = "@default";
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct DefaultConfig {
+    pub sample_rate: u32,
+    pub channels: u16,
+    pub sample_format: String,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct DeviceInfo {
     pub id: String,
@@ -126,7 +146,7 @@ pub struct DeviceInfo {
     /// Full description (manufacturer, type, connection).
     pub description: String,
     /// Default config, if the device can be opened for output.
-    pub default_config: Option<String>,
+    pub default_config: Option<DefaultConfig>,
     /// Most channels the device takes; `None` if it cannot tell.
     pub max_channels: Option<u16>,
     /// Smallest and largest callback buffer in frames, if the host tells.
@@ -168,7 +188,7 @@ enum Backend {
 /// What the supervisor shares with the [`AudioOutput`] handle.
 #[derive(Default)]
 struct Shared {
-    errors: Mutex<Vec<String>>,
+    errors: Mutex<Vec<Detail>>,
     /// Xruns reported by the stream since the last `take_errors`. The error
     /// callback may run on the audio thread, so it only counts.
     xruns: AtomicU32,
@@ -176,7 +196,7 @@ struct Shared {
     /// `take_errors` (formatting allocates).
     error_budget: AtomicU32,
     /// Why the device is lost, while it is.
-    lost: Mutex<Option<String>>,
+    lost: Mutex<Option<Detail>>,
     /// The device as last opened again, until [`AudioOutput::refresh`]
     /// takes it: "Standardgerät" may now be another one.
     reopened: Mutex<Option<OutputInfo>>,
@@ -260,13 +280,13 @@ fn failure_code(kind: cpal::ErrorKind) -> u8 {
     }
 }
 
-fn failure_text(code: u8) -> String {
+fn failure_detail(code: u8) -> Detail {
     match code {
-        1 => t!("audio.failure.device_lost"),
-        2 => t!("audio.failure.stream_invalidated"),
-        3 => t!("audio.failure.host_lost"),
-        4 => t!("audio.failure.default_changed"),
-        _ => t!("audio.failure.silent"),
+        1 => detail!("audio_device_gone"),
+        2 => detail!("audio_stream_invalidated"),
+        3 => detail!("audio_host_lost"),
+        4 => detail!("audio_default_changed"),
+        _ => detail!("audio_no_data"),
     }
 }
 
@@ -462,8 +482,8 @@ impl AudioOutput {
         let lent = Lent { mixer: Some(mixer), home: Home::default() };
         let info = OutputInfo {
             host: "-".into(),
-            device: t!("audio.silent.device"),
-            device_detail: t!("audio.silent.detail"),
+            device: SILENT_DEVICE.into(),
+            device_detail: SILENT_DEVICE.into(),
             sample_rate,
             channels,
             max_channels: None,
@@ -476,27 +496,6 @@ impl AudioOutput {
 
     pub fn info(&self) -> &OutputInfo {
         &self.info
-    }
-
-    /// Puts the texts in `info` that the program wrote itself (the silent output, PipeWire's default device)
-    /// into the current language; returns whether anything changed. Device names from the system stay.
-    pub fn relocalize(&mut self) -> bool {
-        let mut changed = false;
-        for (device, detail) in [
-            ("audio.silent.device", "audio.silent.detail"),
-            ("audio.default_device", "audio.default_device_detail"),
-        ] {
-            let is = |text: &str, key: &str| {
-                jq_i18n::Lang::ALL.iter().any(|l| jq_i18n::translate_in(*l, key, &[]) == text)
-            };
-            if is(&self.info.device, device) {
-                let (device, detail) = (jq_i18n::translate(device, &[]), jq_i18n::translate(detail, &[]));
-                changed = device != self.info.device || detail != self.info.device_detail;
-                (self.info.device, self.info.device_detail) = (device, detail);
-                break;
-            }
-        }
-        changed
     }
 
     /// Why the device is lost while the output runs silently and tries to
@@ -530,7 +529,7 @@ impl AudioOutput {
         }
     }
 
-    pub fn lost(&self) -> Option<String> {
+    pub fn lost(&self) -> Option<Detail> {
         self.shared.lost.lock().ok()?.clone()
     }
 
@@ -543,12 +542,12 @@ impl AudioOutput {
     }
 
     /// Stream errors (xruns, device lost) since the last call.
-    pub fn take_errors(&self) -> Vec<String> {
+    pub fn take_errors(&self) -> Vec<Detail> {
         let mut errors = self.shared.errors.lock().map(|mut e| std::mem::take(&mut *e)).unwrap_or_default();
         self.shared.error_budget.store(0, Ordering::Relaxed);
         let xruns = self.shared.xruns.swap(0, Ordering::Relaxed);
         if xruns > 0 {
-            errors.push(t!("audio.xruns", count = xruns));
+            errors.push(detail!("audio_xruns", count = xruns));
         }
         errors
     }
@@ -604,15 +603,15 @@ fn supervise(
     // The mixer goes to the null thread; with a failed attempt to open the
     // device again, the reason says why.
     let fall_back = |reason: u8, attempt: Option<AudioError>| {
-        let text = failure_text(reason);
+        let text = failure_detail(reason);
         let Some(lent) = Lent::take(&home) else {
-            set_lost(&shared, Some(t!("audio.lost.recovering", reason = text)));
+            set_lost(&shared, Some(detail!("audio_lost_recovering", reason = text)));
             return Link::Gone { reason };
         };
         set_lost(
             &shared,
             Some(match attempt {
-                Some(e) => t!("audio.lost.last_attempt", reason = text, error = e),
+                Some(e) => detail!("audio_lost_last_attempt", reason = text, error = e.detail()),
                 None => text,
             }),
         );
@@ -683,7 +682,7 @@ fn supervise(
     }
 }
 
-fn set_lost(shared: &Shared, reason: Option<String>) {
+fn set_lost(shared: &Shared, reason: Option<Detail>) {
     if let Ok(mut lost) = shared.lost.lock() {
         *lost = reason;
     }
@@ -813,13 +812,10 @@ fn device_info(device: &Device, max_channels: Option<u16>) -> DeviceInfo {
         id: device_id(device),
         name,
         description,
-        default_config: device.default_output_config().ok().map(|c| {
-            t!(
-                "audio.default_config",
-                rate = c.sample_rate(),
-                channels = c.channels(),
-                format = format!("{:?}", c.sample_format())
-            )
+        default_config: device.default_output_config().ok().map(|c| DefaultConfig {
+            sample_rate: c.sample_rate(),
+            channels: c.channels(),
+            sample_format: format!("{:?}", c.sample_format()),
         }),
         max_channels,
         buffer_range: device.default_output_config().ok().and_then(|c| match *c.buffer_size() {
@@ -890,7 +886,7 @@ fn device_id(device: &Device) -> String {
 fn describe(device: &Device) -> (String, String) {
     // PipeWire's default node follows the system default sink.
     if device_id(device) == "pipewire:output_default" {
-        return (t!("audio.default_device"), t!("audio.default_device_detail"));
+        return (DEFAULT_DEVICE.into(), DEFAULT_DEVICE.into());
     }
     match device.description() {
         Ok(desc) => (desc.name().to_string(), desc.to_string()),
@@ -977,7 +973,7 @@ fn stream_error(err: &cpal::Error, pulse: &Pulse, shared: &Shared) {
         return;
     }
     if let Ok(mut e) = shared.errors.try_lock() {
-        e.push(err.to_string());
+        e.push(Detail::text(err.to_string()));
     }
 }
 

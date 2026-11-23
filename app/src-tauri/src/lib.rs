@@ -3,6 +3,7 @@
 
 mod backend;
 mod close;
+mod error;
 mod jobs;
 mod key_labels;
 mod language;
@@ -27,6 +28,8 @@ use serde::Serialize;
 use session::EditOp;
 use tauri::{AppHandle, Emitter, Manager, RunEvent, State};
 use tauri_plugin_window_state::StateFlags;
+
+use crate::error::{AppError, Error};
 
 /// Window state kept between runs. Decorations and visibility come from
 /// the config.
@@ -54,30 +57,30 @@ struct Backend(Mutex<Sender<Request>>);
 struct StartupOffer(Mutex<Option<PathBuf>>);
 
 impl Backend {
-    fn send(&self, request: Request) -> Result<(), String> {
+    fn send(&self, request: Request) -> Result<(), Error> {
         self.0
             .lock()
-            .map_err(|_| jq_i18n::t!("app.backend_locked"))?
+            .map_err(|_| Error::from(AppError::BackendLocked))?
             .send(request)
-            .map_err(|_| jq_i18n::t!("app.thread_ended"))
+            .map_err(|_| Error::from(AppError::ThreadEnded))
     }
 
     /// Sends a request and waits for its reply off the async runtime.
     async fn ask<T: Send + 'static>(
         &self,
         make: impl FnOnce(backend::Reply<T>) -> Request,
-    ) -> Result<T, String> {
+    ) -> Result<T, Error> {
         let (tx, rx) = mpsc::channel();
         self.send(make(tx))?;
         tauri::async_runtime::spawn_blocking(move || rx.recv_timeout(REPLY_TIMEOUT))
             .await
-            .map_err(|e| e.to_string())?
-            .map_err(|_| jq_i18n::t!("app.no_reply"))?
+            .map_err(|e| Error::from(e.to_string()))?
+            .map_err(|_| Error::from(AppError::NoReply))?
     }
 }
 
 #[tauri::command]
-async fn open_show(backend: State<'_, Backend>, path: PathBuf) -> Result<serde_json::Value, String> {
+async fn open_show(backend: State<'_, Backend>, path: PathBuf) -> Result<serde_json::Value, Error> {
     backend.ask(|r| Request::Open(path, r)).await
 }
 
@@ -87,15 +90,14 @@ async fn open_show(backend: State<'_, Backend>, path: PathBuf) -> Result<serde_j
 fn startup_open_failed(
     app: &AppHandle,
     path: PathBuf,
-    opened: mpsc::Receiver<Result<serde_json::Value, String>>,
+    opened: mpsc::Receiver<Result<serde_json::Value, Error>>,
 ) {
     let Ok(Err(e)) = opened.recv() else { return };
-    let notice =
-        jq_core::Notice::Error(jq_i18n::t!("app.startup_open_failed", path = path.display(), error = e));
+    let notice = jq_core::Notice::StartupOpenFailed { path: path.display().to_string(), error: e.detail() };
     if let Ok(mut offer) = app.state::<StartupOffer>().0.lock() {
         offer.get_or_insert(path);
     }
-    let _ = app.emit_to(panel_windows::MAIN, backend::EVENT_NOTICE, notice);
+    let _ = app.emit_to(panel_windows::MAIN, backend::EVENT_NOTICE, notice.sent());
 }
 
 /// The last show the start screen offers to open; only the first call gets
@@ -111,52 +113,52 @@ async fn new_show(
     dir: PathBuf,
     name: String,
     create_folder: bool,
-) -> Result<serde_json::Value, String> {
+) -> Result<serde_json::Value, Error> {
     backend.ask(|reply| Request::New { dir, name, create_folder, reply }).await
 }
 
 #[tauri::command]
-async fn save_show(backend: State<'_, Backend>) -> Result<serde_json::Value, String> {
+async fn save_show(backend: State<'_, Backend>) -> Result<serde_json::Value, Error> {
     backend.ask(Request::Save).await
 }
 
 #[tauri::command]
-async fn get_show(backend: State<'_, Backend>) -> Result<serde_json::Value, String> {
+async fn get_show(backend: State<'_, Backend>) -> Result<serde_json::Value, Error> {
     backend.ask(Request::View).await
 }
 
 /// Fire-and-forget, so GO never waits for a reply.
 #[tauri::command]
-fn action(backend: State<'_, Backend>, action: Action) -> Result<(), String> {
+fn action(backend: State<'_, Backend>, action: Action) -> Result<(), Error> {
     backend.send(Request::Action(action))
 }
 
 /// Fire-and-forget like `action`: the stopwatch buttons in the header.
 #[tauri::command]
-fn stopwatch(backend: State<'_, Backend>, id: String, action: StopwatchAction) -> Result<(), String> {
+fn stopwatch(backend: State<'_, Backend>, id: String, action: StopwatchAction) -> Result<(), Error> {
     backend.send(Request::Stopwatch(id, action))
 }
 
 #[tauri::command]
-async fn edit(backend: State<'_, Backend>, op: EditOp) -> Result<serde_json::Value, String> {
+async fn edit(backend: State<'_, Backend>, op: EditOp) -> Result<serde_json::Value, Error> {
     backend.ask(|r| Request::Edit(Box::new(op), r)).await
 }
 
 /// Fire-and-forget like `action`: sent for every step of a slider.
 #[tauri::command]
-fn live_cue(backend: State<'_, Backend>, cue: Cue) -> Result<(), String> {
+fn live_cue(backend: State<'_, Backend>, cue: Cue) -> Result<(), Error> {
     backend.send(Request::LiveCue(Box::new(cue)))
 }
 
 /// Fire-and-forget like `action`: plays a sound cue's file on the preview
 /// output from `at` seconds to `until` or its end (waveform editor).
 #[tauri::command]
-fn preview_at(backend: State<'_, Backend>, cue: CueId, at: f64, until: Option<f64>) -> Result<(), String> {
+fn preview_at(backend: State<'_, Backend>, cue: CueId, at: f64, until: Option<f64>) -> Result<(), Error> {
     backend.send(Request::PreviewAt(cue, at, until))
 }
 
 #[tauri::command]
-async fn set_keep_awake(backend: State<'_, Backend>, enabled: bool) -> Result<serde_json::Value, String> {
+async fn set_keep_awake(backend: State<'_, Backend>, enabled: bool) -> Result<serde_json::Value, Error> {
     backend.ask(|r| Request::SetKeepAwake(enabled, r)).await
 }
 
@@ -164,22 +166,23 @@ async fn set_keep_awake(backend: State<'_, Backend>, enabled: bool) -> Result<se
 async fn midi_learn(
     backend: State<'_, Backend>,
     target: Option<session::LearnTarget>,
-) -> Result<serde_json::Value, String> {
+) -> Result<serde_json::Value, Error> {
     backend.ask(|r| Request::MidiLearn(target, r)).await
 }
 
 /// Labels of the character keys on the current keyboard layout, by
 /// `KeyboardEvent.code`.
 #[tauri::command]
-async fn key_labels(app: AppHandle) -> Result<std::collections::HashMap<String, String>, String> {
+async fn key_labels(app: AppHandle) -> Result<std::collections::HashMap<String, String>, Error> {
     let (tx, rx) = mpsc::channel();
     app.run_on_main_thread(move || {
         let _ = tx.send(key_labels::labels());
     })
-    .map_err(|e| e.to_string())?;
-    tauri::async_runtime::spawn_blocking(move || rx.recv().map_err(|e| e.to_string())?)
+    .map_err(|e| Error::from(e.to_string()))?;
+    let labels = tauri::async_runtime::spawn_blocking(move || rx.recv().map_err(|e| e.to_string())?)
         .await
-        .map_err(|e| e.to_string())?
+        .map_err(|e| Error::from(e.to_string()))?;
+    Ok(labels?)
 }
 
 #[derive(Serialize)]
@@ -190,12 +193,12 @@ struct MidiPorts {
 
 /// Names of the MIDI input and output ports.
 #[tauri::command]
-async fn midi_ports() -> Result<MidiPorts, String> {
+async fn midi_ports() -> Result<MidiPorts, Error> {
     tauri::async_runtime::spawn_blocking(|| {
         Ok(MidiPorts { inputs: jq_midi::input_ports()?, outputs: jq_midi::output_ports()? })
     })
     .await
-    .map_err(|e| e.to_string())?
+    .map_err(|e| Error::from(e.to_string()))?
 }
 
 /// Peaks of a media file for drawing its waveform, from the peak cache or
@@ -206,15 +209,15 @@ async fn waveform(
     media_dir: PathBuf,
     file: String,
     buckets: usize,
-) -> Result<jq_media::Waveform, String> {
+) -> Result<jq_media::Waveform, Error> {
     let peaks = peaks.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let path = jq_show::paths::resolve(&media_dir, &file);
         // Enough for the waveform editor zoomed in on a long file.
-        peaks.waveform(&path, buckets.clamp(1, 200_000)).map_err(|e| e.to_string())
+        peaks.waveform(&path, buckets.clamp(1, 200_000)).map_err(|e| Error::from(e.detail()))
     })
     .await
-    .map_err(|e| e.to_string())?
+    .map_err(|e| Error::from(e.to_string()))?
 }
 
 /// Detail of `from`–`to` seconds of a media file for a zoomed-in waveform.
@@ -226,14 +229,14 @@ async fn waveform_range(
     from: f64,
     to: f64,
     buckets: usize,
-) -> Result<jq_media::Waveform, String> {
+) -> Result<jq_media::Waveform, Error> {
     let peaks = peaks.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let path = jq_show::paths::resolve(&media_dir, &file);
-        peaks.waveform_range(&path, from, to, buckets.clamp(1, 20_000)).map_err(|e| e.to_string())
+        peaks.waveform_range(&path, from, to, buckets.clamp(1, 20_000)).map_err(|e| Error::from(e.detail()))
     })
     .await
-    .map_err(|e| e.to_string())?
+    .map_err(|e| Error::from(e.to_string()))?
 }
 
 /// Where a media file is audible, for trimming silence off a cue; `None` if
@@ -243,58 +246,58 @@ async fn audible_range(
     peaks: State<'_, Arc<PeakCache>>,
     media_dir: PathBuf,
     file: String,
-) -> Result<Option<jq_media::peaks::Audible>, String> {
+) -> Result<Option<jq_media::peaks::Audible>, Error> {
     let peaks = peaks.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let path = jq_show::paths::resolve(&media_dir, &file);
-        Ok(peaks.peaks(&path, &|| true).map_err(|e| e.to_string())?.audible())
+        Ok(peaks.peaks(&path, &|| true).map_err(|e| Error::from(e.detail()))?.audible())
     })
     .await
-    .map_err(|e| e.to_string())?
+    .map_err(|e| Error::from(e.to_string()))?
 }
 
 /// Bytes the peak cache takes on disk.
 #[tauri::command]
-async fn peak_cache_size(peaks: State<'_, Arc<PeakCache>>) -> Result<u64, String> {
+async fn peak_cache_size(peaks: State<'_, Arc<PeakCache>>) -> Result<u64, Error> {
     let peaks = peaks.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || peaks.size()).await.map_err(|e| e.to_string())
+    tauri::async_runtime::spawn_blocking(move || peaks.size()).await.map_err(|e| Error::from(e.to_string()))
 }
 
 /// Deletes the stored peaks; waveforms are decoded again when next shown.
 /// Returns what is left (peaks being built meanwhile are stored).
 #[tauri::command]
-async fn clear_peak_cache(peaks: State<'_, Arc<PeakCache>>) -> Result<u64, String> {
+async fn clear_peak_cache(peaks: State<'_, Arc<PeakCache>>) -> Result<u64, Error> {
     let peaks = peaks.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        peaks.clear().map_err(|e| jq_i18n::t!("app.peak_cache_not_cleared", error = e))?;
+        peaks.clear().map_err(|e| Error::from(AppError::PeakCacheNotCleared { error: e.to_string() }))?;
         Ok(peaks.size())
     })
     .await
-    .map_err(|e| e.to_string())?
+    .map_err(|e| Error::from(e.to_string()))?
 }
 
 /// Which picked files lie outside the media folder and whose names are
 /// taken there, so the UI can ask before adding them. Compares file
 /// contents, so it runs in the background, never on the show thread.
 #[tauri::command]
-async fn check_import(media_dir: PathBuf, paths: Vec<PathBuf>) -> Result<session::ImportCheck, String> {
+async fn check_import(media_dir: PathBuf, paths: Vec<PathBuf>) -> Result<session::ImportCheck, Error> {
     tauri::async_runtime::spawn_blocking(move || session::check_import(&media_dir, &paths))
         .await
-        .map_err(|e| e.to_string())?
+        .map_err(|e| Error::from(e.to_string()))?
 }
 
 #[tauri::command]
-async fn recover_autosave(backend: State<'_, Backend>, apply: bool) -> Result<serde_json::Value, String> {
+async fn recover_autosave(backend: State<'_, Backend>, apply: bool) -> Result<serde_json::Value, Error> {
     backend.ask(|r| Request::Recover(apply, r)).await
 }
 
 #[tauri::command]
-async fn rename_show(backend: State<'_, Backend>, name: String) -> Result<serde_json::Value, String> {
+async fn rename_show(backend: State<'_, Backend>, name: String) -> Result<serde_json::Value, Error> {
     backend.ask(|r| Request::Rename(name, r)).await
 }
 
 #[tauri::command]
-async fn set_show_mode(backend: State<'_, Backend>, enabled: bool) -> Result<serde_json::Value, String> {
+async fn set_show_mode(backend: State<'_, Backend>, enabled: bool) -> Result<serde_json::Value, Error> {
     backend.ask(|r| Request::SetShowMode(enabled, r)).await
 }
 
@@ -302,7 +305,7 @@ async fn set_show_mode(backend: State<'_, Backend>, enabled: bool) -> Result<ser
 async fn set_settings(
     backend: State<'_, Backend>,
     settings: LocalSettings,
-) -> Result<serde_json::Value, String> {
+) -> Result<serde_json::Value, Error> {
     backend.ask(|r| Request::SetSettings(Box::new(settings), r)).await
 }
 
@@ -311,13 +314,13 @@ async fn set_settings(
 async fn set_audio_dir(
     backend: State<'_, Backend>,
     dir: Option<PathBuf>,
-) -> Result<serde_json::Value, String> {
+) -> Result<serde_json::Value, Error> {
     backend.ask(|r| Request::SetAudioDir(dir, r)).await
 }
 
 /// Changes the show's media folder.
 #[tauri::command]
-async fn set_media_dir(backend: State<'_, Backend>, dir: PathBuf) -> Result<serde_json::Value, String> {
+async fn set_media_dir(backend: State<'_, Backend>, dir: PathBuf) -> Result<serde_json::Value, Error> {
     backend.ask(|r| Request::SetMediaDir(dir, r)).await
 }
 
@@ -327,7 +330,7 @@ async fn set_media_dir(backend: State<'_, Backend>, dir: PathBuf) -> Result<serd
 async fn check_level_limits(
     backend: State<'_, Backend>,
     limits: jq_show::LevelLimits,
-) -> Result<serde_json::Value, String> {
+) -> Result<serde_json::Value, Error> {
     backend.ask(|r| Request::CheckLevelLimits(limits, r)).await
 }
 
@@ -336,14 +339,14 @@ async fn check_level_limits(
 async fn set_selection_mode(
     backend: State<'_, Backend>,
     mode: SelectionMode,
-) -> Result<serde_json::Value, String> {
+) -> Result<serde_json::Value, Error> {
     backend.ask(|r| Request::SetSelectionMode(mode, r)).await
 }
 
 /// Looks at the show's media files again, for changes the file watcher
 /// missed (e.g. on a network share).
 #[tauri::command]
-async fn rescan_media(backend: State<'_, Backend>) -> Result<serde_json::Value, String> {
+async fn rescan_media(backend: State<'_, Backend>) -> Result<serde_json::Value, Error> {
     backend.ask(Request::RescanMedia).await
 }
 
@@ -352,7 +355,7 @@ async fn rescan_media(backend: State<'_, Backend>) -> Result<serde_json::Value, 
 async fn set_layout(
     backend: State<'_, Backend>,
     layout: Option<serde_json::Value>,
-) -> Result<serde_json::Value, String> {
+) -> Result<serde_json::Value, Error> {
     backend.ask(|r| Request::SetLayout(layout, r)).await
 }
 
@@ -366,14 +369,14 @@ struct AudioDevices {
 
 /// Probing devices can take a while, so it runs off the show thread.
 #[tauri::command]
-async fn audio_devices(host: Option<String>) -> Result<AudioDevices, String> {
+async fn audio_devices(host: Option<String>) -> Result<AudioDevices, Error> {
     tauri::async_runtime::spawn_blocking(move || {
-        let devices = jq_audio::list_devices(host.as_deref()).map_err(|e| e.to_string())?;
+        let devices = jq_audio::list_devices(host.as_deref()).map_err(|e| Error::from(e.detail()))?;
         let host = host.unwrap_or_else(jq_audio::default_host_name);
         Ok(AudioDevices { hosts: jq_audio::host_names(), host, devices })
     })
     .await
-    .map_err(|e| e.to_string())?
+    .map_err(|e| Error::from(e.to_string()))?
 }
 
 /// The show file among command-line arguments (without the program name),

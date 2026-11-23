@@ -3,6 +3,7 @@
 // changes writes) the dialog's draft; the open device comes from the view.
 
 import { api, type AudioDevices, type LocalSettings, type ShowView } from './api';
+import { deviceName } from './format';
 import { fmtNumber, t } from './i18n/index.svelte';
 import { type Option, withMissing } from './options';
 import { attempt } from './store.svelte';
@@ -77,7 +78,9 @@ export class AudioSetup {
   /** A stored device the list lacks (unplugged), by the name it had when last open: "Focusrite (not found)". */
   missingLabel(device: string): string {
     const known = this.view().settings.device_names[device];
-    return t('device.not_found', { name: known ?? (HOST_ID.test(device) ? t('device.unknown') : device) });
+    return t('device.not_found', {
+      name: known ? deviceName(known) : HOST_ID.test(device) ? t('device.unknown') : device,
+    });
   }
 
   /** The device will be reopened on apply. */
@@ -130,7 +133,7 @@ export class AudioSetup {
     const device = this.draft().device;
     return [
       { value: '', label: this.loading ? t('device.searching') : t('audio.default_device') },
-      ...(this.devices?.devices ?? []).map((info) => ({ value: info.id, label: info.name })),
+      ...(this.devices?.devices ?? []).map((info) => ({ value: info.id, label: deviceName(info.name) })),
       ...(this.unknownDevice && device ? [{ value: device, label: this.missingLabel(device) }] : []),
     ];
   });

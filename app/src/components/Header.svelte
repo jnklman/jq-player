@@ -14,7 +14,8 @@
 
   import { api } from '../lib/api';
   import { redo, setMode, undo } from '../lib/commands';
-  import { clock, shortDevice } from '../lib/format';
+  import { errorText } from '../lib/errors';
+  import { clock, deviceDetail, shortDevice } from '../lib/format';
   import { fmtNumber, t } from '../lib/i18n/index.svelte';
   import { attempt, type Mode, mode as currentMode, saveShow, ui } from '../lib/store.svelte';
   import { dragFill } from '../lib/ui';
@@ -157,9 +158,9 @@
     <div class="flex flex-wrap items-center gap-3.5 text-xs text-muted-foreground">
       <Popover.Root bind:open={audioOpen}>
         <Tooltip
-          tip={view.audio_error ??
-            (view.audio_lost && t('header.audio_lost', { reason: view.audio_lost })) ??
-            `${view.audio.device_detail}\n${view.audio.host} · ${view.audio.sample_rate} Hz · ${t('header.channels', { count: view.audio.channels })} · ${view.audio.sample_format}`}
+          tip={(view.audio_error && errorText(view.audio_error)) ||
+            (view.audio_lost && t('header.audio_lost', { reason: errorText(view.audio_lost) })) ||
+            `${deviceDetail(view.audio.device_detail)}\n${view.audio.host} · ${view.audio.sample_rate} Hz · ${t('header.channels', { count: view.audio.channels })} · ${view.audio.sample_format}`}
           side="bottom"
         >
           {#snippet child({ props: tipProps })}

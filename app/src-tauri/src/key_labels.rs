@@ -61,7 +61,7 @@ const SCAN_CODES: [(&str, u16); 48] = [
 
 /// The unshifted character of each character key. Must run on the UI
 /// (main) thread: GTK and the Windows keyboard layout are per thread.
-pub fn labels() -> Result<HashMap<String, String>, String> {
+pub fn labels() -> Result<HashMap<String, String>, jq_i18n::Detail> {
     let mut labels = HashMap::new();
     for (code, scan) in SCAN_CODES {
         if let Some(text) = platform::label(scan)?.filter(|t| !t.trim().is_empty()) {
@@ -77,9 +77,10 @@ mod platform {
 
     /// Through GDK, which knows the layout on X11 and on Wayland. The first
     /// layout group is asked; GDK does not tell which one is active.
-    pub fn label(scan: u16) -> Result<Option<String>, String> {
-        let display = gdk::Display::default().ok_or_else(|| jq_i18n::t!("keylabels.no_display"))?;
-        let keymap = gdk::Keymap::for_display(&display).ok_or_else(|| jq_i18n::t!("keylabels.no_layout"))?;
+    pub fn label(scan: u16) -> Result<Option<String>, jq_i18n::Detail> {
+        let display = gdk::Display::default().ok_or_else(|| jq_i18n::detail!("keylabels_no_display"))?;
+        let keymap =
+            gdk::Keymap::for_display(&display).ok_or_else(|| jq_i18n::detail!("keylabels_no_layout"))?;
         // X and Wayland key codes are evdev codes plus 8.
         let Some((keyval, ..)) =
             keymap.translate_keyboard_state(u32::from(scan) + 8, gdk::ModifierType::empty(), 0)
@@ -96,7 +97,7 @@ mod platform {
         GetKeyboardLayout, MAPVK_VSC_TO_VK_EX, MapVirtualKeyExW, ToUnicodeEx,
     };
 
-    pub fn label(scan: u16) -> Result<Option<String>, String> {
+    pub fn label(scan: u16) -> Result<Option<String>, jq_i18n::Detail> {
         // SAFETY: plain Win32 calls with buffers that outlive them.
         unsafe {
             let layout = GetKeyboardLayout(0);
@@ -125,7 +126,7 @@ mod platform {
 
 #[cfg(not(any(target_os = "linux", windows)))]
 mod platform {
-    pub fn label(_scan: u16) -> Result<Option<String>, String> {
-        Err(jq_i18n::t!("keylabels.unavailable"))
+    pub fn label(_scan: u16) -> Result<Option<String>, jq_i18n::Detail> {
+        Err(jq_i18n::detail!("keylabels_unavailable"))
     }
 }

@@ -50,10 +50,10 @@ describe('noticesOf', () => {
     const notices = noticesOf(
       sound('a'),
       info({
-        problems: ['Unknown output'],
+        problems: [{ kind: 'output_unknown', output: 'gone' }],
         missing: true,
         case_mismatch: 'Rain.WAV',
-        timing: [{ kind: 'start_past_end', message: 'Start past end' }],
+        timing: [{ kind: 'start_past_end' }],
         normalize_stale: true,
         level_silenced: true,
         level_capped: true,
@@ -71,7 +71,7 @@ describe('noticesOf', () => {
       ['sound', 'volume'],
       ['flow', 'repeat'],
     ]);
-    expect(notices[0].text).toBe('Unknown output');
+    expect(notices[0].text).toBe('Output “gone” does not exist in the show – plays on channels 1/2');
     expect(notices[2].text).toContain('Rain.WAV');
     expect(notices[6].text).toContain('+6.0 dB');
   });

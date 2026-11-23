@@ -162,8 +162,8 @@ describe('cueWarnings', () => {
     showing([s, g, p], {
       s: {
         missing: true,
-        timing: [{ kind: 'end_past_file', message: 'End past file' }],
-        problems: ['Unknown output'],
+        timing: [{ kind: 'end_past_file' }],
+        problems: [{ kind: 'output_unknown', output: 'gone' }],
         case_mismatch: 'S.WAV',
         level_silenced: true,
         level_capped: true,
@@ -173,8 +173,8 @@ describe('cueWarnings', () => {
     });
     expect(cueWarnings(s)).toEqual([
       'File missing',
-      'End past file',
-      'Unknown output',
+      'End is behind the end of the file',
+      'Output “gone” does not exist in the show – plays on channels 1/2',
       expect.stringContaining('S.WAV'),
       "Level below the show's minimum (−60.0 dB): the cue is silent",
       "Level above the show's maximum: plays at +6.0 dB",

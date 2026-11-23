@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-use jq_i18n::t;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -493,28 +492,6 @@ impl Chord {
     /// The same key with the same modifiers (the label does not count).
     pub fn same(&self, other: &Chord) -> bool {
         (&self.code, self.ctrl, self.shift, self.alt) == (&other.code, other.ctrl, other.shift, other.alt)
-    }
-
-    /// How it is shown in messages, e.g. "Strg+Umschalt+F5".
-    pub fn text(&self) -> String {
-        let mut text = String::new();
-        let modifiers =
-            [(self.ctrl, t!("key.ctrl")), (self.alt, t!("key.alt")), (self.shift, t!("key.shift"))];
-        for (on, name) in modifiers {
-            if on {
-                text.push_str(&name);
-                text.push('+');
-            }
-        }
-        let code = self.code.as_str();
-        let key = match code {
-            "Space" => t!("key.space"),
-            "Escape" => "Esc".to_string(),
-            _ if !self.label.trim().is_empty() => self.label.to_uppercase(),
-            _ => code.strip_prefix("Key").or(code.strip_prefix("Digit")).unwrap_or(code).to_string(),
-        };
-        text.push_str(&key);
-        text
     }
 }
 
@@ -2263,16 +2240,7 @@ mod tests {
     }
 
     #[test]
-    fn a_chord_names_its_key_and_modifiers() {
-        assert_eq!(Chord::new("KeyF", "f").ctrl().shift().text(), "Ctrl+Shift+F");
-        let mut alt = Chord::new("Digit1", "");
-        alt.alt = true;
-        assert_eq!(alt.text(), "Alt+1", "the code without its prefix when no label was recorded");
-        assert_eq!(Chord::new("F5", " ").text(), "F5", "a blank label counts as none");
-        assert_eq!(Chord::new("Space", " ").text(), "Space");
-        assert_eq!(Chord::new("Escape", "Escape").text(), "Esc");
-        assert_eq!(Chord::new("KeyY", "z").ctrl().text(), "Ctrl+Z", "the recorded layout's letter");
-
+    fn a_chord_is_the_same_key_whatever_its_label() {
         assert!(
             Chord::new("KeyY", "z").same(&Chord::new("KeyY", "y")),
             "the label does not make another key"
