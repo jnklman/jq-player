@@ -12,6 +12,8 @@ different in the app, not how the code changed). The Release workflow turns
 
 ## Unreleased
 
+## 0.4.0 – 2026-11-23
+
 ### Added
 
 - Sound cues that loop have a delay between passes: a pause of silence after each pass, or, negative,
