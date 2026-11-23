@@ -90,9 +90,9 @@
         onchange={(port) => (draft.midi_out = port || null)}
       />
       {#if view.midi.out_error}
-        <span class="text-xs text-stop-soft"
-          >{t('midi_tab.error_retry', { error: errorText(view.midi.out_error) })}</span
-        >
+        <span class="text-xs text-stop-soft">
+          {t('midi_tab.error_retry', { error: errorText(view.midi.out_error) })}
+        </span>
       {/if}
     </SettingRow>
   </SettingGroup>
