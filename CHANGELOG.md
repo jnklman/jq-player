@@ -12,6 +12,23 @@ different in the app, not how the code changed). The Release workflow turns
 
 ## Unreleased
 
+### Added
+
+- Cue libraries: "From library…" in every add menu opens ready-made cues to pick from, with a search,
+  recently used presets and favorites. Parameters (such as the channel or the level) are filled in
+  before inserting. Two libraries come with jQ Player: Behringer X32 / Midas M32 (mutes, faders,
+  sends, DCAs, mute groups, scenes and snippets over OSC) and ChamSys MagicQ (playbacks, executes and
+  black out over OSC, GO/STOP/RESUME over MIDI Show Control).
+- A cue inserted from a library keeps everything in the show, so the show plays the same on a computer
+  without that library. The inspector shows which fields differ from the preset, resets them one by one
+  or all at once, changes the parameters and offers an update when a newer revision of the library is
+  installed.
+- An OSC cue from a library adds the network device it needs to the show (without an address, which
+  you then set) or uses the one added before.
+- Libraries made by others (`.jqlibrary` files) open with a double-click: jQ Player shows what the
+  library holds and installs it. The new "Cue libraries" settings list the installed libraries, switch
+  them on and off, remove them and install more from a file.
+
 ## 0.4.0 – 2026-11-23
 
 ### Added

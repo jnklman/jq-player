@@ -7,4 +7,11 @@
     <icon name="jq-player"/>
     <glob pattern="*.jqshow"/>
   </mime-type>
+  <mime-type type="application/x-jqplayer-library">
+    <comment>jQ Player cue library</comment>
+    <comment xml:lang="de">jQ-Player-Cue-Bibliothek</comment>
+    <sub-class-of type="application/json"/>
+    <icon name="jq-player"/>
+    <glob pattern="*.jqlibrary"/>
+  </mime-type>
 </mime-info>

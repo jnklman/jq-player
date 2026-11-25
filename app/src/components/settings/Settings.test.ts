@@ -55,7 +55,7 @@ function showView(extra: Parameters<typeof view>[1] = {}) {
       ...extra.settings,
     },
     show: {
-      devices: [{ id: 'd', name: 'Desk', host: '10.0.0.2', port: 53000 }],
+      devices: [{ id: 'd', name: 'Desk', host: '10.0.0.2', port: 53000, template: null }],
       ...extra.show,
     },
   });

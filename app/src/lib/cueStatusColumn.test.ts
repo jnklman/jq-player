@@ -125,7 +125,7 @@ describe('a resting cue', () => {
     const osc = (device: string | null) =>
       ({ ...wait('o'), type: 'osc', device, messages: [{ address: '/go', args: [] }] }) as unknown as Cue;
     showing([], {}, {});
-    ui.view!.show.devices = [{ id: 'd', name: 'Desk', host: 'x', port: 1 }];
+    ui.view!.show.devices = [{ id: 'd', name: 'Desk', host: 'x', port: 1, template: null }];
     expect(cueStatus(midi([]))).toEqual({ text: '0 messages', bad: true });
     expect(cueStatus(midi([{ kind: 'program_change', channel: 0, program: 3 }])).text).toBe('PC 3 · Channel 1');
     expect(cueStatus(midi([{}, {}])).text).toBe('2 messages');

@@ -1,7 +1,7 @@
 // What the backend says went wrong (`Detail` in api.ts): why a command failed, or what a layer below reports (a device,
 // a file, MIDI, OSC). A message of a kind is worded here; a text (a system's error, an exception) is shown as it is.
 
-import type { CheckedSetting, CommandError, LayerMessage } from './api';
+import type { CheckedSetting, CommandError, LayerMessage, LibraryError, ParamProblem, PresetCueProblem } from './api';
 import { deviceName } from './format';
 import { t } from './i18n/index.svelte';
 import { keyText } from './keys.svelte';
@@ -46,6 +46,22 @@ function commandErrorText(e: CommandError): string {
       return t('error.media_dir_not_found', { path: e.path });
     case 'file_manager_failed':
       return t('error.file_manager_failed', { error: e.error });
+    case 'library_file':
+      return t('error.library_file', { path: e.path, error: libraryErrorText(e.error) });
+    case 'library_io':
+      return t('error.library_io', { path: e.path, error: e.error });
+    case 'no_library_folder':
+      return t('error.no_library_folder');
+    case 'library_not_found':
+      return t('error.library_not_found');
+    case 'preset_not_found':
+      return t('error.preset_not_found');
+    case 'library_built_in':
+      return t('error.library_built_in');
+    case 'preset':
+      return libraryErrorText(e.error);
+    case 'not_from_preset':
+      return t('error.not_from_preset');
     case 'show_mode_locked':
       return t('error.show_mode_locked');
     case 'media_dir_busy_cue':
@@ -357,6 +373,8 @@ function layerText(e: LayerMessage): string {
       return t('error.runner_no_osc_device');
     case 'runner_osc_device_missing':
       return t('error.runner_osc_device_missing', { device: e.device });
+    case 'runner_osc_no_address':
+      return t('error.runner_osc_no_address', { device: e.device });
     case 'runner_osc_unavailable':
       return t('error.runner_osc_unavailable');
     case 'runner_no_midi_output':
@@ -374,5 +392,76 @@ function layerText(e: LayerMessage): string {
     default:
       // A kind this UI does not know yet (a newer backend): its data says the most.
       return JSON.stringify(e);
+  }
+}
+
+/** What is wrong with a library file or a preset's parameters. */
+export function libraryErrorText(e: LibraryError): string {
+  switch (e.kind) {
+    case 'too_large':
+      return t('library_error.too_large', { max: Math.round(e.max / (1024 * 1024)) });
+    case 'invalid':
+      return t('library_error.invalid', { error: e.error });
+    case 'wrong_format':
+      return t('library_error.wrong_format', { found: e.found || '–' });
+    case 'too_new':
+      return t('library_error.too_new', { found: e.found, current: e.current });
+    case 'duplicate':
+      return t('library_error.duplicate', { id: e.id });
+    case 'unknown_category':
+      return t('library_error.unknown_category', { preset: e.preset, category: e.category });
+    case 'param':
+      return t('library_error.param', { preset: e.preset, param: e.param, problem: paramProblemText(e.problem) });
+    case 'template':
+      return t('library_error.template', {
+        preset: e.preset,
+        problem: e.error.kind === 'syntax' ? e.error.text : e.error.param,
+      });
+    case 'cue':
+      return cueProblemText(e.preset, e.problem);
+    case 'preset_not_found':
+      return t('error.preset_not_found');
+  }
+}
+
+function cueProblemText(preset: string, problem: PresetCueProblem): string {
+  switch (problem.kind) {
+    case 'invalid':
+      return t('library_error.cue_invalid', { preset, error: problem.error });
+    case 'media':
+      return t('library_error.cue_media', { preset });
+    case 'stopwatch':
+      return t('library_error.cue_stopwatch', { preset });
+    case 'trigger':
+      return t('library_error.cue_trigger', { preset });
+    case 'outside_target':
+      return t('library_error.cue_outside', { preset });
+    case 'unknown_device':
+      return t('library_error.cue_device', { preset, device: problem.device });
+  }
+}
+
+function paramProblemText(p: ParamProblem): string {
+  switch (p.kind) {
+    case 'range':
+      return t('library_error.problem.range');
+    case 'map':
+      return t('library_error.problem.map');
+    case 'pattern':
+      return t('library_error.problem.pattern');
+    case 'choices':
+      return t('library_error.problem.choices');
+    case 'wrong_type':
+      return t('library_error.problem.wrong_type');
+    case 'out_of_range':
+      return t('library.param.range', { min: p.min, max: p.max });
+    case 'required':
+      return t('library.param.required');
+    case 'too_long':
+      return t('library.param.too_long', { max: p.max });
+    case 'no_match':
+      return t('library.param.pattern');
+    case 'not_a_choice':
+      return t('library.param.choice');
   }
 }

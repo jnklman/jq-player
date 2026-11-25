@@ -301,7 +301,7 @@ describe('dialogs', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Apply' }));
     await settle();
     expect(lastEdit('set_devices')!.devices).toEqual([
-      { id: expect.any(String), name: 'Lighting desk', host: '192.168.1.20', port: 53000 },
+      { id: expect.any(String), name: 'Lighting desk', host: '192.168.1.20', port: 53000, template: null },
     ]);
   });
 

@@ -8,8 +8,9 @@ import App from './App.svelte';
 import PanelWindow from './components/layout/PanelWindow.svelte';
 import { api, events } from './lib/api';
 import { commitFields } from './lib/commit';
+import { initLibraries } from './lib/library.svelte';
 import { openShowFile } from './lib/shows';
-import { init, initLanguage } from './lib/store.svelte';
+import { init, initLanguage, ui } from './lib/store.svelte';
 import { lockWebview } from './lib/webview';
 import { dragByTouch, loadWindowSupport, markPlatform, trackFocus, trackMaximized } from './lib/window.svelte';
 import { forwardDialogs, isMainWindow, serveDialogs, syncSelection, windowPanel } from './lib/windows.svelte';
@@ -25,8 +26,17 @@ init(isMainWindow);
 // Before this window or the program closes, what is typed in a field reaches the show (and counts as unsaved).
 events.onCommitFields(() => void commitFields().finally(() => api.fieldsCommitted()));
 syncSelection();
+initLibraries();
 if (isMainWindow) {
   events.onOpenRequested(openShowFile);
+  // A library file double-clicked: shown to be installed (at start, or while running).
+  events.onLibraryRequested((path) => (ui.libraryImport = path));
+  api.startupLibrary().then(
+    (path) => {
+      if (path) ui.libraryImport = path;
+    },
+    () => {},
+  );
   serveDialogs();
 } else {
   forwardDialogs();

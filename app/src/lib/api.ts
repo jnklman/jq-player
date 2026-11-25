@@ -102,6 +102,9 @@ interface CueBase {
    * id, number, title, script_ref, notes, color, hotkey, midi_trigger, advance, passes, second_trigger,
    * release_trigger and others identical (pre_wait included). Absent = not linked. Only changed by link_cues/unlink_cues, duplicate and paste. */
   link?: string;
+  /** The library preset the cue was made from (shared by linked cues). Only a note of its origin: the cue holds all
+   * its data and works the same without the library; `CueInfo.preset` compares it with the preset installed. */
+  preset: PresetRef | null;
 }
 
 /** ignore: swallowed silently; pause: pause/resume in turn; fade_out: own fade-out time (FADE ALL time if 0);
@@ -419,8 +422,12 @@ export interface GroupFields {
 export interface NetDevice {
   id: string;
   name: string;
+  /** Empty for a device a library preset added: the operator sets it (until then its cues fail with
+   * `runner_osc_no_address`). `set_devices` refuses an empty host. */
   host: string;
   port: number;
+  /** The library device template it was made from; cues from that library's presets go to it. Keep it when editing. */
+  template: DeviceTemplateRef | null;
 }
 
 /** Leaves the loop or vamp of running targets (each one releases the next vamp); none running = no-op. */
@@ -864,6 +871,8 @@ export interface CueInfo {
   repeat_blocked: boolean;
   /** Other top-level cues with the same hotkey (a hint: a press starts them all). */
   hotkey_shared: CueId[];
+  /** For a cue made from a library preset (`preset` set): how it compares with the preset installed now. */
+  preset: PresetState | null;
 }
 
 export interface FileLoudness {
@@ -963,6 +972,15 @@ export type CommandError =
   | { kind: 'peak_cache_not_cleared'; error: string }
   | { kind: 'media_dir_not_found'; path: string }
   | { kind: 'file_manager_failed'; error: string }
+  // Cue libraries
+  | { kind: 'library_file'; path: string; error: LibraryError }
+  | { kind: 'library_io'; path: string; error: string }
+  | { kind: 'no_library_folder' }
+  | { kind: 'library_not_found' }
+  | { kind: 'preset_not_found' }
+  | { kind: 'library_built_in' }
+  | { kind: 'preset'; error: LibraryError }
+  | { kind: 'not_from_preset' }
   // Editing and the show's folders
   | { kind: 'show_mode_locked' }
   | { kind: 'media_dir_busy_cue' }
@@ -1134,6 +1152,8 @@ export type LayerMessage =
   | { kind: 'runner_file_not_loadable'; error: Detail }
   | { kind: 'runner_no_osc_device' }
   | { kind: 'runner_osc_device_missing'; device: string }
+  /** The device (by name) has no address yet (added by a library preset). */
+  | { kind: 'runner_osc_no_address'; device: string }
   | { kind: 'runner_osc_unavailable' }
   | { kind: 'runner_no_midi_output' }
   // Windows and the keyboard
@@ -1414,6 +1434,8 @@ export type NoticeKind =
   | { kind: 'writes_pending' }
   | { kind: 'settings_ignored'; error: Detail }
   | { kind: 'link_synced'; cue: CueName }
+  /** A preset's cue needed a network device the show lacked; it was added without an address (set it). */
+  | { kind: 'library_device_added'; name: string; port: number }
   | { kind: 'autosave_unreadable'; error: Detail }
   | { kind: 'autosave_not_deleted'; error: Detail }
   | { kind: 'file_missing'; file: string }
@@ -1618,8 +1640,196 @@ export type EditOp =
   /** Dissolves the groups among `ids`: their cues take each group's place and play as before as far as possible
    * (advance, pre-wait, hotkey; control and go-to cues aiming at the group aim at its cues). */
   | { op: 'ungroup'; ids: CueId[] }
+  /** A cue made from a library preset with `params` (missing ones at their defaults; checked, `preset` error). OSC
+   * cues go to the show's device made from the library's device template; one is added in the same step (empty host,
+   * notice `library_device_added`) if the show has none. Notes the preset as recently used. */
+  | {
+      op: 'add_preset';
+      library: string;
+      preset: string;
+      params?: Record<string, ParamValue>;
+      index: number | null;
+      group?: CueId;
+    }
+  /** Takes the listed fields (`PresetState.modified` names; null = all) of cues made from presets from their preset
+   * as installed now, which also brings them to its revision (an update). Number, hotkey, MIDI trigger and link stay. */
+  | { op: 'reset_to_preset'; ids: CueId[]; fields?: string[] | null }
+  /** Fills a preset cue in again with other parameters: the fields that use them follow, the others stay. */
+  | { op: 'set_preset_params'; id: CueId; params: Record<string, ParamValue> }
+  /** Forgets which preset the cues came from (they keep everything else). */
+  | { op: 'detach_preset'; ids: CueId[] }
   | { op: 'undo' }
   | { op: 'redo' };
+
+// --- Cue libraries (`.jqlibrary`)
+
+export const LIBRARY_EXTENSION = 'jqlibrary';
+
+/** A text by language code ("en", "de"); pick one with `localized` (`lib/library.ts`). */
+export type LocalizedText = Record<string, string>;
+
+/** A preset parameter's value: numbers for int/float (and numeric choices), text for text (and text choices). */
+export type ParamValue = number | string;
+
+export interface PresetRef {
+  library: string;
+  preset: string;
+  /** The preset's revision the cue was made from or last updated to. */
+  revision: number;
+  /** Absent when the preset has none. */
+  params?: Record<string, ParamValue>;
+}
+
+export interface DeviceTemplateRef {
+  library: string;
+  device: string;
+}
+
+export interface Library {
+  format: 'jqlibrary';
+  version: number;
+  id: string;
+  revision: number;
+  name: LocalizedText;
+  description: LocalizedText;
+  author: string;
+  homepage: string;
+  min_app: string;
+  devices: { id: string; name: LocalizedText; port: number }[];
+  categories: { id: string; name: LocalizedText }[];
+  presets: LibraryPreset[];
+}
+
+export interface LibraryPreset {
+  id: string;
+  revision: number;
+  category: string | null;
+  /** May hold placeholders such as `{ch}`; `presetTitle` fills them in. */
+  title: LocalizedText;
+  description: LocalizedText;
+  keywords: Record<string, string[]>;
+  params: LibraryParam[];
+  /** The cue as in a show file, with placeholders; its `type` tells the kind. */
+  cue: { type: Cue['type'] } & Record<string, unknown>;
+}
+
+export type LibraryParam = { id: string; label: LocalizedText } & (
+  | { type: 'int'; min: number; max: number; default: number; unit?: string; map?: [number, number][] }
+  | {
+      type: 'float';
+      min: number;
+      max: number;
+      default: number;
+      step?: number;
+      unit?: string;
+      map?: [number, number][];
+    }
+  | { type: 'text'; default: string; max_len?: number; pattern?: string; required: boolean }
+  | { type: 'choice'; values: { value: ParamValue; label: LocalizedText }[]; default: ParamValue }
+);
+
+/** What is wrong with a library file or a preset's parameters; worded by `lib/errors.ts`. */
+export type LibraryError =
+  | { kind: 'too_large'; max: number }
+  | { kind: 'invalid'; error: string }
+  | { kind: 'wrong_format'; found: string }
+  | { kind: 'too_new'; found: number; current: number }
+  | { kind: 'duplicate'; part: 'preset' | 'param' | 'category' | 'device'; id: string }
+  | { kind: 'unknown_category'; preset: string; category: string }
+  | { kind: 'param'; preset: string; param: string; problem: ParamProblem }
+  | { kind: 'template'; preset: string; error: TemplateError }
+  | { kind: 'cue'; preset: string; problem: PresetCueProblem }
+  | { kind: 'preset_not_found'; preset: string };
+
+export type ParamProblem =
+  | { kind: 'range' }
+  | { kind: 'map' }
+  | { kind: 'pattern' }
+  | { kind: 'choices' }
+  | { kind: 'wrong_type' }
+  | { kind: 'out_of_range'; min: number; max: number }
+  | { kind: 'required' }
+  | { kind: 'too_long'; max: number }
+  | { kind: 'no_match' }
+  | { kind: 'not_a_choice' };
+
+export type TemplateError =
+  | { kind: 'syntax'; text: string }
+  | { kind: 'unknown_param'; param: string }
+  | { kind: 'no_label'; param: string }
+  | { kind: 'not_a_number'; param: string };
+
+export type PresetCueProblem =
+  | { kind: 'invalid'; error: string }
+  | { kind: 'media' }
+  | { kind: 'stopwatch' }
+  | { kind: 'trigger' }
+  | { kind: 'outside_target' }
+  | { kind: 'unknown_device'; device: string };
+
+/** A cue made from a preset compared with the preset installed now. Only for reset and update: the cue plays the same
+ * either way. */
+export type PresetState =
+  /** The library or the preset is not installed on this machine. */
+  | { status: 'missing' }
+  /** The preset does not take the cue's parameters any more. */
+  | { status: 'broken'; library: LocalizedText; title: LocalizedText; error: LibraryError }
+  | {
+      status: 'linked';
+      library: LocalizedText;
+      /** The preset's title with the cue's parameters, by language. */
+      title: LocalizedText;
+      /** Fields (keys of the cue, its type's fields included) that differ from what the preset makes now. */
+      modified: string[];
+      /** The installed preset's revision when it is newer than the cue's: `reset_to_preset` updates. */
+      update: number | null;
+    };
+
+export interface PresetKey {
+  library: string;
+  preset: string;
+}
+
+export interface LibrarySummary {
+  /** null for a file that cannot be read (`error`). */
+  id: string | null;
+  /** Bundled ones come with the program: they can be disabled, not removed. */
+  source: 'bundled' | 'installed';
+  file: string;
+  error: LibraryError | null;
+  name: LocalizedText;
+  description: LocalizedText;
+  author: string;
+  homepage: string;
+  revision: number;
+  presets: number;
+  languages: string[];
+  /** Offered when adding cues. */
+  enabled: boolean;
+  /** The one in use among files with the same id (newest revision; the installed one of equal ones). */
+  active: boolean;
+}
+
+export interface LibrariesView {
+  libraries: LibrarySummary[];
+  prefs: {
+    /** Libraries not offered when adding cues (cues from them still reset and update). */
+    disabled: string[];
+    /** Most recent first, at most 20. */
+    recent: PresetKey[];
+    favorites: PresetKey[];
+  };
+  /** Folder of installed libraries; null without a config folder. */
+  folder: string | null;
+}
+
+/** A library file looked at before installing it. */
+export interface LibraryInspection {
+  library: Library;
+  /** Compared with the one in use with the same id. */
+  comparison: 'new' | 'newer' | 'same' | 'older';
+  installed: number | null;
+}
 
 export const SHOW_EXTENSION = 'jqshow';
 
@@ -1799,6 +2009,29 @@ export const api = {
   focusMain: () => invoke<void>('focus_main'),
   /** Output devices of `host` (default: system host); may take a moment. */
   audioDevices: (host?: string) => invoke<AudioDevices>('audio_devices', { host: host ?? null }),
+  // Cue libraries; they work without a show. Changes also come to every window as `libraries`.
+  /** A library file the program was started with (double-click); only the first call gets it. */
+  startupLibrary: () => invoke<string | null>('startup_library'),
+  libraries: () => invoke<LibrariesView>('libraries'),
+  /** The library in use with this id, enabled or not, with all its texts. */
+  library: (id: string) => invoke<Library>('library', { id }),
+  /** Several libraries by id (unknown ones left out). */
+  libraryPresets: (ids: string[]) => invoke<Record<string, Library>>('library_presets', { ids }),
+  /** Reads a library file (checked) and compares it with what is installed; installs nothing. */
+  inspectLibrary: (path: string) => invoke<LibraryInspection>('inspect_library', { path }),
+  /** Copies a library file into the libraries folder (replacing an installed one with the same id) and enables it. */
+  installLibrary: (path: string) => invoke<LibrariesView>('install_library', { path }),
+  /** Removes the installed files of a library; refused for a bundled one (`library_built_in`). */
+  removeLibrary: (id: string) => invoke<LibrariesView>('remove_library', { id }),
+  /** Removes an installed file that cannot be read (`LibrarySummary.file`). */
+  removeLibraryFile: (file: string) => invoke<LibrariesView>('remove_library_file', { file }),
+  /** Reads the libraries folder again (files copied in by hand). */
+  rescanLibraries: () => invoke<LibrariesView>('rescan_libraries'),
+  setLibraryEnabled: (id: string, enabled: boolean) => invoke<LibrariesView>('set_library_enabled', { id, enabled }),
+  setPresetFavorite: (library: string, preset: string, favorite: boolean) =>
+    invoke<LibrariesView>('set_preset_favorite', { library, preset, favorite }),
+  /** Opens the libraries folder in the system file manager (created if missing). */
+  openLibraryFolder: () => invoke<void>('open_library_folder'),
 };
 
 export const events = {
@@ -1821,6 +2054,12 @@ export const events = {
   /** Download progress of `installUpdate`; `total` is null if the server does not tell the size. */
   onUpdateProgress: (handler: (progress: UpdateProgress) => void): Promise<UnlistenFn> =>
     listen<UpdateProgress>('update_progress', (e) => handler(e.payload)),
+  /** The cue libraries or their preferences changed (install, remove, favorites, recently used); to every window. */
+  onLibraries: (handler: (view: LibrariesView) => void): Promise<UnlistenFn> =>
+    listen<LibrariesView>('libraries', (e) => handler(e.payload)),
+  /** A library file was opened from outside (double-click while running): show it and offer to install it. */
+  onLibraryRequested: (handler: (path: string) => void): Promise<UnlistenFn> =>
+    listen<string>('library_requested', (e) => handler(e.payload)),
   /** Open it like `openShow`, asking first; the backend opens nothing itself. */
   onOpenRequested: (handler: (path: string) => void): Promise<UnlistenFn> =>
     listen<string>('open_requested', (e) => handler(e.payload)),

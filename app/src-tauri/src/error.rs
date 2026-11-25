@@ -50,6 +50,30 @@ pub enum AppError {
         error: String,
     },
 
+    // Cue libraries
+    /// A library file cannot be used.
+    LibraryFile {
+        path: String,
+        error: jq_library::LibraryError,
+    },
+    /// Copying into or removing from the libraries folder failed.
+    LibraryIo {
+        path: String,
+        error: String,
+    },
+    NoLibraryFolder,
+    /// Neither installed nor bundled (any more).
+    LibraryNotFound,
+    PresetNotFound,
+    /// Bundled libraries come with the program; they can be disabled, not removed.
+    LibraryBuiltIn,
+    /// The preset's parameters do not fit (or the preset makes no valid cue).
+    Preset {
+        error: jq_library::LibraryError,
+    },
+    /// The cue was not made from a preset.
+    NotFromPreset,
+
     // Editing and the show's folders
     ShowModeLocked,
     MediaDirBusyCue,

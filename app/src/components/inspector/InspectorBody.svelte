@@ -16,6 +16,7 @@
   import CueHeader from './CueHeader.svelte';
   import InspectorTabs from './InspectorTabs.svelte';
   import Notices from './Notices.svelte';
+  import PresetBox from './PresetBox.svelte';
   import FlowTab from './tabs/FlowTab.svelte';
   import MainTab from './tabs/MainTab.svelte';
   import NotesTab from './tabs/NotesTab.svelte';
@@ -138,6 +139,9 @@
   </Tooltip>
 {/if}
 <Notices {notices} {tabs} onreveal={reveal} />
+{#if single?.preset}
+  <PresetBox cue={single} {info} {locked} />
+{/if}
 <InspectorTabs {tabs} active={tab} {problems} onselect={(next) => (inspectorView.tab = next)} />
 <ScrollArea class="min-h-0 flex-1">
   <div bind:this={body} role="tabpanel" aria-label={tabs.find((other) => other.id === tab)?.label}>

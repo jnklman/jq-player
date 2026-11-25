@@ -1,0 +1,929 @@
+{
+  "format": "jqlibrary",
+  "version": 1,
+  "id": "ced50deb-1b79-456d-867e-7ed76725905e",
+  "revision": 1,
+  "name": {
+    "en": "ChamSys MagicQ",
+    "de": "ChamSys MagicQ"
+  },
+  "description": {
+    "en": "Playbacks, executes, cue jumps and black out over OSC, and GO/STOP/RESUME over MIDI Show Control. On MagicQ enable OSC in Setup → View Settings → Network and set its receive port (8000 here); OSC is UDP only. Over OSC MagicQ takes playbacks 1–10 and execute pages 1–10.",
+    "de": "Playbacks, Executes, Cue-Sprünge und Black-out über OSC sowie GO/STOP/RESUME über MIDI Show Control. In MagicQ OSC unter Setup → View Settings → Network einschalten und den Empfangsport setzen (hier 8000); OSC nur über UDP. Über OSC erreicht MagicQ die Playbacks 1–10 und die Execute-Seiten 1–10."
+  },
+  "author": "jQ Player",
+  "min_app": "0.5.0",
+  "devices": [
+    {
+      "id": "magicq",
+      "name": {
+        "en": "MagicQ",
+        "de": "MagicQ"
+      },
+      "port": 8000
+    }
+  ],
+  "categories": [
+    {
+      "id": "playback",
+      "name": {
+        "en": "Playbacks",
+        "de": "Playbacks"
+      }
+    },
+    {
+      "id": "exec",
+      "name": {
+        "en": "Executes",
+        "de": "Executes"
+      }
+    },
+    {
+      "id": "desk",
+      "name": {
+        "en": "Desk",
+        "de": "Pult"
+      }
+    },
+    {
+      "id": "msc",
+      "name": {
+        "en": "MIDI Show Control",
+        "de": "MIDI Show Control"
+      }
+    }
+  ],
+  "presets": [
+    {
+      "id": "pb-go",
+      "revision": 1,
+      "category": "playback",
+      "title": {
+        "en": "PB {pb} GO",
+        "de": "PB {pb} GO"
+      },
+      "description": {
+        "en": "Advances the cue stack on a playback, like its GO button.",
+        "de": "Schaltet den Cue-Stack eines Playbacks weiter, wie seine GO-Taste."
+      },
+      "params": [
+        {
+          "id": "pb",
+          "label": {
+            "en": "Playback",
+            "de": "Playback"
+          },
+          "type": "int",
+          "min": 1,
+          "max": 10,
+          "default": 1
+        }
+      ],
+      "cue": {
+        "type": "osc",
+        "device": "magicq",
+        "messages": [
+          {
+            "address": "/pb/{pb}/go"
+          }
+        ]
+      },
+      "keywords": {
+        "en": [
+          "go",
+          "next",
+          "cue stack",
+          "lighting"
+        ],
+        "de": [
+          "Go",
+          "weiter",
+          "Cue-Stack",
+          "Licht"
+        ]
+      }
+    },
+    {
+      "id": "pb-pause",
+      "revision": 1,
+      "category": "playback",
+      "title": {
+        "en": "PB {pb} pause",
+        "de": "PB {pb} Pause"
+      },
+      "description": {
+        "en": "Pauses the running cue on a playback.",
+        "de": "Hält den laufenden Cue eines Playbacks an."
+      },
+      "params": [
+        {
+          "id": "pb",
+          "label": {
+            "en": "Playback",
+            "de": "Playback"
+          },
+          "type": "int",
+          "min": 1,
+          "max": 10,
+          "default": 1
+        }
+      ],
+      "cue": {
+        "type": "osc",
+        "device": "magicq",
+        "messages": [
+          {
+            "address": "/pb/{pb}/pause"
+          }
+        ]
+      },
+      "keywords": {
+        "en": [
+          "pause",
+          "hold"
+        ],
+        "de": [
+          "Pause",
+          "anhalten"
+        ]
+      }
+    },
+    {
+      "id": "pb-release",
+      "revision": 1,
+      "category": "playback",
+      "title": {
+        "en": "PB {pb} release",
+        "de": "PB {pb} freigeben"
+      },
+      "description": {
+        "en": "Releases the playback; its fader stays where it is.",
+        "de": "Gibt das Playback frei; sein Fader bleibt stehen."
+      },
+      "params": [
+        {
+          "id": "pb",
+          "label": {
+            "en": "Playback",
+            "de": "Playback"
+          },
+          "type": "int",
+          "min": 1,
+          "max": 10,
+          "default": 1
+        }
+      ],
+      "cue": {
+        "type": "osc",
+        "device": "magicq",
+        "messages": [
+          {
+            "address": "/pb/{pb}/release"
+          }
+        ]
+      },
+      "keywords": {
+        "en": [
+          "release",
+          "off",
+          "stop"
+        ],
+        "de": [
+          "freigeben",
+          "aus",
+          "Stopp"
+        ]
+      }
+    },
+    {
+      "id": "pb-level",
+      "revision": 1,
+      "category": "playback",
+      "title": {
+        "en": "PB {pb} fader to {pct} %",
+        "de": "PB {pb} Fader auf {pct} %"
+      },
+      "description": {
+        "en": "Sets a playback's fader. MagicQ stores levels in 255ths, so 50 % reads back as 51 %.",
+        "de": "Stellt den Fader eines Playbacks. MagicQ speichert Pegel in 255steln, 50 % wird als 51 % zurückgemeldet."
+      },
+      "params": [
+        {
+          "id": "pb",
+          "label": {
+            "en": "Playback",
+            "de": "Playback"
+          },
+          "type": "int",
+          "min": 1,
+          "max": 10,
+          "default": 1
+        },
+        {
+          "id": "pct",
+          "label": {
+            "en": "Level",
+            "de": "Pegel"
+          },
+          "type": "int",
+          "min": 0,
+          "max": 100,
+          "default": 100,
+          "unit": "%"
+        }
+      ],
+      "cue": {
+        "type": "osc",
+        "device": "magicq",
+        "messages": [
+          {
+            "address": "/pb/{pb}",
+            "args": [
+              {
+                "int": "{pct}"
+              }
+            ]
+          }
+        ]
+      },
+      "keywords": {
+        "en": [
+          "fader",
+          "level",
+          "intensity"
+        ],
+        "de": [
+          "Fader",
+          "Pegel",
+          "Intensität"
+        ]
+      }
+    },
+    {
+      "id": "pb-flash",
+      "revision": 1,
+      "category": "playback",
+      "title": {
+        "en": "PB {pb} flash {onoff:label}",
+        "de": "PB {pb} Flash {onoff:label}"
+      },
+      "description": {
+        "en": "Presses or releases a playback's flash button.",
+        "de": "Drückt die Flash-Taste eines Playbacks oder lässt sie los."
+      },
+      "params": [
+        {
+          "id": "pb",
+          "label": {
+            "en": "Playback",
+            "de": "Playback"
+          },
+          "type": "int",
+          "min": 1,
+          "max": 10,
+          "default": 1
+        },
+        {
+          "id": "onoff",
+          "label": {
+            "en": "Action",
+            "de": "Aktion"
+          },
+          "type": "choice",
+          "values": [
+            {
+              "value": 1,
+              "label": {
+                "en": "On",
+                "de": "Ein"
+              }
+            },
+            {
+              "value": 0,
+              "label": {
+                "en": "Off",
+                "de": "Aus"
+              }
+            }
+          ],
+          "default": 1
+        }
+      ],
+      "cue": {
+        "type": "osc",
+        "device": "magicq",
+        "messages": [
+          {
+            "address": "/pb/{pb}/flash",
+            "args": [
+              {
+                "int": "{onoff}"
+              }
+            ]
+          }
+        ]
+      },
+      "keywords": {
+        "en": [
+          "flash",
+          "bump"
+        ],
+        "de": [
+          "Flash"
+        ]
+      }
+    },
+    {
+      "id": "pb-jump",
+      "revision": 1,
+      "category": "playback",
+      "title": {
+        "en": "PB {pb} jump to cue {cue}",
+        "de": "PB {pb} springe zu Cue {cue}"
+      },
+      "description": {
+        "en": "Jumps to a cue of the playback's cue stack.",
+        "de": "Springt zu einem Cue im Cue-Stack des Playbacks."
+      },
+      "params": [
+        {
+          "id": "pb",
+          "label": {
+            "en": "Playback",
+            "de": "Playback"
+          },
+          "type": "int",
+          "min": 1,
+          "max": 10,
+          "default": 1
+        },
+        {
+          "id": "cue",
+          "label": {
+            "en": "Cue",
+            "de": "Cue"
+          },
+          "type": "text",
+          "default": "1",
+          "pattern": "\\d+(\\.\\d+)?",
+          "required": true
+        }
+      ],
+      "cue": {
+        "type": "osc",
+        "device": "magicq",
+        "messages": [
+          {
+            "address": "/pb/{pb}/{cue}"
+          }
+        ]
+      },
+      "keywords": {
+        "en": [
+          "jump",
+          "goto",
+          "cue"
+        ],
+        "de": [
+          "springen",
+          "Cue"
+        ]
+      }
+    },
+    {
+      "id": "exec",
+      "revision": 1,
+      "category": "exec",
+      "title": {
+        "en": "Execute {page}/{item} at {pct:raw} %",
+        "de": "Execute {page}/{item} auf {pct:raw} %"
+      },
+      "description": {
+        "en": "Sets an execute item. 0 % releases; only fader executes use the level, buttons switch on at any value above 0.",
+        "de": "Stellt ein Execute-Item. 0 % gibt frei; nur Fader-Executes nutzen den Pegel, Tasten schalten bei jedem Wert über 0 ein."
+      },
+      "params": [
+        {
+          "id": "page",
+          "label": {
+            "en": "Page",
+            "de": "Seite"
+          },
+          "type": "int",
+          "min": 1,
+          "max": 10,
+          "default": 1
+        },
+        {
+          "id": "item",
+          "label": {
+            "en": "Execute",
+            "de": "Execute"
+          },
+          "type": "int",
+          "min": 1,
+          "max": 1000,
+          "default": 1
+        },
+        {
+          "id": "pct",
+          "label": {
+            "en": "Level",
+            "de": "Pegel"
+          },
+          "type": "int",
+          "min": 0,
+          "max": 100,
+          "default": 100,
+          "unit": "%",
+          "map": [
+            [
+              0,
+              0
+            ],
+            [
+              100,
+              1
+            ]
+          ]
+        }
+      ],
+      "cue": {
+        "type": "osc",
+        "device": "magicq",
+        "messages": [
+          {
+            "address": "/exec/{page}/{item}",
+            "args": [
+              {
+                "float": "{pct}"
+              }
+            ]
+          }
+        ]
+      },
+      "keywords": {
+        "en": [
+          "execute",
+          "button",
+          "fader"
+        ],
+        "de": [
+          "Execute",
+          "Taste",
+          "Fader"
+        ]
+      }
+    },
+    {
+      "id": "exec-release",
+      "revision": 1,
+      "category": "exec",
+      "title": {
+        "en": "Execute {page}/{item} release",
+        "de": "Execute {page}/{item} freigeben"
+      },
+      "description": {
+        "en": "Releases an execute item.",
+        "de": "Gibt ein Execute-Item frei."
+      },
+      "params": [
+        {
+          "id": "page",
+          "label": {
+            "en": "Page",
+            "de": "Seite"
+          },
+          "type": "int",
+          "min": 1,
+          "max": 10,
+          "default": 1
+        },
+        {
+          "id": "item",
+          "label": {
+            "en": "Execute",
+            "de": "Execute"
+          },
+          "type": "int",
+          "min": 1,
+          "max": 1000,
+          "default": 1
+        }
+      ],
+      "cue": {
+        "type": "osc",
+        "device": "magicq",
+        "messages": [
+          {
+            "address": "/exec/{page}/{item}",
+            "args": [
+              {
+                "float": 0
+              }
+            ]
+          }
+        ]
+      },
+      "keywords": {
+        "en": [
+          "execute",
+          "release",
+          "off"
+        ],
+        "de": [
+          "Execute",
+          "freigeben",
+          "aus"
+        ]
+      }
+    },
+    {
+      "id": "tenscene",
+      "revision": 1,
+      "category": "exec",
+      "title": {
+        "en": "10Scene {item}, zone {zone} at {pct:raw} %",
+        "de": "10Scene {item}, Zone {zone} auf {pct:raw} %"
+      },
+      "description": {
+        "en": "Sets a 10Scene item in a zone; 0 % releases.",
+        "de": "Stellt ein 10Scene-Item in einer Zone; 0 % gibt frei."
+      },
+      "params": [
+        {
+          "id": "item",
+          "label": {
+            "en": "Item",
+            "de": "Item"
+          },
+          "type": "int",
+          "min": 1,
+          "max": 100,
+          "default": 1
+        },
+        {
+          "id": "zone",
+          "label": {
+            "en": "Zone",
+            "de": "Zone"
+          },
+          "type": "int",
+          "min": 1,
+          "max": 10,
+          "default": 1
+        },
+        {
+          "id": "pct",
+          "label": {
+            "en": "Level",
+            "de": "Pegel"
+          },
+          "type": "int",
+          "min": 0,
+          "max": 100,
+          "default": 100,
+          "unit": "%",
+          "map": [
+            [
+              0,
+              0
+            ],
+            [
+              100,
+              1
+            ]
+          ]
+        }
+      ],
+      "cue": {
+        "type": "osc",
+        "device": "magicq",
+        "messages": [
+          {
+            "address": "/10scene/{item}/{zone}",
+            "args": [
+              {
+                "float": "{pct}"
+              }
+            ]
+          }
+        ]
+      },
+      "keywords": {
+        "en": [
+          "10scene",
+          "architectural"
+        ],
+        "de": [
+          "10Scene"
+        ]
+      }
+    },
+    {
+      "id": "dbo",
+      "revision": 1,
+      "category": "desk",
+      "title": {
+        "en": "Desk black out {onoff:label}",
+        "de": "Black-out {onoff:label}"
+      },
+      "description": {
+        "en": "Presses (On) or releases (Off) the DBO button. What it does follows the desk's DBO function: momentary blacks out until Off; latched toggles on each On; tap to time taps the tempo.",
+        "de": "Drückt (Ein) die DBO-Taste oder lässt sie los (Aus). Was sie tut, hängt von der DBO-Funktion des Pults ab: momentary schaltet bis Aus dunkel; latched schaltet bei jedem Ein um; tap to time tippt das Tempo."
+      },
+      "params": [
+        {
+          "id": "onoff",
+          "label": {
+            "en": "Action",
+            "de": "Aktion"
+          },
+          "type": "choice",
+          "values": [
+            {
+              "value": 1,
+              "label": {
+                "en": "On",
+                "de": "Ein"
+              }
+            },
+            {
+              "value": 0,
+              "label": {
+                "en": "Off",
+                "de": "Aus"
+              }
+            }
+          ],
+          "default": 1
+        }
+      ],
+      "cue": {
+        "type": "osc",
+        "device": "magicq",
+        "messages": [
+          {
+            "address": "/dbo",
+            "args": [
+              {
+                "int": "{onoff}"
+              }
+            ]
+          }
+        ]
+      },
+      "keywords": {
+        "en": [
+          "blackout",
+          "dbo",
+          "dark"
+        ],
+        "de": [
+          "Black-out",
+          "DBO",
+          "dunkel"
+        ]
+      }
+    },
+    {
+      "id": "rpc",
+      "revision": 1,
+      "category": "desk",
+      "title": {
+        "en": "MagicQ command {command}",
+        "de": "MagicQ-Befehl {command}"
+      },
+      "description": {
+        "en": "Sends a MagicQ remote protocol command as text.",
+        "de": "Sendet einen Befehl des MagicQ-Remote-Protokolls als Text."
+      },
+      "params": [
+        {
+          "id": "command",
+          "label": {
+            "en": "Command",
+            "de": "Befehl"
+          },
+          "type": "text",
+          "default": "",
+          "required": true
+        }
+      ],
+      "cue": {
+        "type": "osc",
+        "device": "magicq",
+        "messages": [
+          {
+            "address": "/rpc",
+            "args": [
+              {
+                "string": "{command}"
+              }
+            ]
+          }
+        ]
+      },
+      "keywords": {
+        "en": [
+          "rpc",
+          "remote",
+          "command"
+        ],
+        "de": [
+          "RPC",
+          "Fernsteuerung",
+          "Befehl"
+        ]
+      }
+    },
+    {
+      "id": "msc-go",
+      "revision": 1,
+      "category": "msc",
+      "title": {
+        "en": "MSC GO {cue}",
+        "de": "MSC GO {cue}"
+      },
+      "description": {
+        "en": "MagicQ reacts to GO, STOP, RESUME and TIMED GO. What a cue number and list address depends on MagicQ's Show Control Type (Setup → View Settings → MIDI Timecode: Normal, Cue Stack 1, Playback 1). Device ID 127 addresses all devices.",
+        "de": "MagicQ reagiert auf GO, STOP, RESUME und TIMED GO. Worauf Cue-Nummer und Liste wirken, hängt vom Show Control Type in MagicQ ab (Setup → View Settings → MIDI Timecode: Normal, Cue Stack 1, Playback 1). Geräte-ID 127 spricht alle Geräte an."
+      },
+      "params": [
+        {
+          "id": "device",
+          "label": {
+            "en": "Device ID",
+            "de": "Geräte-ID"
+          },
+          "type": "int",
+          "min": 0,
+          "max": 127,
+          "default": 127
+        },
+        {
+          "id": "cue",
+          "label": {
+            "en": "Cue",
+            "de": "Cue"
+          },
+          "type": "text",
+          "default": "",
+          "pattern": "(\\d+(\\.\\d+)?)?"
+        },
+        {
+          "id": "list",
+          "label": {
+            "en": "Cue list",
+            "de": "Cue-Liste"
+          },
+          "type": "text",
+          "default": "",
+          "pattern": "(\\d+(\\.\\d+)?)?"
+        }
+      ],
+      "cue": {
+        "type": "midi",
+        "messages": [
+          {
+            "kind": "msc",
+            "device": "{device}",
+            "command": "go",
+            "list": "{list}",
+            "cue": "{cue}"
+          }
+        ]
+      },
+      "keywords": {
+        "en": [
+          "msc",
+          "midi",
+          "go"
+        ],
+        "de": [
+          "MSC",
+          "MIDI",
+          "Go"
+        ]
+      }
+    },
+    {
+      "id": "msc-stop",
+      "revision": 1,
+      "category": "msc",
+      "title": {
+        "en": "MSC STOP",
+        "de": "MSC STOP"
+      },
+      "description": {
+        "en": "MagicQ reacts to GO, STOP, RESUME and TIMED GO. What a cue number and list address depends on MagicQ's Show Control Type (Setup → View Settings → MIDI Timecode: Normal, Cue Stack 1, Playback 1). Device ID 127 addresses all devices.",
+        "de": "MagicQ reagiert auf GO, STOP, RESUME und TIMED GO. Worauf Cue-Nummer und Liste wirken, hängt vom Show Control Type in MagicQ ab (Setup → View Settings → MIDI Timecode: Normal, Cue Stack 1, Playback 1). Geräte-ID 127 spricht alle Geräte an."
+      },
+      "params": [
+        {
+          "id": "device",
+          "label": {
+            "en": "Device ID",
+            "de": "Geräte-ID"
+          },
+          "type": "int",
+          "min": 0,
+          "max": 127,
+          "default": 127
+        },
+        {
+          "id": "list",
+          "label": {
+            "en": "Cue list",
+            "de": "Cue-Liste"
+          },
+          "type": "text",
+          "default": "",
+          "pattern": "(\\d+(\\.\\d+)?)?"
+        }
+      ],
+      "cue": {
+        "type": "midi",
+        "messages": [
+          {
+            "kind": "msc",
+            "device": "{device}",
+            "command": "stop",
+            "list": "{list}"
+          }
+        ]
+      },
+      "keywords": {
+        "en": [
+          "msc",
+          "midi",
+          "show control"
+        ],
+        "de": [
+          "MSC",
+          "MIDI",
+          "Show Control"
+        ]
+      }
+    },
+    {
+      "id": "msc-resume",
+      "revision": 1,
+      "category": "msc",
+      "title": {
+        "en": "MSC RESUME",
+        "de": "MSC RESUME"
+      },
+      "description": {
+        "en": "MagicQ reacts to GO, STOP, RESUME and TIMED GO. What a cue number and list address depends on MagicQ's Show Control Type (Setup → View Settings → MIDI Timecode: Normal, Cue Stack 1, Playback 1). Device ID 127 addresses all devices.",
+        "de": "MagicQ reagiert auf GO, STOP, RESUME und TIMED GO. Worauf Cue-Nummer und Liste wirken, hängt vom Show Control Type in MagicQ ab (Setup → View Settings → MIDI Timecode: Normal, Cue Stack 1, Playback 1). Geräte-ID 127 spricht alle Geräte an."
+      },
+      "params": [
+        {
+          "id": "device",
+          "label": {
+            "en": "Device ID",
+            "de": "Geräte-ID"
+          },
+          "type": "int",
+          "min": 0,
+          "max": 127,
+          "default": 127
+        },
+        {
+          "id": "list",
+          "label": {
+            "en": "Cue list",
+            "de": "Cue-Liste"
+          },
+          "type": "text",
+          "default": "",
+          "pattern": "(\\d+(\\.\\d+)?)?"
+        }
+      ],
+      "cue": {
+        "type": "midi",
+        "messages": [
+          {
+            "kind": "msc",
+            "device": "{device}",
+            "command": "resume",
+            "list": "{list}"
+          }
+        ]
+      },
+      "keywords": {
+        "en": [
+          "msc",
+          "midi",
+          "show control"
+        ],
+        "de": [
+          "MSC",
+          "MIDI",
+          "Show Control"
+        ]
+      }
+    }
+  ]
+}

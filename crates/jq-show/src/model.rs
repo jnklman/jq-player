@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -556,8 +556,36 @@ pub struct Cue {
     /// Cues with the same link share everything [`Cue::copy_shared`] copies.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub link: Option<LinkId>,
+    /// The library preset the cue was made from. Only a note of its origin:
+    /// the cue holds all of its data, and nothing that plays, checks or
+    /// edits the show reads a library.
+    #[serde(default, skip_serializing_if = "omit_in_file")]
+    pub preset: Option<PresetRef>,
     #[serde(flatten)]
     pub kind: CueKind,
+}
+
+/// The preset of a cue library a cue was made from, with the parameters it
+/// was filled in with; lets the cue be reset to the preset or updated from a
+/// newer revision of it while the library is installed.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PresetRef {
+    /// The library's id.
+    pub library: Uuid,
+    /// The preset's id within the library.
+    pub preset: String,
+    /// The preset's revision the cue was made from or last updated to.
+    pub revision: u32,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub params: BTreeMap<String, ParamValue>,
+}
+
+/// A preset parameter's value.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ParamValue {
+    Number(f64),
+    Text(String),
 }
 
 impl Cue {
@@ -666,15 +694,17 @@ impl Cue {
             release_trigger: _,
             others: _,
             link: _,
+            preset,
             kind,
         } = from;
         self.pre_wait = *pre_wait;
+        self.preset.clone_from(preset);
         self.kind.clone_from(kind);
     }
 
     /// True if `other` has the same shared part.
     pub fn shares_with(&self, other: &Cue) -> bool {
-        self.pre_wait == other.pre_wait && self.kind == other.kind
+        self.pre_wait == other.pre_wait && self.preset == other.preset && self.kind == other.kind
     }
 
     pub fn new(kind: CueKind) -> Self {
@@ -694,6 +724,7 @@ impl Cue {
             release_trigger: false,
             others: None,
             link: None,
+            preset: None,
             kind,
         }
     }
@@ -1479,6 +1510,17 @@ pub struct NetDevice {
     /// IP address (or host name; resolving it may take a moment).
     pub host: String,
     pub port: u16,
+    /// The library device template this device was made from; cues from
+    /// that library's presets go to it.
+    #[serde(default, skip_serializing_if = "omit_in_file")]
+    pub template: Option<DeviceTemplateRef>,
+}
+
+/// A device template of a cue library.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeviceTemplateRef {
+    pub library: Uuid,
+    pub device: String,
 }
 
 /// Sends OSC messages over UDP to one device.

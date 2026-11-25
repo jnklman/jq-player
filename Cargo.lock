@@ -2680,6 +2680,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "jq-library"
+version = "0.4.0"
+dependencies = [
+ "jq-show",
+ "regex",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
 name = "jq-media"
 version = "0.4.0"
 dependencies = [
@@ -2709,6 +2720,7 @@ dependencies = [
  "jq-core",
  "jq-engine",
  "jq-i18n",
+ "jq-library",
  "jq-media",
  "jq-midi",
  "jq-show",
@@ -2721,6 +2733,7 @@ dependencies = [
  "tauri-plugin-single-instance",
  "tauri-plugin-updater",
  "tauri-plugin-window-state",
+ "uuid",
  "windows-sys 0.61.2",
 ]
 

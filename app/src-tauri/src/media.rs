@@ -81,24 +81,25 @@ pub async fn open_media_dir(backend: State<'_, Backend>) -> Result<(), Error> {
         if !dir.is_dir() {
             return Err(AppError::MediaDirNotFound { path: dir.display().to_string() }.into());
         }
-        #[cfg(target_os = "windows")]
-        let mut command = {
-            let mut command = Command::new("explorer");
-            command.arg(&dir);
-            command
-        };
-        #[cfg(target_os = "linux")]
-        let mut command = {
-            let mut command = Command::new("xdg-open");
-            command.arg(&dir);
-            command
-        };
-
-        command
-            .spawn()
-            .map(|_| ())
-            .map_err(|e| Error::from(AppError::FileManagerFailed { error: e.to_string() }))
+        open_folder(&dir)
     })
     .await
     .map_err(|e| Error::from(e.to_string()))?
+}
+
+/// Opens a folder in the system file manager.
+pub fn open_folder(dir: &std::path::Path) -> Result<(), Error> {
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        let mut command = Command::new("explorer");
+        command.arg(dir);
+        command
+    };
+    #[cfg(not(target_os = "windows"))]
+    let mut command = {
+        let mut command = Command::new("xdg-open");
+        command.arg(dir);
+        command
+    };
+    command.spawn().map(|_| ()).map_err(|e| Error::from(AppError::FileManagerFailed { error: e.to_string() }))
 }

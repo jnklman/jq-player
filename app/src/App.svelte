@@ -13,6 +13,8 @@
   import KeyboardScope from './components/KeyboardScope.svelte';
   import Workspace from './components/layout/Workspace.svelte';
   import LeaveDialog from './components/LeaveDialog.svelte';
+  import LibraryDialog from './components/library/LibraryDialog.svelte';
+  import LibraryImportDialog from './components/library/LibraryImportDialog.svelte';
   import Notices from './components/Notices.svelte';
   import OutputsDialog from './components/OutputsDialog.svelte';
   import QuestionDialog from './components/QuestionDialog.svelte';
@@ -69,6 +71,9 @@
     {#if ui.waveformOpen}
       <WaveformDialog cueId={ui.waveformOpen} onclose={() => (ui.waveformOpen = null)} />
     {/if}
+    {#if ui.libraryOpen}
+      <LibraryDialog place={ui.libraryOpen} onclose={() => (ui.libraryOpen = null)} />
+    {/if}
     {#if ui.devicesOpen}
       <DevicesDialog onclose={() => (ui.devicesOpen = false)} />
     {/if}
@@ -83,6 +88,10 @@
     {/if}
   {:else if ui.started}
     <Welcome />
+  {/if}
+  <!-- A library file opened from outside: shown with or without a show. -->
+  {#if ui.libraryImport}
+    <LibraryImportDialog path={ui.libraryImport} onclose={() => (ui.libraryImport = null)} />
   {/if}
   {#if ui.aboutOpen}
     <AboutDialog onclose={() => (ui.aboutOpen = false)} />

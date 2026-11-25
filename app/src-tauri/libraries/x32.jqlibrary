@@ -1,0 +1,1981 @@
+{
+  "format": "jqlibrary",
+  "version": 1,
+  "id": "ddad2594-fb4e-4094-9c37-e7f283ecf29f",
+  "revision": 1,
+  "name": {
+    "en": "Behringer X32 / Midas M32",
+    "de": "Behringer X32 / Midas M32"
+  },
+  "description": {
+    "en": "Mutes, faders, sends, DCAs, mute groups, scenes, snippets and show cues over OSC. Set the console's IP address in the show's network devices; the X32 listens on UDP port 10023.",
+    "de": "Stummschaltungen, Fader, Sends, DCAs, Mute-Gruppen, Szenen, Snippets und Show-Cues über OSC. Die IP-Adresse des Pults in den Netzwerkgeräten der Show eintragen; das X32 empfängt auf UDP-Port 10023."
+  },
+  "author": "jQ Player",
+  "min_app": "0.5.0",
+  "devices": [
+    {
+      "id": "x32",
+      "name": {
+        "en": "X32",
+        "de": "X32"
+      },
+      "port": 10023
+    }
+  ],
+  "categories": [
+    {
+      "id": "mute",
+      "name": {
+        "en": "Mutes",
+        "de": "Stummschaltungen"
+      }
+    },
+    {
+      "id": "fader",
+      "name": {
+        "en": "Faders",
+        "de": "Fader"
+      }
+    },
+    {
+      "id": "send",
+      "name": {
+        "en": "Sends",
+        "de": "Sends"
+      }
+    },
+    {
+      "id": "dca",
+      "name": {
+        "en": "DCAs and mute groups",
+        "de": "DCAs und Mute-Gruppen"
+      }
+    },
+    {
+      "id": "scene",
+      "name": {
+        "en": "Scenes, snippets, cues",
+        "de": "Szenen, Snippets, Cues"
+      }
+    },
+    {
+      "id": "misc",
+      "name": {
+        "en": "Other",
+        "de": "Sonstiges"
+      }
+    }
+  ],
+  "presets": [
+    {
+      "id": "ch-mute",
+      "revision": 1,
+      "category": "mute",
+      "title": {
+        "en": "Ch {ch}: {state:label}",
+        "de": "Kanal {ch}: {state:label}"
+      },
+      "description": {
+        "en": "Mutes or unmutes an input channel (its ON button).",
+        "de": "Schaltet einen Eingangskanal stumm oder wieder ein (ON-Taste)."
+      },
+      "params": [
+        {
+          "id": "ch",
+          "label": {
+            "en": "Channel",
+            "de": "Kanal"
+          },
+          "type": "int",
+          "min": 1,
+          "max": 32,
+          "default": 1
+        },
+        {
+          "id": "state",
+          "label": {
+            "en": "Action",
+            "de": "Aktion"
+          },
+          "type": "choice",
+          "values": [
+            {
+              "value": 0,
+              "label": {
+                "en": "Mute",
+                "de": "Stummschalten"
+              }
+            },
+            {
+              "value": 1,
+              "label": {
+                "en": "Unmute",
+                "de": "Stummschaltung aufheben"
+              }
+            }
+          ],
+          "default": 0
+        }
+      ],
+      "cue": {
+        "type": "osc",
+        "device": "x32",
+        "messages": [
+          {
+            "address": "/ch/{ch:02}/mix/on",
+            "args": [
+              {
+                "int": "{state}"
+              }
+            ]
+          }
+        ]
+      },
+      "keywords": {
+        "en": [
+          "off",
+          "on",
+          "silence",
+          "mute"
+        ],
+        "de": [
+          "aus",
+          "an",
+          "stumm",
+          "Mute"
+        ]
+      }
+    },
+    {
+      "id": "auxin-mute",
+      "revision": 1,
+      "category": "mute",
+      "title": {
+        "en": "Aux in {n}: {state:label}",
+        "de": "Aux-In {n}: {state:label}"
+      },
+      "description": {
+        "en": "Mutes or unmutes an aux input (its ON button).",
+        "de": "Schaltet einen Aux-Eingang stumm oder wieder ein (ON-Taste)."
+      },
+      "params": [
+        {
+          "id": "n",
+          "label": {
+            "en": "Aux in",
+            "de": "Aux-In"
+          },
+          "type": "int",
+          "min": 1,
+          "max": 8,
+          "default": 1
+        },
+        {
+          "id": "state",
+          "label": {
+            "en": "Action",
+            "de": "Aktion"
+          },
+          "type": "choice",
+          "values": [
+            {
+              "value": 0,
+              "label": {
+                "en": "Mute",
+                "de": "Stummschalten"
+              }
+            },
+            {
+              "value": 1,
+              "label": {
+                "en": "Unmute",
+                "de": "Stummschaltung aufheben"
+              }
+            }
+          ],
+          "default": 0
+        }
+      ],
+      "cue": {
+        "type": "osc",
+        "device": "x32",
+        "messages": [
+          {
+            "address": "/auxin/{n:02}/mix/on",
+            "args": [
+              {
+                "int": "{state}"
+              }
+            ]
+          }
+        ]
+      },
+      "keywords": {
+        "en": [
+          "off",
+          "on",
+          "silence",
+          "mute"
+        ],
+        "de": [
+          "aus",
+          "an",
+          "stumm",
+          "Mute"
+        ]
+      }
+    },
+    {
+      "id": "fxrtn-mute",
+      "revision": 1,
+      "category": "mute",
+      "title": {
+        "en": "FX return {n}: {state:label}",
+        "de": "FX-Return {n}: {state:label}"
+      },
+      "description": {
+        "en": "Mutes or unmutes an effects return (its ON button).",
+        "de": "Schaltet einen Effekt-Return stumm oder wieder ein (ON-Taste)."
+      },
+      "params": [
+        {
+          "id": "n",
+          "label": {
+            "en": "FX return",
+            "de": "FX-Return"
+          },
+          "type": "int",
+          "min": 1,
+          "max": 8,
+          "default": 1
+        },
+        {
+          "id": "state",
+          "label": {
+            "en": "Action",
+            "de": "Aktion"
+          },
+          "type": "choice",
+          "values": [
+            {
+              "value": 0,
+              "label": {
+                "en": "Mute",
+                "de": "Stummschalten"
+              }
+            },
+            {
+              "value": 1,
+              "label": {
+                "en": "Unmute",
+                "de": "Stummschaltung aufheben"
+              }
+            }
+          ],
+          "default": 0
+        }
+      ],
+      "cue": {
+        "type": "osc",
+        "device": "x32",
+        "messages": [
+          {
+            "address": "/fxrtn/{n:02}/mix/on",
+            "args": [
+              {
+                "int": "{state}"
+              }
+            ]
+          }
+        ]
+      },
+      "keywords": {
+        "en": [
+          "off",
+          "on",
+          "silence",
+          "mute"
+        ],
+        "de": [
+          "aus",
+          "an",
+          "stumm",
+          "Mute"
+        ]
+      }
+    },
+    {
+      "id": "bus-mute",
+      "revision": 1,
+      "category": "mute",
+      "title": {
+        "en": "Bus {n}: {state:label}",
+        "de": "Bus {n}: {state:label}"
+      },
+      "description": {
+        "en": "Mutes or unmutes a mix bus (its ON button).",
+        "de": "Schaltet einen Mix-Bus stumm oder wieder ein (ON-Taste)."
+      },
+      "params": [
+        {
+          "id": "n",
+          "label": {
+            "en": "Bus",
+            "de": "Bus"
+          },
+          "type": "int",
+          "min": 1,
+          "max": 16,
+          "default": 1
+        },
+        {
+          "id": "state",
+          "label": {
+            "en": "Action",
+            "de": "Aktion"
+          },
+          "type": "choice",
+          "values": [
+            {
+              "value": 0,
+              "label": {
+                "en": "Mute",
+                "de": "Stummschalten"
+              }
+            },
+            {
+              "value": 1,
+              "label": {
+                "en": "Unmute",
+                "de": "Stummschaltung aufheben"
+              }
+            }
+          ],
+          "default": 0
+        }
+      ],
+      "cue": {
+        "type": "osc",
+        "device": "x32",
+        "messages": [
+          {
+            "address": "/bus/{n:02}/mix/on",
+            "args": [
+              {
+                "int": "{state}"
+              }
+            ]
+          }
+        ]
+      },
+      "keywords": {
+        "en": [
+          "off",
+          "on",
+          "silence",
+          "mute"
+        ],
+        "de": [
+          "aus",
+          "an",
+          "stumm",
+          "Mute"
+        ]
+      }
+    },
+    {
+      "id": "mtx-mute",
+      "revision": 1,
+      "category": "mute",
+      "title": {
+        "en": "Matrix {n}: {state:label}",
+        "de": "Matrix {n}: {state:label}"
+      },
+      "description": {
+        "en": "Mutes or unmutes a matrix (its ON button).",
+        "de": "Schaltet eine Matrix stumm oder wieder ein (ON-Taste)."
+      },
+      "params": [
+        {
+          "id": "n",
+          "label": {
+            "en": "Matrix",
+            "de": "Matrix"
+          },
+          "type": "int",
+          "min": 1,
+          "max": 6,
+          "default": 1
+        },
+        {
+          "id": "state",
+          "label": {
+            "en": "Action",
+            "de": "Aktion"
+          },
+          "type": "choice",
+          "values": [
+            {
+              "value": 0,
+              "label": {
+                "en": "Mute",
+                "de": "Stummschalten"
+              }
+            },
+            {
+              "value": 1,
+              "label": {
+                "en": "Unmute",
+                "de": "Stummschaltung aufheben"
+              }
+            }
+          ],
+          "default": 0
+        }
+      ],
+      "cue": {
+        "type": "osc",
+        "device": "x32",
+        "messages": [
+          {
+            "address": "/mtx/{n:02}/mix/on",
+            "args": [
+              {
+                "int": "{state}"
+              }
+            ]
+          }
+        ]
+      },
+      "keywords": {
+        "en": [
+          "off",
+          "on",
+          "silence",
+          "mute"
+        ],
+        "de": [
+          "aus",
+          "an",
+          "stumm",
+          "Mute"
+        ]
+      }
+    },
+    {
+      "id": "main-mute",
+      "revision": 1,
+      "category": "mute",
+      "title": {
+        "en": "Main LR: {state:label}",
+        "de": "Summe LR: {state:label}"
+      },
+      "description": {
+        "en": "Mutes or unmutes the main stereo bus.",
+        "de": "Schaltet die Stereo-Summe stumm oder wieder ein."
+      },
+      "params": [
+        {
+          "id": "state",
+          "label": {
+            "en": "Action",
+            "de": "Aktion"
+          },
+          "type": "choice",
+          "values": [
+            {
+              "value": 0,
+              "label": {
+                "en": "Mute",
+                "de": "Stummschalten"
+              }
+            },
+            {
+              "value": 1,
+              "label": {
+                "en": "Unmute",
+                "de": "Stummschaltung aufheben"
+              }
+            }
+          ],
+          "default": 0
+        }
+      ],
+      "cue": {
+        "type": "osc",
+        "device": "x32",
+        "messages": [
+          {
+            "address": "/main/st/mix/on",
+            "args": [
+              {
+                "int": "{state}"
+              }
+            ]
+          }
+        ]
+      },
+      "keywords": {
+        "en": [
+          "off",
+          "on",
+          "silence",
+          "mute"
+        ],
+        "de": [
+          "aus",
+          "an",
+          "stumm",
+          "Mute"
+        ]
+      }
+    },
+    {
+      "id": "mono-mute",
+      "revision": 1,
+      "category": "mute",
+      "title": {
+        "en": "Mono/Center: {state:label}",
+        "de": "Mono/Center: {state:label}"
+      },
+      "description": {
+        "en": "Mutes or unmutes the mono/center bus.",
+        "de": "Schaltet den Mono-/Center-Bus stumm oder wieder ein."
+      },
+      "params": [
+        {
+          "id": "state",
+          "label": {
+            "en": "Action",
+            "de": "Aktion"
+          },
+          "type": "choice",
+          "values": [
+            {
+              "value": 0,
+              "label": {
+                "en": "Mute",
+                "de": "Stummschalten"
+              }
+            },
+            {
+              "value": 1,
+              "label": {
+                "en": "Unmute",
+                "de": "Stummschaltung aufheben"
+              }
+            }
+          ],
+          "default": 0
+        }
+      ],
+      "cue": {
+        "type": "osc",
+        "device": "x32",
+        "messages": [
+          {
+            "address": "/main/m/mix/on",
+            "args": [
+              {
+                "int": "{state}"
+              }
+            ]
+          }
+        ]
+      },
+      "keywords": {
+        "en": [
+          "off",
+          "on",
+          "silence",
+          "mute"
+        ],
+        "de": [
+          "aus",
+          "an",
+          "stumm",
+          "Mute"
+        ]
+      }
+    },
+    {
+      "id": "ch-fader",
+      "revision": 1,
+      "category": "fader",
+      "title": {
+        "en": "Ch {ch} fader to {level:raw} dB",
+        "de": "Kanal {ch} Fader auf {level:raw} dB"
+      },
+      "description": {
+        "en": "Sets the fader of an input channel (−90 dB is off).",
+        "de": "Stellt den Fader für einen Eingangskanal (−90 dB ist aus)."
+      },
+      "params": [
+        {
+          "id": "ch",
+          "label": {
+            "en": "Channel",
+            "de": "Kanal"
+          },
+          "type": "int",
+          "min": 1,
+          "max": 32,
+          "default": 1
+        },
+        {
+          "id": "level",
+          "label": {
+            "en": "Level",
+            "de": "Pegel"
+          },
+          "type": "float",
+          "min": -90,
+          "max": 10,
+          "default": 0,
+          "step": 0.5,
+          "unit": "dB",
+          "map": [
+            [
+              -90,
+              0
+            ],
+            [
+              -60,
+              0.0625
+            ],
+            [
+              -30,
+              0.25
+            ],
+            [
+              -10,
+              0.5
+            ],
+            [
+              10,
+              1
+            ]
+          ]
+        }
+      ],
+      "cue": {
+        "type": "osc",
+        "device": "x32",
+        "messages": [
+          {
+            "address": "/ch/{ch:02}/mix/fader",
+            "args": [
+              {
+                "float": "{level}"
+              }
+            ]
+          }
+        ]
+      },
+      "keywords": {
+        "en": [
+          "volume",
+          "level",
+          "dB",
+          "fader"
+        ],
+        "de": [
+          "Lautstärke",
+          "Pegel",
+          "dB",
+          "Fader"
+        ]
+      }
+    },
+    {
+      "id": "auxin-fader",
+      "revision": 1,
+      "category": "fader",
+      "title": {
+        "en": "Aux in {n} fader to {level:raw} dB",
+        "de": "Aux-In {n} Fader auf {level:raw} dB"
+      },
+      "description": {
+        "en": "Sets the fader of an aux input (−90 dB is off).",
+        "de": "Stellt den Fader für einen Aux-Eingang (−90 dB ist aus)."
+      },
+      "params": [
+        {
+          "id": "n",
+          "label": {
+            "en": "Aux in",
+            "de": "Aux-In"
+          },
+          "type": "int",
+          "min": 1,
+          "max": 8,
+          "default": 1
+        },
+        {
+          "id": "level",
+          "label": {
+            "en": "Level",
+            "de": "Pegel"
+          },
+          "type": "float",
+          "min": -90,
+          "max": 10,
+          "default": 0,
+          "step": 0.5,
+          "unit": "dB",
+          "map": [
+            [
+              -90,
+              0
+            ],
+            [
+              -60,
+              0.0625
+            ],
+            [
+              -30,
+              0.25
+            ],
+            [
+              -10,
+              0.5
+            ],
+            [
+              10,
+              1
+            ]
+          ]
+        }
+      ],
+      "cue": {
+        "type": "osc",
+        "device": "x32",
+        "messages": [
+          {
+            "address": "/auxin/{n:02}/mix/fader",
+            "args": [
+              {
+                "float": "{level}"
+              }
+            ]
+          }
+        ]
+      },
+      "keywords": {
+        "en": [
+          "volume",
+          "level",
+          "dB",
+          "fader"
+        ],
+        "de": [
+          "Lautstärke",
+          "Pegel",
+          "dB",
+          "Fader"
+        ]
+      }
+    },
+    {
+      "id": "fxrtn-fader",
+      "revision": 1,
+      "category": "fader",
+      "title": {
+        "en": "FX return {n} fader to {level:raw} dB",
+        "de": "FX-Return {n} Fader auf {level:raw} dB"
+      },
+      "description": {
+        "en": "Sets the fader of an effects return (−90 dB is off).",
+        "de": "Stellt den Fader für einen Effekt-Return (−90 dB ist aus)."
+      },
+      "params": [
+        {
+          "id": "n",
+          "label": {
+            "en": "FX return",
+            "de": "FX-Return"
+          },
+          "type": "int",
+          "min": 1,
+          "max": 8,
+          "default": 1
+        },
+        {
+          "id": "level",
+          "label": {
+            "en": "Level",
+            "de": "Pegel"
+          },
+          "type": "float",
+          "min": -90,
+          "max": 10,
+          "default": 0,
+          "step": 0.5,
+          "unit": "dB",
+          "map": [
+            [
+              -90,
+              0
+            ],
+            [
+              -60,
+              0.0625
+            ],
+            [
+              -30,
+              0.25
+            ],
+            [
+              -10,
+              0.5
+            ],
+            [
+              10,
+              1
+            ]
+          ]
+        }
+      ],
+      "cue": {
+        "type": "osc",
+        "device": "x32",
+        "messages": [
+          {
+            "address": "/fxrtn/{n:02}/mix/fader",
+            "args": [
+              {
+                "float": "{level}"
+              }
+            ]
+          }
+        ]
+      },
+      "keywords": {
+        "en": [
+          "volume",
+          "level",
+          "dB",
+          "fader"
+        ],
+        "de": [
+          "Lautstärke",
+          "Pegel",
+          "dB",
+          "Fader"
+        ]
+      }
+    },
+    {
+      "id": "bus-fader",
+      "revision": 1,
+      "category": "fader",
+      "title": {
+        "en": "Bus {n} fader to {level:raw} dB",
+        "de": "Bus {n} Fader auf {level:raw} dB"
+      },
+      "description": {
+        "en": "Sets the fader of a mix bus (−90 dB is off).",
+        "de": "Stellt den Fader für einen Mix-Bus (−90 dB ist aus)."
+      },
+      "params": [
+        {
+          "id": "n",
+          "label": {
+            "en": "Bus",
+            "de": "Bus"
+          },
+          "type": "int",
+          "min": 1,
+          "max": 16,
+          "default": 1
+        },
+        {
+          "id": "level",
+          "label": {
+            "en": "Level",
+            "de": "Pegel"
+          },
+          "type": "float",
+          "min": -90,
+          "max": 10,
+          "default": 0,
+          "step": 0.5,
+          "unit": "dB",
+          "map": [
+            [
+              -90,
+              0
+            ],
+            [
+              -60,
+              0.0625
+            ],
+            [
+              -30,
+              0.25
+            ],
+            [
+              -10,
+              0.5
+            ],
+            [
+              10,
+              1
+            ]
+          ]
+        }
+      ],
+      "cue": {
+        "type": "osc",
+        "device": "x32",
+        "messages": [
+          {
+            "address": "/bus/{n:02}/mix/fader",
+            "args": [
+              {
+                "float": "{level}"
+              }
+            ]
+          }
+        ]
+      },
+      "keywords": {
+        "en": [
+          "volume",
+          "level",
+          "dB",
+          "fader"
+        ],
+        "de": [
+          "Lautstärke",
+          "Pegel",
+          "dB",
+          "Fader"
+        ]
+      }
+    },
+    {
+      "id": "mtx-fader",
+      "revision": 1,
+      "category": "fader",
+      "title": {
+        "en": "Matrix {n} fader to {level:raw} dB",
+        "de": "Matrix {n} Fader auf {level:raw} dB"
+      },
+      "description": {
+        "en": "Sets the fader of a matrix (−90 dB is off).",
+        "de": "Stellt den Fader für eine Matrix (−90 dB ist aus)."
+      },
+      "params": [
+        {
+          "id": "n",
+          "label": {
+            "en": "Matrix",
+            "de": "Matrix"
+          },
+          "type": "int",
+          "min": 1,
+          "max": 6,
+          "default": 1
+        },
+        {
+          "id": "level",
+          "label": {
+            "en": "Level",
+            "de": "Pegel"
+          },
+          "type": "float",
+          "min": -90,
+          "max": 10,
+          "default": 0,
+          "step": 0.5,
+          "unit": "dB",
+          "map": [
+            [
+              -90,
+              0
+            ],
+            [
+              -60,
+              0.0625
+            ],
+            [
+              -30,
+              0.25
+            ],
+            [
+              -10,
+              0.5
+            ],
+            [
+              10,
+              1
+            ]
+          ]
+        }
+      ],
+      "cue": {
+        "type": "osc",
+        "device": "x32",
+        "messages": [
+          {
+            "address": "/mtx/{n:02}/mix/fader",
+            "args": [
+              {
+                "float": "{level}"
+              }
+            ]
+          }
+        ]
+      },
+      "keywords": {
+        "en": [
+          "volume",
+          "level",
+          "dB",
+          "fader"
+        ],
+        "de": [
+          "Lautstärke",
+          "Pegel",
+          "dB",
+          "Fader"
+        ]
+      }
+    },
+    {
+      "id": "main-fader",
+      "revision": 1,
+      "category": "fader",
+      "title": {
+        "en": "Main LR fader to {level:raw} dB",
+        "de": "Summe LR Fader auf {level:raw} dB"
+      },
+      "description": {
+        "en": "Sets the fader of the main stereo bus (−90 dB is off).",
+        "de": "Stellt den Fader für die Stereo-Summe (−90 dB ist aus)."
+      },
+      "params": [
+        {
+          "id": "level",
+          "label": {
+            "en": "Level",
+            "de": "Pegel"
+          },
+          "type": "float",
+          "min": -90,
+          "max": 10,
+          "default": 0,
+          "step": 0.5,
+          "unit": "dB",
+          "map": [
+            [
+              -90,
+              0
+            ],
+            [
+              -60,
+              0.0625
+            ],
+            [
+              -30,
+              0.25
+            ],
+            [
+              -10,
+              0.5
+            ],
+            [
+              10,
+              1
+            ]
+          ]
+        }
+      ],
+      "cue": {
+        "type": "osc",
+        "device": "x32",
+        "messages": [
+          {
+            "address": "/main/st/mix/fader",
+            "args": [
+              {
+                "float": "{level}"
+              }
+            ]
+          }
+        ]
+      },
+      "keywords": {
+        "en": [
+          "volume",
+          "level",
+          "dB",
+          "fader"
+        ],
+        "de": [
+          "Lautstärke",
+          "Pegel",
+          "dB",
+          "Fader"
+        ]
+      }
+    },
+    {
+      "id": "mono-fader",
+      "revision": 1,
+      "category": "fader",
+      "title": {
+        "en": "Mono/Center fader to {level:raw} dB",
+        "de": "Mono/Center Fader auf {level:raw} dB"
+      },
+      "description": {
+        "en": "Sets the fader of the mono/center bus (−90 dB is off).",
+        "de": "Stellt den Fader für den Mono-/Center-Bus (−90 dB ist aus)."
+      },
+      "params": [
+        {
+          "id": "level",
+          "label": {
+            "en": "Level",
+            "de": "Pegel"
+          },
+          "type": "float",
+          "min": -90,
+          "max": 10,
+          "default": 0,
+          "step": 0.5,
+          "unit": "dB",
+          "map": [
+            [
+              -90,
+              0
+            ],
+            [
+              -60,
+              0.0625
+            ],
+            [
+              -30,
+              0.25
+            ],
+            [
+              -10,
+              0.5
+            ],
+            [
+              10,
+              1
+            ]
+          ]
+        }
+      ],
+      "cue": {
+        "type": "osc",
+        "device": "x32",
+        "messages": [
+          {
+            "address": "/main/m/mix/fader",
+            "args": [
+              {
+                "float": "{level}"
+              }
+            ]
+          }
+        ]
+      },
+      "keywords": {
+        "en": [
+          "volume",
+          "level",
+          "dB",
+          "fader"
+        ],
+        "de": [
+          "Lautstärke",
+          "Pegel",
+          "dB",
+          "Fader"
+        ]
+      }
+    },
+    {
+      "id": "ch-send-on",
+      "revision": 1,
+      "category": "send",
+      "title": {
+        "en": "Ch {ch} → bus {bus}: {onoff:label}",
+        "de": "Kanal {ch} → Bus {bus}: {onoff:label}"
+      },
+      "description": {
+        "en": "Switches a channel's send to a mix bus on or off.",
+        "de": "Schaltet den Send eines Kanals auf einen Mix-Bus ein oder aus."
+      },
+      "params": [
+        {
+          "id": "ch",
+          "label": {
+            "en": "Channel",
+            "de": "Kanal"
+          },
+          "type": "int",
+          "min": 1,
+          "max": 32,
+          "default": 1
+        },
+        {
+          "id": "bus",
+          "label": {
+            "en": "Bus",
+            "de": "Bus"
+          },
+          "type": "int",
+          "min": 1,
+          "max": 16,
+          "default": 1
+        },
+        {
+          "id": "onoff",
+          "label": {
+            "en": "Action",
+            "de": "Aktion"
+          },
+          "type": "choice",
+          "values": [
+            {
+              "value": 1,
+              "label": {
+                "en": "On",
+                "de": "Ein"
+              }
+            },
+            {
+              "value": 0,
+              "label": {
+                "en": "Off",
+                "de": "Aus"
+              }
+            }
+          ],
+          "default": 1
+        }
+      ],
+      "cue": {
+        "type": "osc",
+        "device": "x32",
+        "messages": [
+          {
+            "address": "/ch/{ch:02}/mix/{bus:02}/on",
+            "args": [
+              {
+                "int": "{onoff}"
+              }
+            ]
+          }
+        ]
+      },
+      "keywords": {
+        "en": [
+          "aux",
+          "monitor",
+          "send"
+        ],
+        "de": [
+          "Aux",
+          "Monitor",
+          "Send"
+        ]
+      }
+    },
+    {
+      "id": "ch-send-level",
+      "revision": 1,
+      "category": "send",
+      "title": {
+        "en": "Ch {ch} → bus {bus} at {level:raw} dB",
+        "de": "Kanal {ch} → Bus {bus} auf {level:raw} dB"
+      },
+      "description": {
+        "en": "Sets the level of a channel's send to a mix bus.",
+        "de": "Stellt den Pegel des Sends eines Kanals auf einen Mix-Bus."
+      },
+      "params": [
+        {
+          "id": "ch",
+          "label": {
+            "en": "Channel",
+            "de": "Kanal"
+          },
+          "type": "int",
+          "min": 1,
+          "max": 32,
+          "default": 1
+        },
+        {
+          "id": "bus",
+          "label": {
+            "en": "Bus",
+            "de": "Bus"
+          },
+          "type": "int",
+          "min": 1,
+          "max": 16,
+          "default": 1
+        },
+        {
+          "id": "level",
+          "label": {
+            "en": "Level",
+            "de": "Pegel"
+          },
+          "type": "float",
+          "min": -90,
+          "max": 10,
+          "default": 0,
+          "step": 0.5,
+          "unit": "dB",
+          "map": [
+            [
+              -90,
+              0
+            ],
+            [
+              -60,
+              0.0625
+            ],
+            [
+              -30,
+              0.25
+            ],
+            [
+              -10,
+              0.5
+            ],
+            [
+              10,
+              1
+            ]
+          ]
+        }
+      ],
+      "cue": {
+        "type": "osc",
+        "device": "x32",
+        "messages": [
+          {
+            "address": "/ch/{ch:02}/mix/{bus:02}/level",
+            "args": [
+              {
+                "float": "{level}"
+              }
+            ]
+          }
+        ]
+      },
+      "keywords": {
+        "en": [
+          "aux",
+          "monitor",
+          "send",
+          "level"
+        ],
+        "de": [
+          "Aux",
+          "Monitor",
+          "Send",
+          "Pegel"
+        ]
+      }
+    },
+    {
+      "id": "dca-mute",
+      "revision": 1,
+      "category": "dca",
+      "title": {
+        "en": "DCA {n}: {state:label}",
+        "de": "DCA {n}: {state:label}"
+      },
+      "description": {
+        "en": "Mutes or unmutes a DCA group.",
+        "de": "Schaltet eine DCA-Gruppe stumm oder wieder ein."
+      },
+      "params": [
+        {
+          "id": "n",
+          "label": {
+            "en": "DCA",
+            "de": "DCA"
+          },
+          "type": "int",
+          "min": 1,
+          "max": 8,
+          "default": 1
+        },
+        {
+          "id": "state",
+          "label": {
+            "en": "Action",
+            "de": "Aktion"
+          },
+          "type": "choice",
+          "values": [
+            {
+              "value": 0,
+              "label": {
+                "en": "Mute",
+                "de": "Stummschalten"
+              }
+            },
+            {
+              "value": 1,
+              "label": {
+                "en": "Unmute",
+                "de": "Stummschaltung aufheben"
+              }
+            }
+          ],
+          "default": 0
+        }
+      ],
+      "cue": {
+        "type": "osc",
+        "device": "x32",
+        "messages": [
+          {
+            "address": "/dca/{n}/on",
+            "args": [
+              {
+                "int": "{state}"
+              }
+            ]
+          }
+        ]
+      },
+      "keywords": {
+        "en": [
+          "off",
+          "on",
+          "silence",
+          "mute"
+        ],
+        "de": [
+          "aus",
+          "an",
+          "stumm",
+          "Mute"
+        ]
+      }
+    },
+    {
+      "id": "dca-fader",
+      "revision": 1,
+      "category": "dca",
+      "title": {
+        "en": "DCA {n} fader to {level:raw} dB",
+        "de": "DCA {n} Fader auf {level:raw} dB"
+      },
+      "description": {
+        "en": "Sets the fader of a DCA group (−90 dB is off).",
+        "de": "Stellt den Fader einer DCA-Gruppe (−90 dB ist aus)."
+      },
+      "params": [
+        {
+          "id": "n",
+          "label": {
+            "en": "DCA",
+            "de": "DCA"
+          },
+          "type": "int",
+          "min": 1,
+          "max": 8,
+          "default": 1
+        },
+        {
+          "id": "level",
+          "label": {
+            "en": "Level",
+            "de": "Pegel"
+          },
+          "type": "float",
+          "min": -90,
+          "max": 10,
+          "default": 0,
+          "step": 0.5,
+          "unit": "dB",
+          "map": [
+            [
+              -90,
+              0
+            ],
+            [
+              -60,
+              0.0625
+            ],
+            [
+              -30,
+              0.25
+            ],
+            [
+              -10,
+              0.5
+            ],
+            [
+              10,
+              1
+            ]
+          ]
+        }
+      ],
+      "cue": {
+        "type": "osc",
+        "device": "x32",
+        "messages": [
+          {
+            "address": "/dca/{n}/fader",
+            "args": [
+              {
+                "float": "{level}"
+              }
+            ]
+          }
+        ]
+      },
+      "keywords": {
+        "en": [
+          "volume",
+          "level",
+          "dB",
+          "fader"
+        ],
+        "de": [
+          "Lautstärke",
+          "Pegel",
+          "dB",
+          "Fader"
+        ]
+      }
+    },
+    {
+      "id": "mutegroup",
+      "revision": 1,
+      "category": "dca",
+      "title": {
+        "en": "Mute group {n}: {onoff:label}",
+        "de": "Mute-Gruppe {n}: {onoff:label}"
+      },
+      "description": {
+        "en": "Engages or releases a mute group; engaged mutes all its members.",
+        "de": "Schaltet eine Mute-Gruppe ein oder aus; eingeschaltet sind alle ihre Mitglieder stumm."
+      },
+      "params": [
+        {
+          "id": "n",
+          "label": {
+            "en": "Mute group",
+            "de": "Mute-Gruppe"
+          },
+          "type": "int",
+          "min": 1,
+          "max": 6,
+          "default": 1
+        },
+        {
+          "id": "onoff",
+          "label": {
+            "en": "Action",
+            "de": "Aktion"
+          },
+          "type": "choice",
+          "values": [
+            {
+              "value": 1,
+              "label": {
+                "en": "On",
+                "de": "Ein"
+              }
+            },
+            {
+              "value": 0,
+              "label": {
+                "en": "Off",
+                "de": "Aus"
+              }
+            }
+          ],
+          "default": 1
+        }
+      ],
+      "cue": {
+        "type": "osc",
+        "device": "x32",
+        "messages": [
+          {
+            "address": "/config/mute/{n}",
+            "args": [
+              {
+                "int": "{onoff}"
+              }
+            ]
+          }
+        ]
+      },
+      "keywords": {
+        "en": [
+          "off",
+          "on",
+          "silence",
+          "mute"
+        ],
+        "de": [
+          "aus",
+          "an",
+          "stumm",
+          "Mute"
+        ]
+      }
+    },
+    {
+      "id": "scene",
+      "revision": 1,
+      "category": "scene",
+      "title": {
+        "en": "Recall scene {scene:02}",
+        "de": "Szene {scene:02} laden"
+      },
+      "description": {
+        "en": "Loads a scene from the console's show (00–99).",
+        "de": "Lädt eine Szene aus der Show des Pults (00–99)."
+      },
+      "params": [
+        {
+          "id": "scene",
+          "label": {
+            "en": "Scene",
+            "de": "Szene"
+          },
+          "type": "int",
+          "min": 0,
+          "max": 99,
+          "default": 0
+        }
+      ],
+      "cue": {
+        "type": "osc",
+        "device": "x32",
+        "messages": [
+          {
+            "address": "/-action/goscene",
+            "args": [
+              {
+                "int": "{scene}"
+              }
+            ]
+          }
+        ]
+      },
+      "keywords": {
+        "en": [
+          "load",
+          "recall",
+          "snapshot"
+        ],
+        "de": [
+          "laden",
+          "abrufen",
+          "Snapshot"
+        ]
+      }
+    },
+    {
+      "id": "snippet",
+      "revision": 1,
+      "category": "scene",
+      "title": {
+        "en": "Recall snippet {snippet:02}",
+        "de": "Snippet {snippet:02} laden"
+      },
+      "description": {
+        "en": "Loads a snippet from the console's show (00–99).",
+        "de": "Lädt ein Snippet aus der Show des Pults (00–99)."
+      },
+      "params": [
+        {
+          "id": "snippet",
+          "label": {
+            "en": "Snippet",
+            "de": "Snippet"
+          },
+          "type": "int",
+          "min": 0,
+          "max": 99,
+          "default": 0
+        }
+      ],
+      "cue": {
+        "type": "osc",
+        "device": "x32",
+        "messages": [
+          {
+            "address": "/-action/gosnippet",
+            "args": [
+              {
+                "int": "{snippet}"
+              }
+            ]
+          }
+        ]
+      },
+      "keywords": {
+        "en": [
+          "load",
+          "recall"
+        ],
+        "de": [
+          "laden",
+          "abrufen"
+        ]
+      }
+    },
+    {
+      "id": "show-cue",
+      "revision": 1,
+      "category": "scene",
+      "title": {
+        "en": "Go show cue {cue}",
+        "de": "Show-Cue {cue} auslösen"
+      },
+      "description": {
+        "en": "Fires a cue of the console's show by its index; the console must have a show loaded.",
+        "de": "Löst einen Cue der Show im Pult über seinen Index aus; im Pult muss eine Show geladen sein."
+      },
+      "params": [
+        {
+          "id": "cue",
+          "label": {
+            "en": "Cue index",
+            "de": "Cue-Index"
+          },
+          "type": "int",
+          "min": 0,
+          "max": 99,
+          "default": 0
+        }
+      ],
+      "cue": {
+        "type": "osc",
+        "device": "x32",
+        "messages": [
+          {
+            "address": "/-action/gocue",
+            "args": [
+              {
+                "int": "{cue}"
+              }
+            ]
+          }
+        ]
+      },
+      "keywords": {
+        "en": [
+          "go",
+          "fire"
+        ],
+        "de": [
+          "Go",
+          "auslösen"
+        ]
+      }
+    },
+    {
+      "id": "ch-name",
+      "revision": 1,
+      "category": "misc",
+      "title": {
+        "en": "Ch {ch} name: {name}",
+        "de": "Kanal {ch} Name: {name}"
+      },
+      "description": {
+        "en": "Sets the name shown on a channel's scribble strip.",
+        "de": "Setzt den Namen, den das Scribble-Strip eines Kanals zeigt."
+      },
+      "params": [
+        {
+          "id": "ch",
+          "label": {
+            "en": "Channel",
+            "de": "Kanal"
+          },
+          "type": "int",
+          "min": 1,
+          "max": 32,
+          "default": 1
+        },
+        {
+          "id": "name",
+          "label": {
+            "en": "Name",
+            "de": "Name"
+          },
+          "type": "text",
+          "default": "",
+          "max_len": 12,
+          "required": true
+        }
+      ],
+      "cue": {
+        "type": "osc",
+        "device": "x32",
+        "messages": [
+          {
+            "address": "/ch/{ch:02}/config/name",
+            "args": [
+              {
+                "string": "{name}"
+              }
+            ]
+          }
+        ]
+      },
+      "keywords": {
+        "en": [
+          "label",
+          "scribble"
+        ],
+        "de": [
+          "Beschriftung",
+          "Scribble"
+        ]
+      }
+    },
+    {
+      "id": "talkback",
+      "revision": 1,
+      "category": "misc",
+      "title": {
+        "en": "Talkback {talk}: {onoff:label}",
+        "de": "Talkback {talk}: {onoff:label}"
+      },
+      "description": {
+        "en": "Switches talkback A or B on or off.",
+        "de": "Schaltet Talkback A oder B ein oder aus."
+      },
+      "params": [
+        {
+          "id": "talk",
+          "label": {
+            "en": "Talkback",
+            "de": "Talkback"
+          },
+          "type": "choice",
+          "values": [
+            {
+              "value": "A",
+              "label": {
+                "en": "A",
+                "de": "A"
+              }
+            },
+            {
+              "value": "B",
+              "label": {
+                "en": "B",
+                "de": "B"
+              }
+            }
+          ],
+          "default": "A"
+        },
+        {
+          "id": "onoff",
+          "label": {
+            "en": "Action",
+            "de": "Aktion"
+          },
+          "type": "choice",
+          "values": [
+            {
+              "value": 1,
+              "label": {
+                "en": "On",
+                "de": "Ein"
+              }
+            },
+            {
+              "value": 0,
+              "label": {
+                "en": "Off",
+                "de": "Aus"
+              }
+            }
+          ],
+          "default": 1
+        }
+      ],
+      "cue": {
+        "type": "osc",
+        "device": "x32",
+        "messages": [
+          {
+            "address": "/-stat/talk/{talk}",
+            "args": [
+              {
+                "int": "{onoff}"
+              }
+            ]
+          }
+        ]
+      },
+      "keywords": {
+        "en": [
+          "talk",
+          "intercom"
+        ],
+        "de": [
+          "Sprechen",
+          "Intercom"
+        ]
+      }
+    },
+    {
+      "id": "clear-solo",
+      "revision": 1,
+      "category": "misc",
+      "title": {
+        "en": "Clear solo",
+        "de": "Solo aufheben"
+      },
+      "description": {
+        "en": "Releases every solo on the console.",
+        "de": "Hebt alle Solos am Pult auf."
+      },
+      "params": [],
+      "cue": {
+        "type": "osc",
+        "device": "x32",
+        "messages": [
+          {
+            "address": "/-action/clearsolo",
+            "args": [
+              {
+                "int": 1
+              }
+            ]
+          }
+        ]
+      },
+      "keywords": {
+        "en": [
+          "solo",
+          "pfl",
+          "afl"
+        ],
+        "de": [
+          "Solo",
+          "PFL",
+          "AFL"
+        ]
+      }
+    }
+  ]
+}

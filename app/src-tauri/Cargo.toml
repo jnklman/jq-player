@@ -28,9 +28,11 @@ jq-audio = { path = "../../crates/jq-audio" }
 jq-core = { path = "../../crates/jq-core" }
 jq-engine = { path = "../../crates/jq-engine" }
 jq-i18n = { path = "../../crates/jq-i18n" }
+jq-library = { path = "../../crates/jq-library" }
 jq-media = { path = "../../crates/jq-media" }
 jq-midi = { path = "../../crates/jq-midi" }
 jq-show = { path = "../../crates/jq-show" }
+uuid = { version = "1.29.2", features = ["v4", "serde"] }
 
 
 # ASIO host on Windows, see crates/jq-audio/Cargo.toml.

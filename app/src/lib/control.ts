@@ -104,7 +104,7 @@ export type AddItem =
   | { label: string; kind: ControlKind }
   | {
       label: string;
-      kind: 'sound' | 'placeholder' | 'playlist' | 'wait' | 'group' | 'goto' | 'scene' | 'osc' | 'midi';
+      kind: 'sound' | 'placeholder' | 'playlist' | 'wait' | 'group' | 'goto' | 'scene' | 'osc' | 'midi' | 'library';
     };
 
 /** Add-menu kinds that only go into the main list, never into a group. */
@@ -163,6 +163,13 @@ export const addGroups: { label: string; items: AddItem[] }[] = [
       return t('add.external');
     },
     items: [addItem('add.osc', 'osc'), addItem('add.midi', 'midi')],
+  },
+  {
+    get label() {
+      return t('add.library_group');
+    },
+    // Opens the library dialog for the place.
+    items: [addItem('add.library', 'library')],
   },
 ];
 

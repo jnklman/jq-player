@@ -117,6 +117,8 @@ export function noticeText(n: Notice): string {
       return t('notice.settings_ignored', { error: errorText(n.error) });
     case 'link_synced':
       return t('notice.link_synced', { cue: cueName(n.cue) });
+    case 'library_device_added':
+      return t('notice.library_device_added', { name: n.name, port: n.port });
     case 'autosave_unreadable':
       return t('notice.autosave_unreadable', { error: errorText(n.error) });
     case 'autosave_not_deleted':

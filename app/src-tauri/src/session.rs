@@ -20,17 +20,18 @@ use jq_media::loudness::Loudness;
 use jq_midi::{MidiIn, MidiOut};
 use jq_show::paths::{self, FileStamp, MediaIssue, NameCheck};
 use jq_show::{
-    Advance, AdvanceAt, Chord, ControlKind, Cue, CueId, CueKind, Editor, GoToCue, GroupCue, LevelChanges,
-    LevelLimits, LoopMode, MidiCue, MidiMessage, NetDevice, OscCue, OscMessage, OthersEffect, Output,
-    PlaylistCue, PositionTo, PreviousKeyword, Repeat, SceneCue, SecondTrigger, Show, ShowError, ShowFile,
-    SoundCue, StartStopAction, Stopwatch, Targets, TimingIssue, ValueIssue, WaitCue, check_timing,
-    check_values, new_numbers,
+    Advance, AdvanceAt, Chord, ControlKind, Cue, CueId, CueKind, DeviceTemplateRef, Editor, GoToCue,
+    GroupCue, LevelChanges, LevelLimits, LoopMode, MidiCue, MidiMessage, NetDevice, OscCue, OscMessage,
+    OthersEffect, Output, ParamValue, PlaylistCue, PositionTo, PresetRef, PreviousKeyword, Repeat, SceneCue,
+    SecondTrigger, Show, ShowError, ShowFile, SoundCue, StartStopAction, Stopwatch, Targets, TimingIssue,
+    ValueIssue, WaitCue, check_timing, check_values, new_numbers,
 };
 use serde::{Deserialize, Serialize};
 
 use crate::backend::{CloseCheck, Request};
 use crate::error::{AppError, Error, Setting};
 use crate::jobs::{self, Copier, Copy, Found, Prober};
+use crate::library::{Libraries, PresetKey};
 use crate::writer::{Key, Writer};
 
 const MAX_VOICES: usize = 64;
@@ -105,6 +106,38 @@ pub enum EditOp {
     /// Replaces the show's stopwatches.
     SetStopwatches {
         stopwatches: Vec<Stopwatch>,
+    },
+    /// Adds a cue made from a library preset, `params` filled in (the rest
+    /// at their defaults). Its OSC messages go to the show's device made
+    /// from the library's device template; one is added (without an
+    /// address) where the show has none yet.
+    AddPreset {
+        library: uuid::Uuid,
+        preset: String,
+        #[serde(default)]
+        params: BTreeMap<String, ParamValue>,
+        index: Option<usize>,
+
+        /// Into this group instead of the main list.
+        group: Option<CueId>,
+    },
+    /// Takes fields of cues made from presets (`None`: all of them) from
+    /// their preset as installed now, which also updates them to its
+    /// revision.
+    ResetToPreset {
+        ids: Vec<CueId>,
+        #[serde(default)]
+        fields: Option<Vec<String>>,
+    },
+    /// Fills a preset cue in again with other parameters: the fields that
+    /// use them follow, the others stay.
+    SetPresetParams {
+        id: CueId,
+        params: BTreeMap<String, ParamValue>,
+    },
+    /// Forgets which preset cues were made from.
+    DetachPreset {
+        ids: Vec<CueId>,
     },
     AddOsc {
         index: Option<usize>,
@@ -484,6 +517,28 @@ pub struct CueInfo {
     pub repeat_blocked: bool,
     /// Other cues with the same hotkey (it starts them all).
     pub hotkey_shared: Vec<CueId>,
+    /// How a cue made from a library preset compares with it.
+    pub preset: Option<PresetState>,
+}
+
+/// A cue made from a library preset, compared with the preset as installed
+/// now. Only for resetting and updating it: the cue works the same either way.
+#[derive(Clone, Debug, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum PresetState {
+    /// The library or the preset is not installed here.
+    Missing,
+    /// The preset does not take the cue's parameters any more.
+    Broken { library: jq_library::Text, title: jq_library::Text, error: jq_library::LibraryError },
+    Linked {
+        library: jq_library::Text,
+        /// The preset's title with the cue's parameters, by language.
+        title: jq_library::Text,
+        /// Fields that differ from what the preset makes.
+        modified: Vec<String>,
+        /// The installed preset's revision, when newer than the cue's.
+        update: Option<u32>,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
@@ -688,6 +743,8 @@ pub struct Session {
     midi_out_setting: Option<String>,
     /// Cues copied or cut, as they were then; kept until the show is closed.
     clipboard: Vec<Cue>,
+    /// Cue libraries, to insert, reset and update cues from their presets.
+    libraries: Arc<Libraries>,
     /// Reads media file lengths in the background.
     prober: Prober,
     /// Copies files into the media folder in the background.
@@ -708,6 +765,8 @@ impl Session {
     /// Opens a loaded show, in show mode if `show_mode` is set. Audio
     /// problems never prevent opening: the show then runs on a silent output
     /// and the error is shown.
+    // What a session shares with the rest of the program comes in one by one.
+    #[allow(clippy::too_many_arguments)]
     pub fn open(
         mut file: ShowFile,
         show_mode: bool,
@@ -715,6 +774,7 @@ impl Session {
         peaks: Arc<PeakCache>,
         writer: Writer,
         midi_tx: Sender<Request>,
+        libraries: Arc<Libraries>,
         notices: &mut Vec<Notice>,
     ) -> Self {
         // The settings file and the autosave are read back below: what is
@@ -748,6 +808,7 @@ impl Session {
         attach_osc_out(&mut runner, notices);
         let watcher = MediaWatcher::new(settings.media_watch, WATCH_INTERVAL);
         let mut session = Self {
+            libraries,
             editor: Editor::new(file.show.clone()),
             file,
             runner,
@@ -2016,6 +2077,89 @@ impl Session {
                 }
                 self.editor.change(|s| s.stopwatches = stopwatches);
             }
+            EditOp::AddPreset { library, preset, params, index, group } => {
+                let lib = self.libraries.library(library).ok_or(AppError::LibraryNotFound)?;
+                let p = lib.preset(&preset).ok_or(AppError::PresetNotFound)?;
+                let lang = jq_i18n::language().code();
+                let mut cue = jq_library::instantiate(&lib, p, &params, lang)
+                    .map_err(|error| AppError::Preset { error })?;
+                let added = preset_devices(self.editor.show(), &lib, &mut cue, true);
+                let to_add = added.clone();
+                self.place_with(group, index, vec![cue], move |s| s.devices.extend(to_add))?;
+                notices.extend(
+                    added.into_iter().map(|d| Notice::LibraryDeviceAdded { name: d.name, port: d.port }),
+                );
+                self.libraries.used(PresetKey { library, preset });
+            }
+            EditOp::ResetToPreset { ids, fields } => {
+                let show = self.editor.show();
+                let mut devices: Vec<NetDevice> = Vec::new();
+                let mut cues = Vec::new();
+                for id in &ids {
+                    let cue = show.cue(*id).ok_or(ShowError::CueNotFound)?;
+                    let reference = cue.preset.as_ref().ok_or(AppError::NotFromPreset)?;
+                    let mut with = show.clone();
+                    with.devices.extend(devices.iter().cloned());
+                    let (mut made, added) = self.made_from(&with, reference, None, true)?;
+                    made.id = cue.id;
+                    devices.extend(added);
+                    let reset = jq_library::apply(cue, &made, fields.as_deref())
+                        .map_err(|error| AppError::Preset { error })?;
+                    cues.push(reset);
+                }
+                let added = devices.clone();
+                self.editor.change(move |s| {
+                    s.devices.extend(devices);
+                    for cue in cues {
+                        if let Some(c) = s.cue_mut(cue.id) {
+                            let link = c.link;
+                            *c = cue;
+                            c.link = link;
+                        }
+                    }
+                });
+                notices.extend(
+                    added.into_iter().map(|d| Notice::LibraryDeviceAdded { name: d.name, port: d.port }),
+                );
+            }
+            EditOp::SetPresetParams { id, params } => {
+                let show = self.editor.show();
+                let cue = show.cue(id).ok_or(ShowError::CueNotFound)?;
+                let reference = cue.preset.as_ref().ok_or(AppError::NotFromPreset)?;
+                let lib = self.libraries.library(reference.library).ok_or(AppError::LibraryNotFound)?;
+                let p = lib.preset(&reference.preset).ok_or(AppError::PresetNotFound)?;
+                let (made, added) = self.made_from(show, reference, Some(&params), true)?;
+                let mut changed = jq_library::apply(cue, &made, Some(&jq_library::param_fields(p)))
+                    .map_err(|error| AppError::Preset { error })?;
+                // Only the parameters changed: an update still waits for the operator.
+                if let Some(r) = changed.preset.as_mut() {
+                    r.revision = reference.revision;
+                }
+                let to_add = added.clone();
+                self.editor.change(move |s| {
+                    s.devices.extend(to_add);
+                    if let Some(c) = s.cue_mut(id) {
+                        let link = c.link;
+                        *c = changed;
+                        c.link = link;
+                    }
+                });
+                notices.extend(
+                    added.into_iter().map(|d| Notice::LibraryDeviceAdded { name: d.name, port: d.port }),
+                );
+            }
+            EditOp::DetachPreset { ids } => {
+                if ids.iter().any(|id| self.editor.show().cue(*id).is_none()) {
+                    return Err(ShowError::CueNotFound.into());
+                }
+                self.editor.change(|s| {
+                    for id in &ids {
+                        if let Some(c) = s.cue_mut(*id) {
+                            c.preset = None;
+                        }
+                    }
+                });
+            }
             EditOp::AddOsc { index, group } => {
                 let device = self.editor.show().devices.first().map(|d| d.id.clone());
                 let mut cue = Cue::new(CueKind::Osc(OscCue {
@@ -2326,7 +2470,50 @@ impl Session {
             (info.target_missing, info.repeat_blocked, info.problems, info.hotkey_shared) =
                 (target_missing, repeat_blocked, problems, hotkey_shared);
         }
+        if let Some(reference) = &cue.preset {
+            info.get_or_insert_default().preset = Some(self.preset_state(cue, reference));
+        }
         info
+    }
+
+    fn preset_state(&self, cue: &Cue, reference: &PresetRef) -> PresetState {
+        let Some(lib) = self.libraries.library(reference.library) else {
+            return PresetState::Missing;
+        };
+        let Some(preset) = lib.preset(&reference.preset) else {
+            return PresetState::Missing;
+        };
+        let (library, title) = (lib.name.clone(), jq_library::title_text(preset, &reference.params));
+        match self.made_from(self.editor.show(), reference, None, false) {
+            Ok((made, _)) => PresetState::Linked {
+                library,
+                title,
+                modified: jq_library::diff(cue, &made, &jq_library::titles(preset, &reference.params)),
+                update: (preset.revision > reference.revision).then_some(preset.revision),
+            },
+            Err(Error::App(AppError::Preset { error })) => PresetState::Broken { library, title, error },
+            Err(_) => PresetState::Missing,
+        }
+    }
+
+    /// The cue `reference`'s preset makes now (with `params`, default: the
+    /// ones it was made with), its OSC devices those of `show` made from the
+    /// library's templates. With `add`, devices the show lacks come back to
+    /// be added; without, such a device stays unset.
+    fn made_from(
+        &self,
+        show: &Show,
+        reference: &PresetRef,
+        params: Option<&BTreeMap<String, ParamValue>>,
+        add: bool,
+    ) -> Result<(Cue, Vec<NetDevice>), Error> {
+        let lib = self.libraries.library(reference.library).ok_or(AppError::LibraryNotFound)?;
+        let preset = lib.preset(&reference.preset).ok_or(AppError::PresetNotFound)?;
+        let lang = jq_i18n::language().code();
+        let mut made = jq_library::instantiate(&lib, preset, params.unwrap_or(&reference.params), lang)
+            .map_err(|error| AppError::Preset { error })?;
+        let added = preset_devices(show, &lib, &mut made, add);
+        Ok((made, added))
     }
 
     fn problems(&self, cue: &Cue) -> Vec<Problem> {
@@ -3257,6 +3444,41 @@ fn trigger_problems(show: &Show, settings: &LocalSettings, cue: &Cue) -> Vec<Cue
 /// A go-to cue's target was deleted or is no longer at the top level, a
 /// control cue has no target left (or a stopwatch cue's stopwatch is gone),
 /// or a loop exit cue waits for the exit of a cue no longer in its target.
+/// Points the OSC cues in `cue` (made from a preset of `lib`, their devices
+/// still the library's template ids) at the show's devices made from those
+/// templates. With `add`, a device is made for each template the show has
+/// none for yet, without an address, and returned to be added.
+fn preset_devices(show: &Show, lib: &jq_library::Library, cue: &mut Cue, add: bool) -> Vec<NetDevice> {
+    let mut added: Vec<NetDevice> = Vec::new();
+    let mut map = HashMap::new();
+    for template in jq_library::device_templates(cue) {
+        let reference = DeviceTemplateRef { library: lib.id, device: template.clone() };
+        let existing = show.devices.iter().find(|d| d.template.as_ref() == Some(&reference));
+        let id = match (existing, lib.device(&template)) {
+            (Some(d), _) => Some(d.id.clone()),
+            (None, Some(t)) if add => {
+                let taken = |id: &str| show.devices.iter().chain(&added).any(|d| d.id == id);
+                let id = (1..)
+                    .map(|n| if n == 1 { template.clone() } else { format!("{template}-{n}") })
+                    .find(|id| !taken(id))
+                    .expect("a free id");
+                added.push(NetDevice {
+                    id: id.clone(),
+                    name: t.name.get(jq_i18n::language().code()).to_string(),
+                    host: String::new(),
+                    port: t.port,
+                    template: Some(reference),
+                });
+                Some(id)
+            }
+            _ => None,
+        };
+        map.insert(template, id);
+    }
+    jq_library::map_devices(cue, &|t| map.get(t).cloned().flatten());
+    added
+}
+
 fn target_missing(show: &Show, cue: &Cue) -> bool {
     if let Some(Targets::Cues(ids)) = cue.kind.targets()
         && (ids.is_empty() || ids.iter().any(|id| show.cue(*id).is_none()))
@@ -3379,12 +3601,27 @@ mod tests {
 
     /// A new show in `dir` with the settings file next to it.
     fn open_session(dir: &Path, writer: &Writer) -> Session {
+        open_session_with(dir, writer, Libraries::bundled())
+    }
+
+    /// [`open_session`] with these cue libraries.
+    fn open_session_with(dir: &Path, writer: &Writer, libraries: Libraries) -> Session {
         let file = ShowFile::load(&dir.join("Show.jqshow"))
             .or_else(|_| ShowFile::create(dir, "Show", false))
             .unwrap();
         let (midi_tx, _) = std::sync::mpsc::channel();
         let peaks = Arc::new(PeakCache::disabled());
-        Session::open(file, false, dir.join("settings.json"), peaks, writer.clone(), midi_tx, &mut Vec::new())
+        let libraries = Arc::new(libraries);
+        Session::open(
+            file,
+            false,
+            dir.join("settings.json"),
+            peaks,
+            writer.clone(),
+            midi_tx,
+            libraries,
+            &mut Vec::new(),
+        )
     }
 
     /// Makes an edit and lets the autosave queue it.
@@ -4331,6 +4568,7 @@ mod tests {
             name: "Licht".into(),
             host: host.into(),
             port,
+            template: None,
         };
         for bad in [
             vec![device("l", "", 8000)],
@@ -4503,5 +4741,147 @@ mod tests {
         assert_eq!(without_verbatim(r"\\?\C:\Shows\COM1"), None);
         assert_eq!(without_verbatim(r"\\?\C:\Shows\Ende. "), None, "trailing space");
         assert_eq!(without_verbatim(r"\\?\C:\Shows\Console.wav").as_deref(), Some(r"C:\Shows\Console.wav"));
+    }
+
+    const X32: &str = "ddad2594-fb4e-4094-9c37-e7f283ecf29f";
+
+    fn add_preset(
+        session: &mut Session,
+        preset: &str,
+        params: &[(&str, f64)],
+        notices: &mut Vec<Notice>,
+    ) -> CueId {
+        let params = params.iter().map(|(k, v)| (k.to_string(), ParamValue::Number(*v))).collect();
+        let op = EditOp::AddPreset {
+            library: X32.parse().unwrap(),
+            preset: preset.into(),
+            params,
+            index: None,
+            group: None,
+        };
+        session.edit(op, notices).unwrap();
+        session.editor.show().cues.last().unwrap().id
+    }
+
+    fn osc_of(session: &Session, id: CueId) -> OscCue {
+        match &session.editor.show().cue(id).unwrap().kind {
+            CueKind::Osc(osc) => osc.clone(),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    fn preset_state(session: &Session, id: CueId) -> PresetState {
+        session.cue_info(session.editor.show().cue(id).unwrap()).unwrap().preset.unwrap()
+    }
+
+    #[test]
+    fn presets_add_cues_and_their_device_in_one_step() {
+        let dir = tempdir("preset-add");
+        let (writer, _) = Writer::spawn();
+        let mut session = open_session(&dir, &writer);
+        let mut notices = Vec::new();
+        let a = add_preset(&mut session, "ch-mute", &[("ch", 5.0)], &mut notices);
+        let cue = session.editor.show().cue(a).unwrap();
+        assert_eq!((cue.number.as_str(), cue.title.as_str()), ("1", "Ch 5: Mute"));
+        assert_eq!(osc_of(&session, a).messages[0].address, "/ch/05/mix/on");
+        let devices = &session.editor.show().devices;
+        assert_eq!(devices.len(), 1);
+        assert_eq!((devices[0].id.as_str(), devices[0].host.as_str(), devices[0].port), ("x32", "", 10023));
+        assert_eq!(osc_of(&session, a).device.as_deref(), Some("x32"));
+        assert!(matches!(&notices[..], [Notice::LibraryDeviceAdded { port: 10023, .. }]));
+        // The next one goes to the same device.
+        notices.clear();
+        let b = add_preset(&mut session, "scene", &[("scene", 3.0)], &mut notices);
+        assert_eq!(osc_of(&session, b).device.as_deref(), Some("x32"));
+        assert_eq!(session.editor.show().devices.len(), 1);
+        assert!(notices.is_empty());
+        assert!(
+            matches!(preset_state(&session, b), PresetState::Linked { ref modified, update: None, .. } if modified.is_empty())
+        );
+        // Undo takes the cue and the device it brought.
+        edit(&mut session, EditOp::Undo).unwrap();
+        edit(&mut session, EditOp::Undo).unwrap();
+        assert!(session.editor.show().cues.is_empty() && session.editor.show().devices.is_empty());
+        // Out-of-range parameters change nothing.
+        let op = EditOp::AddPreset {
+            library: X32.parse().unwrap(),
+            preset: "ch-mute".into(),
+            params: BTreeMap::from([("ch".to_string(), ParamValue::Number(33.0))]),
+            index: None,
+            group: None,
+        };
+        assert!(matches!(edit(&mut session, op), Err(Error::App(AppError::Preset { .. }))));
+        assert!(session.editor.show().cues.is_empty());
+    }
+
+    #[test]
+    fn preset_cues_reset_per_field_or_whole_and_take_new_parameters() {
+        let dir = tempdir("preset-reset");
+        let (writer, _) = Writer::spawn();
+        let mut session = open_session(&dir, &writer);
+        let id = add_preset(&mut session, "ch-fader", &[("ch", 2.0), ("level", -10.0)], &mut Vec::new());
+        let mut cue = session.editor.show().cue(id).unwrap().clone();
+        cue.notes = "check".into();
+        cue.pre_wait = 2.0;
+        if let CueKind::Osc(osc) = &mut cue.kind {
+            osc.messages[0].address = "/ch/03/mix/fader".into();
+        }
+        edit(&mut session, EditOp::UpdateCue { cue: Box::new(cue) }).unwrap();
+        let PresetState::Linked { modified, .. } = preset_state(&session, id) else { panic!() };
+        assert_eq!(modified, vec!["messages", "notes", "pre_wait"]);
+        edit(&mut session, EditOp::ResetToPreset { ids: vec![id], fields: Some(vec!["messages".into()]) })
+            .unwrap();
+        assert_eq!(osc_of(&session, id).messages[0].address, "/ch/02/mix/fader");
+        assert_eq!(session.editor.show().cue(id).unwrap().notes, "check");
+        edit(&mut session, EditOp::ResetToPreset { ids: vec![id], fields: None }).unwrap();
+        let cue = session.editor.show().cue(id).unwrap();
+        assert_eq!((cue.notes.as_str(), cue.pre_wait, cue.number.as_str()), ("", 0.0, "1"));
+        // Other parameters: the address and title follow, the rest stays.
+        let mut with_notes = cue.clone();
+        with_notes.notes = "kept".into();
+        edit(&mut session, EditOp::UpdateCue { cue: Box::new(with_notes) }).unwrap();
+        let params = BTreeMap::from([
+            ("ch".to_string(), ParamValue::Number(7.0)),
+            ("level".into(), ParamValue::Number(0.0)),
+        ]);
+        edit(&mut session, EditOp::SetPresetParams { id, params }).unwrap();
+        let cue = session.editor.show().cue(id).unwrap();
+        assert_eq!((cue.title.as_str(), cue.notes.as_str()), ("Ch 7 fader to 0 dB", "kept"));
+        assert_eq!(osc_of(&session, id).messages[0].args, vec![jq_show::OscArg::Float(0.75)]);
+        assert_eq!(cue.preset.as_ref().unwrap().params["ch"], ParamValue::Number(7.0));
+        // Detached, it is a plain cue.
+        edit(&mut session, EditOp::DetachPreset { ids: vec![id] }).unwrap();
+        assert!(session.editor.show().cue(id).unwrap().preset.is_none());
+        assert!(matches!(
+            edit(&mut session, EditOp::ResetToPreset { ids: vec![id], fields: None }),
+            Err(Error::App(AppError::NotFromPreset))
+        ));
+    }
+
+    #[test]
+    fn a_show_works_without_the_library_its_cues_came_from() {
+        let dir = tempdir("preset-missing");
+        let (writer, _) = Writer::spawn();
+        let mut session = open_session(&dir, &writer);
+        let id = add_preset(&mut session, "dca-mute", &[("n", 4.0)], &mut Vec::new());
+        let made = session.editor.show().clone();
+        session.save().unwrap();
+        drop(session);
+        // Another machine: no libraries at all.
+        let mut elsewhere = open_session_with(&dir, &writer, Libraries::none());
+        let show = elsewhere.editor.show();
+        assert_eq!(show.cues, made.cues, "the cue is all in the show file");
+        assert_eq!(show.devices, made.devices);
+        assert_eq!(osc_of(&elsewhere, id).messages[0].address, "/dca/4/on");
+        assert!(matches!(preset_state(&elsewhere, id), PresetState::Missing));
+        // It edits like any cue; only resetting needs the library.
+        let mut cue = elsewhere.editor.show().cue(id).unwrap().clone();
+        cue.title = "Band off".into();
+        edit(&mut elsewhere, EditOp::UpdateCue { cue: Box::new(cue) }).unwrap();
+        assert!(matches!(
+            edit(&mut elsewhere, EditOp::ResetToPreset { ids: vec![id], fields: None }),
+            Err(Error::App(AppError::LibraryNotFound))
+        ));
+        assert_eq!(elsewhere.editor.show().cue(id).unwrap().preset, made.cues[0].preset);
     }
 }

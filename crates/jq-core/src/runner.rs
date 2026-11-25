@@ -2976,6 +2976,12 @@ impl Runner {
     /// Sends all messages of an OSC cue; stops at the first failure.
     fn send_osc(&self, cue: &jq_show::OscCue) -> Result<(), Detail> {
         let device = cue.device.as_deref().ok_or_else(|| detail!("runner_no_osc_device"))?;
+        if !self.settings.osc_hosts.contains_key(device)
+            && let Some(d) = self.show.devices.iter().find(|d| d.id == device && d.host.trim().is_empty())
+        {
+            // Added by a library preset; the operator has yet to set it.
+            return Err(detail!("runner_osc_no_address", device = d.name));
+        }
         let target = osc::device_target(&self.show, &self.settings, device)
             .ok_or_else(|| detail!("runner_osc_device_missing", device = device))?;
         let out = self.osc_out.as_ref().ok_or_else(|| detail!("runner_osc_unavailable"))?;

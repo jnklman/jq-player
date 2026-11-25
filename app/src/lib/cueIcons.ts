@@ -5,6 +5,7 @@ import type { Component } from 'svelte';
 import ArrowCounterClockwise from '~icons/ph/arrow-counter-clockwise-bold';
 import ArrowElbowDownRight from '~icons/ph/arrow-elbow-down-right-bold';
 import ArrowsLeftRight from '~icons/ph/arrows-left-right-bold';
+import Books from '~icons/ph/books-bold';
 import Broadcast from '~icons/ph/broadcast-bold';
 import FileDashed from '~icons/ph/file-dashed-bold';
 import FilmSlate from '~icons/ph/film-slate-bold';
@@ -47,5 +48,12 @@ export const cueIcons: Record<Cue['type'], Component> = {
 /** Placeholders: sound cues without a file. */
 export const placeholderIcon = FileDashed;
 
+/** Cue libraries (the add menu's "Library…"). */
+export const libraryIcon = Books;
+
 /** By the add menu's kinds. */
-export const addIcons: Record<AddItem['kind'], Component> = { ...cueIcons, placeholder: placeholderIcon };
+export const addIcons: Record<AddItem['kind'], Component> = {
+  ...cueIcons,
+  placeholder: placeholderIcon,
+  library: libraryIcon,
+};

@@ -493,8 +493,15 @@ mod tests {
             name: "Licht".into(),
             host: "10.0.0.5".into(),
             port: 8000,
+            template: None,
         });
-        show.devices.push(NetDevice { id: "v6".into(), name: "V6".into(), host: "::1".into(), port: 9000 });
+        show.devices.push(NetDevice {
+            id: "v6".into(),
+            name: "V6".into(),
+            host: "::1".into(),
+            port: 9000,
+            template: None,
+        });
         let mut settings = LocalSettings::default();
         assert_eq!(device_target(&show, &settings, "lx").as_deref(), Some("10.0.0.5:8000"));
         assert_eq!(device_target(&show, &settings, "v6").as_deref(), Some("[::1]:9000"));

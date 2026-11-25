@@ -1,11 +1,13 @@
 import { screen } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from 'vitest';
 
+import x32Text from '../../../src-tauri/libraries/x32.jqlibrary?raw';
 import type { Cue, EditOp } from '../../lib/api';
 import { inspectorView } from '../../lib/inspector.svelte';
+import { libraries } from '../../lib/library.svelte';
 import { select, selectAll, ui } from '../../lib/store.svelte';
 import { backend } from '../../test/backend';
-import { chord, control, goto, group, playlist, runtime, scene, sound, view, wait } from '../../test/fixtures';
+import { chord, control, goto, group, info, playlist, runtime, scene, sound, view, wait } from '../../test/fixtures';
 import { renderUi } from '../../test/render';
 import { loadShow, settle } from '../../test/store';
 import Inspector from './Inspector.svelte';
@@ -63,7 +65,7 @@ function showView(extra: Parameters<typeof view>[1] = {}) {
   const v = view(all(), {
     ...extra,
     show: {
-      devices: [{ id: 'd', name: 'Desk', host: '10.0.0.2', port: 53000 }],
+      devices: [{ id: 'd', name: 'Desk', host: '10.0.0.2', port: 53000, template: null }],
       stopwatches: [{ id: 'sw', name: 'Show', countdown: 60 }],
       ...extra.show,
     },
@@ -87,6 +89,66 @@ afterEach(() => {
 });
 
 describe('Inspector', () => {
+  it('compares a cue made from a preset with it, and resets, updates and detaches it', async () => {
+    const x32 = JSON.parse(x32Text) as { id: string };
+    backend.on('library_presets', () => ({ [x32.id]: x32 }));
+    libraries.loaded = {};
+    const fromPreset = {
+      ...osc,
+      id: 'x',
+      title: 'Ch 2: Mute',
+      preset: { library: x32.id, preset: 'ch-mute', revision: 1, params: { ch: 2, state: 0 } },
+    } as Cue;
+    const v = showView();
+    v.show.cues.push(fromPreset);
+    v.cue_info.x = info({
+      preset: {
+        status: 'linked',
+        library: { en: 'Behringer X32 / Midas M32' },
+        title: { en: 'Ch 2: Mute' },
+        modified: ['messages', 'notes'],
+        update: 2,
+      },
+    });
+    await loadShow(v, runtime());
+    select('x');
+    const { user } = await renderUi(Inspector);
+    await settle(5);
+    await user.click(screen.getByText('From preset:'));
+    await settle();
+    expect(screen.getByText(/revision 2 available/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Reset “Messages” to the preset' }));
+    await settle();
+    expect(backend.edits.at(-1)).toEqual({ op: 'reset_to_preset', ids: ['x'], fields: ['messages'] });
+    await user.click(screen.getByRole('button', { name: 'Update to revision 2' }));
+    await settle();
+    expect(backend.edits.at(-1)).toEqual({ op: 'reset_to_preset', ids: ['x'], fields: null });
+    // Other parameters: the channel field is the preset's.
+    const channel = screen.getByRole('spinbutton', { name: 'Channel' });
+    await user.clear(channel);
+    await user.type(channel, '7');
+    await user.tab();
+    await settle();
+    await user.click(screen.getByRole('button', { name: 'Apply parameters' }));
+    await settle();
+    expect(backend.edits.at(-1)).toEqual({ op: 'set_preset_params', id: 'x', params: { ch: 7, state: 0 } });
+    await user.click(screen.getByRole('button', { name: 'Detach' }));
+    await settle();
+    expect(backend.edits.at(-1)).toEqual({ op: 'detach_preset', ids: ['x'] });
+  });
+
+  it('says so when the library of a preset cue is not installed', async () => {
+    const v = showView();
+    v.show.cues.push({ ...osc, id: 'y', preset: { library: 'gone', preset: 'p', revision: 1 } } as Cue);
+    v.cue_info.y = info({ preset: { status: 'missing' } });
+    backend.on('library_presets', () => ({}));
+    await loadShow(v, runtime());
+    select('y');
+    await renderUi(Inspector);
+    await settle(5);
+    expect(screen.getByText(/library not installed/)).toBeInTheDocument();
+  });
+
   it('asks for a cue without a selection', async () => {
     await loadShow(showView());
     await renderUi(Inspector);

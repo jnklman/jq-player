@@ -187,6 +187,12 @@ pub enum Notice {
     LinkSynced {
         cue: CueName,
     },
+    /// A cue from a library preset needed a network device the show did
+    /// not have; it was added without an address, which the operator sets.
+    LibraryDeviceAdded {
+        name: String,
+        port: u16,
+    },
     AutosaveUnreadable {
         error: Detail,
     },

@@ -121,6 +121,10 @@ export const ui = $state({
   groupOpen: null as CueId | null,
   /** Sound cue whose positions are being edited in the waveform dialog. */
   waveformOpen: null as CueId | null,
+  /** The library dialog is open, to add a cue at this place. */
+  libraryOpen: null as { index: number; group?: CueId } | null,
+  /** A library file shown to be installed (opened from outside or picked in the settings). */
+  libraryImport: null as string | null,
   /** A show is being picked or loaded; opening another one waits. */
   openingShow: false,
   /** The first `getShow` has answered. Before, `view` is null also when a show

@@ -59,6 +59,13 @@
         "description": "jQ-Player-Show",
         "role": "Editor",
         "mimeType": "application/x-jqplayer-show"
+      },
+      {
+        "ext": ["jqlibrary"],
+        "name": "jQ-Library",
+        "description": "jQ-Player-Cue-Library",
+        "role": "Viewer",
+        "mimeType": "application/x-jqplayer-library"
       }
     ],
     "linux": {

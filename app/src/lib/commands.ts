@@ -3,7 +3,16 @@
 // (selection afterwards included). Every call reports a failure as a notice.
 
 import { cueAfter, firstAdded } from './added';
-import { api, type Cue, type CueId, type EditOp, type GroupCue, type LevelLimits, type ShowView } from './api';
+import {
+  api,
+  type Cue,
+  type CueId,
+  type EditOp,
+  type GroupCue,
+  type LevelLimits,
+  type ParamValue,
+  type ShowView,
+} from './api';
 import type { AddItem } from './control';
 import { cueLabel, isPlaceholder } from './cue';
 import { fmtDb } from './format';
@@ -258,6 +267,11 @@ export async function addCue(
   place: Place = placeAfterSelection(),
   files?: string[],
 ): Promise<CueId | undefined> {
+  if (item.kind === 'library') {
+    // The dialog adds the cue (`addPreset`).
+    openLibrary(place);
+    return undefined;
+  }
   const op = await addOp(item, place, files);
   if (!op) return undefined;
   // Taken after the file picker, which can take long: the show may have changed meanwhile.
@@ -278,6 +292,8 @@ export async function addCueAndSelect(item: AddItem, place: Place = placeAfterSe
 
 async function addOp(item: AddItem, { index, group }: Place, files?: string[]): Promise<EditOp | null> {
   switch (item.kind) {
+    case 'library':
+      return null;
     case 'sound':
     case 'playlist': {
       const picked = ui.view && (await (files ? importAudio(ui.view, files) : pickAudio(ui.view)));
@@ -299,6 +315,47 @@ async function addOp(item: AddItem, { index, group }: Place, files?: string[]): 
       return { op: 'add_control', kind: item.kind, index, targets, group };
     }
   }
+}
+
+// --- Cue libraries
+
+/** Opens the library dialog to add a cue at `place` (default: after the selection). */
+export function openLibrary(place: Place = placeAfterSelection()) {
+  if (ui.view) ui.libraryOpen = place;
+}
+
+/** Adds a cue from a library preset at `place`, selects it and scrolls it into view; false if that failed. */
+export async function addPreset(
+  library: string,
+  preset: string,
+  params: Record<string, ParamValue>,
+  place: Place = placeAfterSelection(),
+): Promise<boolean> {
+  const listOf = (list: Cue[]) => (place.group ? findGroup(list, place.group)?.cues : list) ?? [];
+  const before = listOf(cues());
+  const view = await edit({ op: 'add_preset', library, preset, params, index: place.index, group: place.group });
+  if (!view) return false;
+  const id = firstAdded(before, listOf(view.show.cues));
+  if (id) {
+    select(id);
+    void revealCue(id, 'smooth');
+  }
+  return true;
+}
+
+/** Takes the listed fields (all: `null`) of cues made from presets from their preset as installed now. */
+export function resetToPreset(ids: CueId[], fields: string[] | null = null) {
+  return edit({ op: 'reset_to_preset', ids, fields });
+}
+
+/** Fills a preset cue in again with other parameters. */
+export function setPresetParams(id: CueId, params: Record<string, ParamValue>) {
+  return edit({ op: 'set_preset_params', id, params });
+}
+
+/** Forgets which preset the cues came from. */
+export function detachPreset(ids: CueId[]) {
+  return edit({ op: 'detach_preset', ids });
 }
 
 /** Adds a sound cue for each dropped audio file at `place` and selects the first. Other files are left out,

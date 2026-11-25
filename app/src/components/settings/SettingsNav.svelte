@@ -2,6 +2,7 @@
   import type { Component } from 'svelte';
 
   import ArrowsSplit from '~icons/ph/arrows-split';
+  import Books from '~icons/ph/books';
   import Broadcast from '~icons/ph/broadcast';
   import CursorClick from '~icons/ph/cursor-click';
   import Keyboard from '~icons/ph/keyboard';
@@ -38,6 +39,7 @@
     keys: Keyboard,
     midi: PianoKeys,
     osc: Broadcast,
+    library: Books,
     ui: CursorClick,
     media: Waveform,
   };

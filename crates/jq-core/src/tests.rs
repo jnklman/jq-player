@@ -1494,6 +1494,7 @@ fn osc_cue_sends_to_its_device_and_continues() {
         name: "Licht".into(),
         host: "10.0.0.5".into(),
         port: 8000,
+        template: None,
     });
     rig.runner.set_show(show);
     let recorder = OscRecorder::default();

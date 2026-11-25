@@ -10,6 +10,7 @@
   import { attemptChange, notify, ui } from '../../lib/store.svelte';
   import EditDialog from '../EditDialog.svelte';
   import DeviceTab from './DeviceTab.svelte';
+  import LibraryTab from './LibraryTab.svelte';
   import MediaTab from './MediaTab.svelte';
   import MidiTab from './MidiTab.svelte';
   import OscTab from './OscTab.svelte';
@@ -114,6 +115,7 @@
       <ShortcutsTab bind:draft {openMidiPort} />
       <MidiTab bind:draft />
       <OscTab bind:draft />
+      <LibraryTab />
       <UiTab bind:draft />
       <MediaTab bind:draft />
       {#if view.searching && !view.found()}

@@ -21,7 +21,10 @@
   const dirty = $derived(JSON.stringify(devices) !== initial);
   // An emptied number field binds to null.
   const valid = $derived(
-    devices.every((device) => Number.isInteger(device.port) && device.port >= 1 && device.port <= 65535),
+    devices.every(
+      (device) =>
+        device.host.trim() !== '' && Number.isInteger(device.port) && device.port >= 1 && device.port <= 65535,
+    ),
   );
 
   function add() {
@@ -30,6 +33,7 @@
       name: t('devices.default_name'),
       host: '192.168.1.20',
       port: 8000,
+      template: null,
     });
   }
 </script>

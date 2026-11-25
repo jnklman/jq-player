@@ -7,6 +7,7 @@ mod error;
 mod jobs;
 mod key_labels;
 mod language;
+mod library;
 mod media;
 mod panel_windows;
 pub mod paths;
@@ -40,6 +41,10 @@ const WINDOW_STATE: StateFlags =
 /// second start); the UI asks first, like for `open_show`.
 const EVENT_OPEN_REQUESTED: &str = "open_requested";
 
+/// A cue library file opened from outside (file manager, second start); the
+/// UI shows what it holds and offers to install it.
+const EVENT_LIBRARY_REQUESTED: &str = "library_requested";
+
 /// A show opened at startup that runs this long did not crash the app.
 const STARTUP_GRACE: Duration = Duration::from_secs(5);
 
@@ -55,6 +60,9 @@ struct Backend(Mutex<Sender<Request>>);
 
 /// The last show, if the start screen is to offer opening it.
 struct StartupOffer(Mutex<Option<PathBuf>>);
+
+/// A library file given on the command line, until the UI asks for it.
+struct StartupLibrary(Mutex<Option<PathBuf>>);
 
 impl Backend {
     fn send(&self, request: Request) -> Result<(), Error> {
@@ -98,6 +106,12 @@ fn startup_open_failed(
         offer.get_or_insert(path);
     }
     let _ = app.emit_to(panel_windows::MAIN, backend::EVENT_NOTICE, notice.sent());
+}
+
+/// A library file the program was started with; only the first call gets it.
+#[tauri::command]
+fn startup_library(offer: State<'_, StartupLibrary>) -> Option<PathBuf> {
+    offer.0.lock().ok()?.take()
 }
 
 /// The last show the start screen offers to open; only the first call gets
@@ -382,9 +396,18 @@ async fn audio_devices(host: Option<String>) -> Result<AudioDevices, Error> {
 /// The show file among command-line arguments (without the program name),
 /// resolved against the folder the program was started in.
 fn show_arg(args: impl IntoIterator<Item = String>, cwd: &Path) -> Option<PathBuf> {
+    arg_with(args, cwd, jq_show::SHOW_FILE_EXTENSION)
+}
+
+/// The same for a cue library file.
+fn library_arg(args: impl IntoIterator<Item = String>, cwd: &Path) -> Option<PathBuf> {
+    arg_with(args, cwd, jq_library::EXTENSION)
+}
+
+fn arg_with(args: impl IntoIterator<Item = String>, cwd: &Path, extension: &str) -> Option<PathBuf> {
     args.into_iter()
         .map(PathBuf::from)
-        .find(|path| path.extension().is_some_and(|ext| ext == jq_show::SHOW_FILE_EXTENSION))
+        .find(|path| path.extension().is_some_and(|ext| ext == extension))
         .map(|path| cwd.join(path))
 }
 
@@ -404,6 +427,9 @@ fn window_state() -> tauri::plugin::TauriPlugin<tauri::Wry> {
 /// the audio and MIDI devices), so this one comes to the front and opens
 /// the show file passed along, if any.
 fn second_instance(app: &AppHandle, args: Vec<String>, cwd: String) {
+    if let Some(path) = library_arg(args.iter().skip(1).cloned(), Path::new(&cwd)) {
+        let _ = app.emit_to(panel_windows::MAIN, EVENT_LIBRARY_REQUESTED, path);
+    }
     if let Some(window) = app.get_webview_window(panel_windows::MAIN) {
         let _ = window.unminimize();
         let _ = window.show();
@@ -496,11 +522,18 @@ pub fn run() {
             // Before the show thread, which queues its settings and autosave writes there.
             let (writer, writes) = writer::Writer::spawn();
             app.manage(writer.clone());
+            // Before the show thread, whose sessions insert cues from them.
+            app.manage::<library::Shared>(Arc::new(library::Libraries::load(
+                paths::library_dir(app.handle()),
+                Some(writer.clone()),
+                Some(app.handle().clone()),
+            )));
             let tx = backend::spawn(app.handle().clone(), writes);
             // A show path on the command line (e.g. a show file opened in the file
             // manager) is opened right away: no show is open yet to ask about.
             let cwd = std::env::current_dir().unwrap_or_default();
             let cli = show_arg(std::env::args().skip(1), &cwd);
+            app.manage(StartupLibrary(Mutex::new(library_arg(std::env::args().skip(1), &cwd))));
             let settings = backend::settings_path(app.handle());
             // Through the writer, like every other write of the settings file, so
             // they cannot interleave. Read before anything is queued.
@@ -551,6 +584,18 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             open_show,
             startup_show,
+            startup_library,
+            library::libraries,
+            library::library,
+            library::library_presets,
+            library::inspect_library,
+            library::install_library,
+            library::remove_library,
+            library::remove_library_file,
+            library::rescan_libraries,
+            library::set_library_enabled,
+            library::set_preset_favorite,
+            library::open_library_folder,
             new_show,
             save_show,
             get_show,
@@ -621,5 +666,17 @@ mod tests {
         assert_eq!(show_arg(args(&["/shows/a.jqshow"]), cwd), Some(PathBuf::from("/shows/a.jqshow")));
         assert_eq!(show_arg(args(&["notes.txt", "show.jq", "fakejqshow"]), cwd), None);
         assert_eq!(show_arg(args(&[]), cwd), None);
+    }
+
+    #[test]
+    fn library_arg_finds_the_library_file() {
+        let args = |list: &[&str]| list.iter().map(|a| a.to_string()).collect::<Vec<_>>();
+        let cwd = Path::new("/home/op");
+        assert_eq!(
+            library_arg(args(&["Downloads/x32.jqlibrary"]), cwd),
+            Some(cwd.join("Downloads/x32.jqlibrary"))
+        );
+        assert_eq!(library_arg(args(&["/shows/a.jqshow"]), cwd), None);
+        assert_eq!(show_arg(args(&["/l/x32.jqlibrary"]), cwd), None);
     }
 }

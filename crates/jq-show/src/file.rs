@@ -424,6 +424,7 @@ mod tests {
             name: "Lichtpult".into(),
             host: "192.168.1.20".into(),
             port: 8000,
+            template: None,
         });
         show.cues.push(Cue::new(CueKind::Group(GroupCue {
             mode: GroupMode::Sequence,

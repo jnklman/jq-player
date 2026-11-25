@@ -32,6 +32,7 @@ const base = (id: CueId) => ({
   second_trigger: { action: 'ignore' as const },
   release_trigger: false,
   others: null,
+  preset: null,
 });
 
 export function sound(id: CueId, extra: Partial<SoundCue> = {}): SoundCue {
@@ -183,6 +184,7 @@ export function info(extra: Partial<CueInfo> = {}): CueInfo {
     target_missing: false,
     repeat_blocked: false,
     hotkey_shared: [],
+    preset: null,
     ...extra,
   };
 }

@@ -55,6 +55,22 @@ describe('commands', () => {
       [() => api.focusMain(), 'focus_main', {}],
       [() => api.audioDevices(), 'audio_devices', { host: null }],
       [() => api.audioDevices('JACK'), 'audio_devices', { host: 'JACK' }],
+      [() => api.startupLibrary(), 'startup_library', {}],
+      [() => api.libraries(), 'libraries', {}],
+      [() => api.library('l'), 'library', { id: 'l' }],
+      [() => api.libraryPresets(['l']), 'library_presets', { ids: ['l'] }],
+      [() => api.inspectLibrary('/x.jqlibrary'), 'inspect_library', { path: '/x.jqlibrary' }],
+      [() => api.installLibrary('/x.jqlibrary'), 'install_library', { path: '/x.jqlibrary' }],
+      [() => api.removeLibrary('l'), 'remove_library', { id: 'l' }],
+      [() => api.removeLibraryFile('x.jqlibrary'), 'remove_library_file', { file: 'x.jqlibrary' }],
+      [() => api.rescanLibraries(), 'rescan_libraries', {}],
+      [() => api.setLibraryEnabled('l', false), 'set_library_enabled', { id: 'l', enabled: false }],
+      [
+        () => api.setPresetFavorite('l', 'p', true),
+        'set_preset_favorite',
+        { library: 'l', preset: 'p', favorite: true },
+      ],
+      [() => api.openLibraryFolder(), 'open_library_folder', {}],
     ];
     for (const [call, cmd, args] of calls) {
       backend.calls = [];

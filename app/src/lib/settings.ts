@@ -6,7 +6,7 @@ import { t } from './i18n/index.svelte';
 import { ACTION_NAMES, isFixed, keyText, sameChord } from './keys.svelte';
 
 /** The tabs of the settings dialog. */
-export type SettingsTab = 'device' | 'routing' | 'show' | 'keys' | 'midi' | 'osc' | 'ui' | 'media';
+export type SettingsTab = 'device' | 'routing' | 'show' | 'keys' | 'midi' | 'osc' | 'library' | 'ui' | 'media';
 
 /** The tabs in the order of the dialog, grouped under a heading each. */
 export const SETTINGS_GROUPS: { title: string; tabs: { id: SettingsTab; title: string }[] }[] = [
@@ -65,6 +65,12 @@ export const SETTINGS_GROUPS: { title: string; tabs: { id: SettingsTab; title: s
           return t('settings.tab.osc');
         },
       },
+      {
+        id: 'library',
+        get title() {
+          return t('settings.tab.library');
+        },
+      },
     ],
   },
   {
@@ -102,6 +108,8 @@ const TAB_FIELDS: Record<SettingsTab, (keyof LocalSettings)[]> = {
   keys: ['keys', 'jump_back', 'jump_forward', 'jump_end', 'volume_step', 'pan_step', 'rate_step'],
   midi: ['midi_port', 'msc_device', 'midi_out'],
   osc: ['osc_listen', 'osc_hosts'],
+  // Applies at once, apart from the draft.
+  library: [],
   ui: ['language', 'open_last', 'wheel', 'escape', 'focus_warning', 'check_updates'],
   media: ['media_watch'],
 };

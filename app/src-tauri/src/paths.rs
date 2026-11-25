@@ -43,6 +43,11 @@ pub fn config_dir(app: &AppHandle) -> Option<PathBuf> {
     }
 }
 
+/// Installed cue libraries.
+pub fn library_dir(app: &AppHandle) -> Option<PathBuf> {
+    config_dir(app).map(|dir| dir.join("libraries"))
+}
+
 /// Waveform peaks.
 pub fn cache_dir(app: &AppHandle) -> Option<PathBuf> {
     match portable_dir() {

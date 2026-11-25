@@ -506,8 +506,17 @@ fn replace(
     }
     let peaks = app.state::<Arc<PeakCache>>().inner().clone();
     let writer = app.state::<Writer>().inner().clone();
-    let mut opened =
-        Session::open(file, show_mode, settings_path(app), peaks, writer, midi_tx.clone(), notices);
+    let libraries = app.state::<crate::library::Shared>().inner().clone();
+    let mut opened = Session::open(
+        file,
+        show_mode,
+        settings_path(app),
+        peaks,
+        writer,
+        midi_tx.clone(),
+        libraries,
+        notices,
+    );
     opened.remember_path(notices);
     *session = Some(opened);
 }
